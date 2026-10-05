@@ -9,6 +9,8 @@ program that thinks every tick, pays for every step of its thinking out of
 its own balance, eats light, breeds and mutates. When one steps off an open
 edge, it **crosses into someone else's browser** and keeps living there.
 
+![Nairobi's island, linked to Denver, Lisbon and Osaka in other browsers](docs/screenshot.png)
+
 There is no server holding the world and no map of it. The world exists
 only in the tabs of the people looking at it. Nobody has seen all of it,
 including whoever runs the relay.
