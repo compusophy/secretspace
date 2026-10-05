@@ -24,6 +24,9 @@ const WANT_LINKS: usize = 3;
 const OPEN_WITHIN_MS: f64 = 15_000.0;
 const MORE_EVERY_MS: f64 = 8_000.0;
 const STUN: &str = "stun:stun.l.google.com:19302";
+/// Redialling an unreachable relay backs off from this to RETRY_MAX_MS.
+const RETRY_MIN_MS: f64 = 5_000.0;
+const RETRY_MAX_MS: f64 = 300_000.0;
 
 type Handler = Closure<dyn FnMut(JsValue)>;
 
@@ -63,6 +66,7 @@ pub struct Mesh {
     links: HashMap<u64, Link>,
     last_more: f64,
     retry_at: f64,
+    backoff: f64,
     _ws_handlers: Vec<Handler>,
 }
 
@@ -106,6 +110,7 @@ impl Mesh {
             links: HashMap::new(),
             last_more: 0.0,
             retry_at: 0.0,
+            backoff: RETRY_MIN_MS,
             _ws_handlers: Vec::new(),
         }
     }
@@ -128,8 +133,11 @@ impl Mesh {
         let me = self.me;
         let on_open = handler(move |_| {
             crate::with(|p| {
-                if let Some(ws) = p.mesh.as_ref().and_then(|m| m.ws.clone()) {
-                    let _ = ws.send_with_str(&format!("hi {me:x}"));
+                if let Some(m) = p.mesh.as_mut() {
+                    m.backoff = RETRY_MIN_MS;
+                    if let Some(ws) = &m.ws {
+                        let _ = ws.send_with_str(&format!("hi {me:x}"));
+                    }
                 }
             });
         });
@@ -148,7 +156,8 @@ impl Mesh {
             crate::with(|p| {
                 if let Some(m) = p.mesh.as_mut() {
                     m.ws = None;
-                    m.retry_at = crate::now() + 10_000.0;
+                    m.retry_at = crate::now() + m.backoff;
+                    m.backoff = (m.backoff * 2.0).min(RETRY_MAX_MS);
                 }
             });
         });
@@ -162,7 +171,7 @@ impl Mesh {
     /// Keep the relay dialled and enough channels open.
     pub fn maintain(&mut self, now: f64) {
         if self.ws.is_none() && now >= self.retry_at {
-            self.retry_at = now + 10_000.0;
+            self.retry_at = now + self.backoff;
             self.dial();
         }
         let stale: Vec<u64> = self

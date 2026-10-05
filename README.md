@@ -125,16 +125,24 @@ cargo run -p secretspace-space --release --example release         # can a new m
 
 ## Deploy
 
-One container serves both the page and the relay:
+**The page on Vercel**, from a machine with the Vercel CLI logged in:
+
+```sh
+bash scripts/deploy.sh                              # tabs of one browser link
+RELAY=wss://your-relay/ws bash scripts/deploy.sh    # devices link too
+```
+
+It installs the wasm target and the pinned wasm-bindgen CLI if they are
+missing, builds `dist/`, writes the relay's address into the page, and runs
+`vercel deploy dist --prod`.
+
+**The relay** cannot live on Vercel (it holds WebSockets open). Deploy the
+Dockerfile to Railway, Fly or Render; it honours `PORT`, and it serves the
+page as well, so on its own it is the whole deployment:
 
 ```sh
 docker build -t secretspace . && docker run -p 8787:8787 secretspace
 ```
-
-On Railway, Fly or Render, deploy the Dockerfile as is; it honours `PORT`.
-To host the page on a static host instead (Vercel, Pages), serve `dist/`
-and point it at the relay with
-`<meta name="relay" content="wss://your-relay/ws">` in `web/index.html`.
 
 ## Lineage
 
