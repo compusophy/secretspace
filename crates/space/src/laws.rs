@@ -16,7 +16,7 @@ pub const TICKS_PER_SEC: u64 = 10;
 /// watches the island and falls to 0 when no one does.
 pub const SUN_MAX: u32 = 100;
 /// How far the level moves toward its target each tick: dusk and dawn take
-/// SUN_MAX / SUN_RAMP ticks (20 seconds).
+/// SUN_MAX / SUN_RAMP ticks (10 seconds).
 pub const SUN_RAMP: u32 = 1;
 /// Light minted into every cell each tick at full sun.
 pub const SUN_BASE: u32 = 1;

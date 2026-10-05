@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>secretspace</title>
+<meta name="description" content="A world made of browser tabs. Your tab is an island; its edges open onto strangers' tabs, and the motes that live here walk across.">
+<meta name="theme-color" content="#07090d">
+<style>
+  :root {
+    --bg: #07090d; --ink: #ffecd2; --dim: rgba(255,255,255,.55); --line: rgba(255,255,255,.12);
+    --amber: #ffb547; --panel: rgba(12,15,21,.94);
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); overflow: hidden; }
+  canvas#world { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: manipulation; }
+  button { font: inherit; color: var(--ink); background: rgba(255,181,71,.14); border: 1px solid rgba(255,181,71,.45); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  button:hover { background: rgba(255,181,71,.24); }
+  button.ghost { background: transparent; border-color: var(--line); color: var(--dim); }
+  #write { position: fixed; top: 20px; right: 20px; z-index: 2; }
+  aside { position: fixed; z-index: 3; right: 16px; top: 64px; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 80px); overflow: auto;
+          background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; backdrop-filter: blur(6px); }
+  aside[hidden] { display: none; }
+  aside header { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 8px; }
+  aside header button { border: 0; background: transparent; font-size: 18px; padding: 0 4px; color: var(--dim); }
+  .hint { color: var(--dim); margin: 0 0 10px; }
+  label { display: flex; gap: 8px; align-items: center; margin: 6px 0; color: var(--dim); }
+  input, textarea { font: 12px/1.5 var(--mono); color: var(--ink); background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  input { flex: 1; }
+  textarea { width: 100%; height: 190px; resize: vertical; margin-top: 6px; white-space: pre; }
+  #m-err { color: #ff8a7a; font: 12px var(--mono); min-height: 1.4em; margin: 6px 0; white-space: pre-wrap; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  pre { font: 11px/1.5 var(--mono); color: var(--dim); white-space: pre-wrap; background: rgba(0,0,0,.3); border-radius: 8px; padding: 8px; margin: 8px 0; }
+  #i-meta { white-space: pre-line; color: var(--dim); }
+  #i-src { color: var(--ink); }
+  @media (max-width: 700px) { #write { top: 14px; right: 14px; } aside { top: 56px; right: 8px; width: calc(100vw - 16px); } }
+</style>
+</head>
+<body>
+<canvas id="world" aria-label="your island"></canvas>
+<button id="write">write a mote</button>
+
+<aside id="editor" hidden>
+  <header><span>write a mote</span><button id="editor-close" aria-label="close">×</button></header>
+  <p class="hint">Every tick your mote thinks this. Each step of thought costs it one erg from its own balance, so a long mind has to earn its keep. Step off an edge with an open portal and it crosses into a stranger's tab.</p>
+  <label>name <input id="m-name" maxlength="24" value="wanderer"></label>
+  <label>you <input id="m-author" maxlength="24"></label>
+  <textarea id="m-src" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+  <div id="m-err"></div>
+  <div class="row"><button id="m-release">release into the warm spot</button><button id="m-card" class="ghost">physics card</button></div>
+  <pre id="m-cardtext" hidden></pre>
+</aside>
+
+<aside id="inspect" hidden>
+  <header><span id="i-name"></span><button id="i-close" aria-label="close">×</button></header>
+  <div id="i-meta"></div>
+  <pre id="i-src"></pre>
+  <button id="i-fork" class="ghost">copy this mind into the editor</button>
+</aside>
+
+<script type="module">import init from "./pkg/secretspace_web.js"; init();</script>
+</body>
+</html>
