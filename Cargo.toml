@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/space"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["compusophy"]
+repository = "https://github.com/compusophy/secretspace"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# The physics tests run thousands of ticks; keep them fast.
+[profile.test]
+opt-level = 2
