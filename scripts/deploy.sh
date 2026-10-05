@@ -25,4 +25,10 @@ sed -i.bak "s|<meta name=\"relay\" content=\"[^\"]*\">|<meta name=\"relay\" cont
 grep -q "name=\"relay\" content=\"$relay\"" dist/index.html || { echo "could not set the relay in dist/index.html"; exit 1; }
 cp web/vercel.json dist/
 echo "relay: $relay"
-vercel deploy dist --prod --yes
+# Deploy from a folder named after the project, keeping its Vercel link
+# (.vercel) between deploys, so Vercel names the project secretspace.
+stage=.deploy/secretspace
+mkdir -p "$stage"
+find "$stage" -mindepth 1 -maxdepth 1 ! -name .vercel -exec rm -rf {} +
+cp -R dist/. "$stage"/
+vercel deploy "$stage" --prod --yes

@@ -132,9 +132,18 @@ bash scripts/deploy.sh                              # tabs of one browser link
 RELAY=wss://your-relay/ws bash scripts/deploy.sh    # devices link too
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+.\scripts\deploy.ps1                               # tabs of one browser link
+.\scripts\deploy.ps1 -Relay wss://your-relay/ws    # devices link too
+```
+
+(If scripts are blocked: `powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1`.)
+
 It installs the wasm target and the pinned wasm-bindgen CLI if they are
 missing, builds `dist/`, writes the relay's address into the page, and runs
-`vercel deploy dist --prod`.
+`vercel deploy` from a folder named `secretspace`, so the Vercel project gets that name.
 
 **The relay** cannot live on Vercel (it holds WebSockets open). Deploy the
 Dockerfile to Railway, Fly or Render; it honours `PORT`, and it serves the

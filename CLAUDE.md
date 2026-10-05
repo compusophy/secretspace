@@ -68,6 +68,7 @@ bash scripts/caps.sh
 bash scripts/build-web.sh          # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen
 cargo run -p secretspace-relay --release -- --static dist   # :8787, page + relay
 RELAY=wss://…/ws bash scripts/deploy.sh   # page to Vercel (needs the CLI logged in)
+.\scripts\deploy.ps1 -Relay wss://…/ws    # the same, in PowerShell
 ```
 
 Browser checks: Playwright with `executablePath` at the preinstalled
