@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 space = { package = "secretspace-space", path = "../space" }
 wasm-bindgen = "=0.2.129"
 js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
 
 [dependencies.web-sys]
 version = "0.3"
@@ -44,4 +45,20 @@ features = [
   "Location",
   "VisibilityState",
   "Crypto",
+  "WebSocket",
+  "BinaryType",
+  "CloseEvent",
+  "RtcPeerConnection",
+  "RtcPeerConnectionState",
+  "RtcConfiguration",
+  "RtcIceServer",
+  "RtcDataChannel",
+  "RtcDataChannelType",
+  "RtcDataChannelState",
+  "RtcDataChannelEvent",
+  "RtcSdpType",
+  "RtcSessionDescriptionInit",
+  "RtcIceCandidate",
+  "RtcIceCandidateInit",
+  "RtcPeerConnectionIceEvent",
 ]

@@ -301,16 +301,22 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
     } else {
         "night".into()
     };
+    let islands = app.islands();
+    let reach = if app.relay_up {
+        format!(" · {} direct", app.links_open)
+    } else {
+        String::new()
+    };
     text(
         ctx,
         &format!(
-            "your island · {} {} · {} · {} motes · {} island{} heard",
+            "your island · {} {} · {} · {} motes · {} island{} in the world{reach}",
             app.place.name,
             clock(app.place.tz_min),
             sun,
             isl.motes().len(),
-            app.heard(),
-            if app.heard() == 1 { "" } else { "s" }
+            islands,
+            if islands == 1 { "" } else { "s" }
         ),
         pad,
         pad + 22.0,
@@ -404,7 +410,7 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
     );
 
     // Alone: say how to make the world bigger.
-    if app.heard() == 1 {
+    if app.islands() == 1 {
         ctx.set_text_baseline("middle");
         ctx.set_font(&format!("13px {SANS}"));
         ctx.set_fill_style_str(&format!(

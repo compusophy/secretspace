@@ -9,7 +9,7 @@ pub struct Place {
     pub tz_min: i16,
 }
 
-fn param(key: &str) -> Option<String> {
+pub fn param(key: &str) -> Option<String> {
     let search = web_sys::window()?.location().search().ok()?;
     let q = search.trim_start_matches('?');
     q.split('&').find_map(|kv| {

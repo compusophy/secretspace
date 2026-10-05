@@ -9,7 +9,7 @@ use space::island::{EventKind, Island};
 use space::laws::{TICKS_PER_SEC, W};
 use space::net::{Net, NetEvent, Portal, WorldLineage};
 use space::rng::splitmix;
-use space::wire::{decode, encode, CensusEntry, Hello};
+use space::wire::{decode, encode, CensusEntry, Hello, Msg, WorldEntry};
 
 use crate::place::{clock, Place};
 use crate::store;
@@ -72,8 +72,15 @@ pub struct App {
     pub world: Vec<WorldLineage>,
     pub summary: Option<Summary>,
     away: Option<Away>,
-    /// Encoded envelopes waiting for the transport.
-    pub outbox: Vec<Vec<u8>>,
+    /// Encoded envelopes waiting for the transports: (to, is a census, bytes).
+    pub outbox: Vec<(u64, bool, Vec<u8>)>,
+    /// The relay's count of the whole world, when it was heard.
+    relay_world: Option<(f64, u32, Vec<WorldEntry>)>,
+    /// Islands online, by the relay's count.
+    pub islands_online: Option<u32>,
+    /// Direct channels to other devices, and whether the relay is up.
+    pub links_open: usize,
+    pub relay_up: bool,
     /// The last place each side opened to, for the feed after it shuts.
     last_beyond: [Option<String>; 4],
 }
@@ -130,6 +137,10 @@ impl App {
             summary: None,
             away: None,
             outbox: Vec::new(),
+            relay_world: None,
+            islands_online: None,
+            links_open: 0,
+            relay_up: false,
             last_beyond: Default::default(),
         };
         if woke > 0 {
@@ -254,6 +265,7 @@ impl App {
         self.net.tick(ms, self.hello(), &census);
         self.flush(now);
         self.world = self.net.world(ms, &census);
+        self.merge_relay_world(now);
         for (side, p) in self.net.portals.iter().enumerate() {
             if let Portal::Open { peer, .. } = p {
                 if let Some(q) = self.net.peers.get(peer) {
@@ -322,6 +334,49 @@ impl App {
         }
     }
 
+    /// The relay's world, folded into what this tab hears itself: a
+    /// lineage is on at least as many islands as either count says.
+    fn merge_relay_world(&mut self, now: f64) {
+        self.islands_online = None;
+        let Some((at, islands, entries)) = &self.relay_world else {
+            return;
+        };
+        if now - at > 12_000.0 {
+            return;
+        }
+        self.islands_online = Some(*islands);
+        for e in entries {
+            match self.world.iter_mut().find(|w| w.lineage == e.lineage) {
+                Some(w) => {
+                    w.tabs = w.tabs.max(e.tabs);
+                    w.count = w.count.max(e.count);
+                }
+                None => self.world.push(WorldLineage {
+                    lineage: e.lineage,
+                    name: e.name.clone(),
+                    author: e.author.clone(),
+                    tabs: e.tabs,
+                    count: e.count,
+                }),
+            }
+        }
+        self.world.sort_by(|a, b| {
+            b.tabs
+                .cmp(&a.tabs)
+                .then(b.count.cmp(&a.count))
+                .then(a.lineage.cmp(&b.lineage))
+        });
+    }
+
+    /// A binary message from the relay itself.
+    pub fn relay(&mut self, now: f64, bytes: &[u8]) {
+        if let Ok(env) = decode(bytes) {
+            if let Msg::World { islands, entries } = env.msg {
+                self.relay_world = Some((now, islands, entries));
+            }
+        }
+    }
+
     /// Envelopes from another tab.
     pub fn receive(&mut self, now: f64, bytes: &[u8]) {
         let Ok(env) = decode(bytes) else { return };
@@ -331,7 +386,10 @@ impl App {
 
     fn flush(&mut self, now: f64) {
         let (out, events) = self.net.drain();
-        self.outbox.extend(out.iter().map(encode));
+        self.outbox.extend(
+            out.iter()
+                .map(|e| (e.to, matches!(e.msg, Msg::Census(_)), encode(e))),
+        );
         for e in events {
             match e {
                 NetEvent::Arrive { side, traveler } => {
@@ -388,12 +446,20 @@ impl App {
         store::save_fossils(&self.island.fossils(FOSSIL_KEEP));
         self.net.bye();
         let (out, _) = self.net.drain();
-        self.outbox.extend(out.iter().map(encode));
+        self.outbox
+            .extend(out.iter().map(|e| (e.to, false, encode(e))));
     }
 
-    /// Islands this one can hear, itself included.
+    /// Islands this one can hear directly, itself included.
     pub fn heard(&self) -> usize {
         1 + self.net.peers.len()
+    }
+
+    /// Islands in the world as far as this tab knows.
+    pub fn islands(&self) -> usize {
+        self.islands_online
+            .map_or(0, |n| n as usize)
+            .max(self.heard())
     }
 }
 

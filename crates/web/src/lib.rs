@@ -6,6 +6,7 @@
 mod app;
 mod bus;
 mod draw;
+mod mesh;
 mod place;
 mod store;
 
@@ -21,6 +22,7 @@ use web_sys::{
 
 use app::App;
 use bus::Bus;
+use mesh::Mesh;
 
 /// Every tab of every browser on this channel is one world.
 const CHANNEL: &str = "secretspace/1";
@@ -28,6 +30,7 @@ const CHANNEL: &str = "secretspace/1";
 struct Page {
     app: App,
     bus: Option<Bus>,
+    mesh: Option<Mesh>,
     ctx: CanvasRenderingContext2d,
     canvas: HtmlCanvasElement,
     field: HtmlCanvasElement,
@@ -43,8 +46,11 @@ thread_local! {
     static PAGE: RefCell<Option<Page>> = const { RefCell::new(None) };
 }
 
+/// Run `f` on the page. Every callback enters through here; the event
+/// loop never re-enters while one runs, but if it ever did, the call is
+/// skipped rather than panicking.
 fn with<R>(f: impl FnOnce(&mut Page) -> R) -> Option<R> {
-    PAGE.with(|p| p.borrow_mut().as_mut().map(f))
+    PAGE.with(|p| p.try_borrow_mut().ok()?.as_mut().map(f))
 }
 
 fn window() -> Window {
@@ -55,7 +61,7 @@ fn document() -> Document {
     window().document().expect("a document")
 }
 
-fn now() -> f64 {
+pub(crate) fn now() -> f64 {
     window()
         .performance()
         .map_or_else(js_sys::Date::now, |p| p.now())
@@ -92,13 +98,84 @@ fn random_id() -> u64 {
     }
 }
 
+/// Hand queued envelopes to every transport: the tabs of this browser
+/// hear everything; a device hears what is addressed to it or to all.
 fn flush(p: &mut Page) {
-    if let Some(bus) = &p.bus {
-        for bytes in p.app.outbox.drain(..) {
+    for (to, census, bytes) in p.app.outbox.drain(..) {
+        if let Some(bus) = &p.bus {
             bus.post(&bytes);
         }
-    } else {
-        p.app.outbox.clear();
+        if let Some(mesh) = &p.mesh {
+            mesh.send(to, &bytes);
+            if census {
+                mesh.census(&bytes);
+            }
+        }
+    }
+}
+
+/// A text line from the relay.
+fn mesh_text(p: &mut Page, line: &str) {
+    let now = now();
+    let Some(mesh) = p.mesh.as_mut() else { return };
+    let mut parts = line.splitn(3, ' ');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some("peers"), first, rest) => {
+            let ids: Vec<u64> = first
+                .into_iter()
+                .chain(rest.into_iter().flat_map(|r| r.split(' ')))
+                .filter_map(|x| u64::from_str_radix(x, 16).ok())
+                .collect();
+            mesh.introduced(&ids, now);
+        }
+        (Some("from"), Some(id), Some(payload)) => {
+            if let Ok(id) = u64::from_str_radix(id, 16) {
+                mesh.signaled(id, payload, now);
+            }
+        }
+        (Some("gone"), Some(id), _) => {
+            if let Ok(id) = u64::from_str_radix(id, 16) {
+                mesh.drop_link(id);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A binary message from the relay: the world's census.
+fn relay_bytes(p: &mut Page, bytes: &[u8]) {
+    p.app.relay(now(), bytes);
+}
+
+/// An envelope from another island over a direct channel.
+fn envelope_bytes(p: &mut Page, bytes: &[u8]) {
+    p.app.receive(now(), bytes);
+    flush(p);
+}
+
+/// Where the relay is: `<meta name="relay">`, else `?relay=`, else this
+/// page's own origin. `?relay=off` keeps the island to this browser.
+fn relay_url() -> Option<String> {
+    let meta = document()
+        .query_selector("meta[name=relay]")
+        .ok()
+        .flatten()
+        .and_then(|m| m.get_attribute("content"))
+        .filter(|c| !c.trim().is_empty());
+    let param = place::param("relay");
+    match param.or(meta) {
+        Some(u) if u == "off" => None,
+        Some(u) => Some(u),
+        None => {
+            let loc = window().location();
+            let host = loc.host().ok()?;
+            let scheme = if loc.protocol().ok()? == "https:" {
+                "wss"
+            } else {
+                "ws"
+            };
+            Some(format!("{scheme}://{host}/ws"))
+        }
     }
 }
 
@@ -292,6 +369,7 @@ pub fn start() -> Result<(), JsValue> {
     let mut page = Page {
         app,
         bus: None,
+        mesh: relay_url().map(|u| Mesh::new(id, u)),
         ctx,
         canvas: canvas.clone(),
         field,
@@ -314,7 +392,13 @@ pub fn start() -> Result<(), JsValue> {
     // The clock: ten ticks a second; a hidden tab's throttled timer catches up.
     let tick = Closure::<dyn FnMut()>::new(|| {
         with(|p| {
-            p.app.pump(now());
+            let t = now();
+            if let Some(m) = p.mesh.as_mut() {
+                m.maintain(t);
+                p.app.links_open = m.open_links();
+                p.app.relay_up = m.relay_up();
+            }
+            p.app.pump(t);
             flush(p);
             if p.app.selected.is_some() {
                 inspect(p);

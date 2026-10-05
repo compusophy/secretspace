@@ -223,6 +223,16 @@ fn wire_round_trips_every_message() {
             author: "genesis".into(),
         }]),
         Msg::Bye,
+        Msg::World {
+            islands: 1200,
+            entries: vec![space::wire::WorldEntry {
+                lineage: 9,
+                tabs: 41,
+                count: 2413,
+                name: "drifter·v3".into(),
+                author: "you".into(),
+            }],
+        },
     ];
     for msg in msgs {
         let env = Envelope {

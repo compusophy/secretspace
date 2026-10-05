@@ -9,7 +9,7 @@ pub const MAGIC: [u8; 2] = *b"SS";
 pub const VERSION: u8 = 1;
 const MAX_PLACE: usize = 48;
 const MAX_NAME: usize = 32;
-const MAX_CENSUS: usize = 24;
+pub const MAX_CENSUS: usize = 24;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hello {
@@ -27,6 +27,17 @@ pub struct Hello {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CensusEntry {
     pub lineage: u64,
+    pub count: u32,
+    pub name: String,
+    pub author: String,
+}
+
+/// One lineage across the whole world, as the relay counts it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorldEntry {
+    pub lineage: u64,
+    /// Islands it is alive on.
+    pub tabs: u32,
     pub count: u32,
     pub name: String,
     pub author: String,
@@ -60,6 +71,12 @@ pub enum Msg {
     },
     Census(Vec<CensusEntry>),
     Bye,
+    /// The relay's count of the whole world: islands online, and the
+    /// lineages alive on the most of them.
+    World {
+        islands: u32,
+        entries: Vec<WorldEntry>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -198,6 +215,7 @@ pub fn encode(env: &Envelope) -> Vec<u8> {
         Msg::MoteAck { .. } => 7,
         Msg::Census(_) => 8,
         Msg::Bye => 9,
+        Msg::World { .. } => 10,
     };
     w.u8(kind);
     w.u64(env.from);
@@ -232,6 +250,18 @@ pub fn encode(env: &Envelope) -> Vec<u8> {
             w.u8(n as u8);
             for e in &entries[..n] {
                 w.u64(e.lineage);
+                w.u32(e.count);
+                w.str(&e.name, MAX_NAME);
+                w.str(&e.author, MAX_NAME);
+            }
+        }
+        Msg::World { islands, entries } => {
+            w.u32(*islands);
+            let n = entries.len().min(MAX_CENSUS);
+            w.u8(n as u8);
+            for e in &entries[..n] {
+                w.u64(e.lineage);
+                w.u32(e.tabs);
                 w.u32(e.count);
                 w.str(&e.name, MAX_NAME);
                 w.str(&e.author, MAX_NAME);
@@ -296,6 +326,24 @@ pub fn decode(b: &[u8]) -> Result<Envelope, WireError> {
             Msg::Census(entries)
         }
         9 => Msg::Bye,
+        10 => {
+            let islands = r.u32()?;
+            let n = r.u8()? as usize;
+            if n > MAX_CENSUS {
+                return Err(WireError::TooLong);
+            }
+            let mut entries = Vec::with_capacity(n);
+            for _ in 0..n {
+                entries.push(WorldEntry {
+                    lineage: r.u64()?,
+                    tabs: r.u32()?,
+                    count: r.u32()?,
+                    name: r.str(MAX_NAME)?,
+                    author: r.str(MAX_NAME)?,
+                });
+            }
+            Msg::World { islands, entries }
+        }
         _ => return Err(WireError::Kind),
     };
     Ok(Envelope { from, to, msg })

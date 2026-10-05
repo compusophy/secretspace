@@ -426,6 +426,8 @@ impl Net {
                 }
             }
             Msg::Bye => self.drop_peer(from),
+            // The relay's to read, not a neighbor's.
+            Msg::World { .. } => {}
         }
     }
 
