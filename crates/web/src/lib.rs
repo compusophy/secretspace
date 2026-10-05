@@ -258,6 +258,17 @@ fn pick(p: &mut Page, x: f64, y: f64) {
     let f = p.frame;
     let cx = (x - f.x) / f.cell;
     let cy = (y - f.y) / f.cell;
+    if p.app.placing.is_some() {
+        let inside =
+            cx >= 0.0 && cy >= 0.0 && cx < space::laws::W as f64 && cy < space::laws::H as f64;
+        if inside {
+            if let Err(e) = p.app.place(cx as i64, cy as i64, now()) {
+                p.app
+                    .say(now(), format!("could not release here: {e}"), None);
+            }
+        }
+        return;
+    }
     let best = p
         .app
         .island
@@ -335,7 +346,7 @@ fn wire_panels() {
         };
         let result = with(|p| {
             p.app.author = store::author();
-            p.app.release(&src.value(), &n, now())
+            p.app.prepare(&src.value(), &n)
         });
         match result {
             Some(Ok(())) => {
@@ -437,6 +448,18 @@ pub fn start() -> Result<(), JsValue> {
     });
     on(&window(), "resize", |_| {
         with(resize);
+    });
+    on(&window(), "keydown", |e| {
+        if let Ok(e) = e.dyn_into::<web_sys::KeyboardEvent>() {
+            if e.key() == "Escape" {
+                show("editor", false);
+                with(|p| {
+                    p.app.placing = None;
+                    p.app.selected = None;
+                    inspect(p);
+                });
+            }
+        }
     });
     on(&canvas, "pointerdown", |e| {
         if let Ok(e) = e.dyn_into::<PointerEvent>() {

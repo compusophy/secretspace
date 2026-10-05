@@ -147,7 +147,7 @@ pub fn frame(ctx: &Ctx, field: &HtmlCanvasElement, app: &App, w: f64, h: f64, no
         ctx.begin_path();
         let _ = ctx.arc(x, y, r * (0.75 + 0.45 * rich), 0.0, TAU);
         ctx.fill();
-        if app.mine.contains(&m.lineage) {
+        if app.is_mine(m.lineage) {
             ctx.set_stroke_style_str("rgba(255,255,255,0.85)");
             ctx.set_line_width(1.0);
             ctx.begin_path();
@@ -307,20 +307,38 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
     } else {
         String::new()
     };
-    text(
-        ctx,
-        &format!(
-            "your island · {} {} · {} · {} motes · {} island{} in the world{reach}",
-            app.place.name,
-            clock(app.place.tz_min),
-            sun,
-            isl.motes().len(),
-            islands,
-            if islands == 1 { "" } else { "s" }
-        ),
-        pad,
-        pad + 22.0,
+    let here = format!(
+        "{} {} · {} · {} motes",
+        app.place.name,
+        clock(app.place.tz_min),
+        sun,
+        isl.motes().len()
     );
+    let world = format!(
+        "{} island{} in the world{reach}",
+        islands,
+        if islands == 1 { "" } else { "s" }
+    );
+    if narrow {
+        text(ctx, &here, pad, pad + 22.0);
+        text(ctx, &world, pad, pad + 38.0);
+    } else {
+        text(
+            ctx,
+            &format!("your island · {here} · {world}"),
+            pad,
+            pad + 22.0,
+        );
+    }
+    if app.night() {
+        ctx.set_fill_style_str("rgba(150,170,255,0.6)");
+        text(
+            ctx,
+            "night: no one is watching, and time crawls",
+            pad,
+            pad + if narrow { 54.0 } else { 38.0 },
+        );
+    }
 
     // The world as far as this tab can hear: lineages by how many islands
     // they are alive on.
@@ -336,7 +354,7 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
         ctx.begin_path();
         let _ = ctx.arc(x + 4.0, y + 7.0, 4.0, 0.0, TAU);
         ctx.fill();
-        let yours = app.mine.contains(&l.lineage);
+        let yours = app.is_mine(l.lineage);
         ctx.set_fill_style_str(if yours {
             "#ffffff"
         } else {
@@ -351,14 +369,65 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
         text(
             ctx,
             &format!(
-                "{}{by} — {} tab{} · {} motes",
+                "{}{by} — {} tab{} · {} mote{}",
                 l.name,
                 l.tabs,
                 if l.tabs == 1 { "" } else { "s" },
-                l.count
+                l.count,
+                if l.count == 1 { "" } else { "s" }
             ),
             x + 14.0,
             y,
+        );
+    }
+
+    // Yours, alive or not.
+    let shown = app
+        .world
+        .iter()
+        .take(rows)
+        .filter(|l| app.is_mine(l.lineage))
+        .count();
+    let mut y = base + 18.0 + rows.min(app.world.len()) as f64 * 18.0 + 6.0;
+    for (id, name) in app.mine.iter().rev().take(3usize.saturating_sub(shown)) {
+        if app.world.iter().take(rows).any(|l| l.lineage == *id) {
+            continue;
+        }
+        let x = pad.max(f.x);
+        ctx.set_fill_style_str(&hsl(hue(*id), 85.0, 62.0, 1.0));
+        ctx.begin_path();
+        let _ = ctx.arc(x + 4.0, y + 7.0, 4.0, 0.0, TAU);
+        ctx.fill();
+        ctx.set_font(&format!("600 12px {SANS}"));
+        let line = match app.world.iter().find(|l| l.lineage == *id) {
+            Some(l) => format!(
+                "{name} (yours) — {} tab{} · {} mote{}",
+                l.tabs,
+                if l.tabs == 1 { "" } else { "s" },
+                l.count,
+                if l.count == 1 { "" } else { "s" }
+            ),
+            None => format!("{name} (yours) — gone from every island in reach"),
+        };
+        ctx.set_fill_style_str("rgba(255,255,255,0.85)");
+        text(ctx, &line, x + 14.0, y);
+        y += 18.0;
+    }
+
+    // Placing a mind: say where to tap.
+    if app.placing.is_some() {
+        ctx.set_text_align("center");
+        ctx.set_text_baseline("bottom");
+        ctx.set_font(&format!("600 13px {SANS}"));
+        ctx.set_fill_style_str(&format!(
+            "rgba(255,236,210,{:.2})",
+            0.7 + 0.3 * (now / 400.0).sin()
+        ));
+        text(
+            ctx,
+            "tap the island where your mote should begin",
+            f.x + f.w() / 2.0,
+            f.y - 30.0,
         );
     }
 

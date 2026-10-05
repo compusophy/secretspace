@@ -48,12 +48,11 @@ pub const FOUNDERS: &[(&str, &str, usize)] = &[
 pub const FOUNDER_ENDOW: u64 = 400;
 
 /// A starting point for a person writing their own mind.
-pub const TEMPLATE: &str =
-    "# your mote thinks this every tick. fuel is money: every step costs an erg.\n\
+pub const TEMPLATE: &str = "# runs every tick; every step of thought costs one of your ergs.\n\
+# cheap minds that breed early win a crowded island. can you do better?\n\
+go(roll(4))\n\
 harvest()\n\
-if light(0,0) < 15 { go(roll(4)) }\n\
-if sun() < 50 && portal(1) > sun() { go(1) }\n\
-if energy() > 650 { spawn() }";
+if energy() > 520 { spawn() }";
 
 /// Seed a fresh island with every founder.
 pub fn genesis(island: &mut crate::island::Island) {

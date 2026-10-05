@@ -80,21 +80,30 @@ pub fn set_author(a: &str) {
     set(AUTHOR, a.trim());
 }
 
-pub fn mine() -> Vec<u64> {
+/// The lineages this person released, newest last, with their names.
+pub fn mine() -> Vec<(u64, String)> {
     get(MINE)
         .map(|s| {
             s.split(',')
-                .filter_map(|x| u64::from_str_radix(x, 16).ok())
+                .filter_map(|x| {
+                    let (id, name) = x.split_once(':')?;
+                    Some((u64::from_str_radix(id, 16).ok()?, name.to_string()))
+                })
                 .collect()
         })
         .unwrap_or_default()
 }
 
-pub fn add_mine(lineage: u64) {
+pub fn add_mine(lineage: u64, name: &str) {
     let mut m = mine();
-    if !m.contains(&lineage) {
-        m.push(lineage);
-        let s: Vec<String> = m.iter().rev().take(32).map(|x| format!("{x:x}")).collect();
+    if m.iter().all(|(id, _)| *id != lineage) {
+        let name: String = name.chars().filter(|c| *c != ',' && *c != ':').collect();
+        m.push((lineage, name));
+        let keep = m.len().saturating_sub(32);
+        let s: Vec<String> = m[keep..]
+            .iter()
+            .map(|(id, n)| format!("{id:x}:{n}"))
+            .collect();
         set(MINE, &s.join(","));
     }
 }

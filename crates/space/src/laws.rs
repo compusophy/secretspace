@@ -79,9 +79,15 @@ pub const MAX_AGE: u32 = 4000;
 /// The most ergs a mote may carry across a portal; the rest stays behind
 /// as light at the edge it left from.
 pub const MAX_CARRY: u64 = 4000;
-/// Releasing a new mind draws its endowment from the light around the spot.
-pub const RELEASE_COST: u64 = 400;
-pub const RELEASE_RADIUS: i64 = 4;
+/// A new mind is released as a clutch: one mote alone on a full island is
+/// almost always lost to drift, however good its mind. Each is endowed
+/// RELEASE_ENDOW, drawn from the island's brightest cells wherever they
+/// are: the whole land pays, not the newborns' neighbourhood.
+pub const CLUTCH: usize = 8;
+pub const RELEASE_ENDOW: u64 = 600;
+/// Releasing clears the ground first: motes within this radius return to
+/// the light they were made of, and the clutch is made from that light.
+pub const CLEARING: i64 = 7;
 
 /// Opposite side of a portal: 0 north, 1 east, 2 south, 3 west.
 pub const fn opposite(side: u8) -> u8 {
@@ -111,6 +117,7 @@ pub fn card() -> String {
          \x20 run dry mid-thought and the whole tank is forfeit\n\
          \x20 at most {MAX_LINES} lines, {MAX_VARS} variables; repeat at most {MAX_REPEAT}\n\
          spawn: endow {ENDOW}, keep {SPAWN_RESERVE}; half of children mutate one line\n\
+         release: a clutch of {CLUTCH}, each endowed {RELEASE_ENDOW}, on ground cleared {CLEARING} cells around\n\
          transfers burn a {TITHE_PER_100K}/100000 tithe; motes die at age {MAX_AGE} or at zero ergs\n\
          portals: step off an edge with an open portal to cross to another person's island ({COST_CROSS} fuel; carry at most {MAX_CARRY})\n\
          capabilities:\n{caps}\n"

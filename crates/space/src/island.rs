@@ -326,9 +326,9 @@ impl Island {
         }
     }
 
-    /// A new mind, released by a person at (x, y). Its endowment is drawn
-    /// from the light around the spot, so releasing costs the land.
-    /// Returns the new lineage's id.
+    /// A new mind, released by a person around (x, y) as a clutch. Its
+    /// endowment is drawn from the island's brightest cells, so releasing
+    /// costs the land and mints nothing. Returns the new lineage's id.
     pub fn release(
         &mut self,
         src: &str,
@@ -337,33 +337,80 @@ impl Island {
         x: i64,
         y: i64,
     ) -> Result<u64, String> {
+        self.release_clutch(src, name, author, x, y, CLUTCH, RELEASE_ENDOW, CLEARING)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn release_clutch(
+        &mut self,
+        src: &str,
+        name: &str,
+        author: &str,
+        x: i64,
+        y: i64,
+        count: usize,
+        endow: u64,
+        clearing: i64,
+    ) -> Result<u64, String> {
         let genome = Genome::new(src).map_err(|d| d.to_string())?;
-        let Some(at) = Island::cell(x, y) else {
-            return Err("outside the island".into());
-        };
+        let (x, y) = (x.clamp(0, W as i64 - 1), y.clamp(0, H as i64 - 1));
+        // Clear the ground: every mote within the radius returns to the
+        // light of its cell.
+        let mut cleared = 0;
+        for m in self.motes.iter_mut() {
+            if (m.x as i64 - x).abs() <= clearing
+                && (m.y as i64 - y).abs() <= clearing
+                && m.leaving.is_none()
+            {
+                m.age = MAX_AGE;
+                cleared += 1;
+            }
+        }
+        if cleared > 0 {
+            self.settle();
+        }
+        let cost = endow * count as u64;
+        let total: u64 = self.light.iter().map(|&l| l as u64).sum();
+        if total < cost {
+            return Err(format!(
+                "not enough light on the island ({total} of {cost})"
+            ));
+        }
         let mut cells = Vec::new();
-        for dy in -RELEASE_RADIUS..=RELEASE_RADIUS {
-            for dx in -RELEASE_RADIUS..=RELEASE_RADIUS {
-                if let Some(c) = Island::cell(x + dx, y + dy) {
-                    cells.push(c);
+        'search: for r in 0..=ENTRY_SEARCH {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs().max(dy.abs()) != r {
+                        continue;
+                    }
+                    if let Some(k) = Island::cell(x + dx, y + dy) {
+                        if self.occ[k] == Self::EMPTY {
+                            cells.push(k);
+                            if cells.len() == count {
+                                break 'search;
+                            }
+                        }
+                    }
                 }
             }
         }
-        let near: u64 = cells.iter().map(|&c| self.light[c] as u64).sum();
-        if near < RELEASE_COST {
-            return Err(format!("not enough light here ({near} of {RELEASE_COST})"));
+        if cells.is_empty() {
+            return Err("no room here".into());
         }
-        let c = if self.occ[at] == Self::EMPTY {
-            at
-        } else {
-            match cells.iter().copied().find(|&c| self.occ[c] == Self::EMPTY) {
-                Some(c) => c,
-                None => return Err("no room here".into()),
-            }
+        let cost = endow * cells.len() as u64;
+        let near = |k: usize| {
+            ((k % W) as i64 - x).abs() <= clearing && ((k / W) as i64 - y).abs() <= clearing
         };
-        let mut owed = RELEASE_COST;
-        for &k in &cells {
-            let take = (self.light[k] as u64).min(owed);
+        let mut order: Vec<usize> = (0..CELLS).collect();
+        order.sort_by(|&a, &b| {
+            near(b)
+                .cmp(&near(a))
+                .then(self.light[b].cmp(&self.light[a]))
+                .then(a.cmp(&b))
+        });
+        let mut owed = cost;
+        for k in order {
+            let take = (self.light[k] as u64).min(owed).min(LIGHT_CAP as u64 / 2);
             self.light[k] -= take as u32;
             owed -= take;
             if owed == 0 {
@@ -376,17 +423,19 @@ impl Island {
             .u64(self.id)
             .u64(self.tick)
             .finish();
-        let id = self.next_id();
-        let name = clip(name);
-        self.place(
-            c,
-            id,
-            lineage,
-            name.clone(),
-            clip(author),
-            genome,
-            RELEASE_COST,
-        );
+        let (name, author) = (clip(name), clip(author));
+        for c in cells {
+            let id = self.next_id();
+            self.place(
+                c,
+                id,
+                lineage,
+                name.clone(),
+                author.clone(),
+                genome.clone(),
+                endow,
+            );
+        }
         self.event(EventKind::Released, name, lineage);
         Ok(lineage)
     }

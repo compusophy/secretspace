@@ -15,6 +15,11 @@ use crate::place::{clock, Place};
 use crate::store;
 
 pub const TICK_MS: f64 = 1000.0 / TICKS_PER_SEC as f64;
+/// In full darkness time crawls: one tick for every NIGHT_SLOWDOWN of day.
+/// An unwatched island fades over minutes, not seconds.
+pub const NIGHT_SLOWDOWN: f64 = 20.0;
+/// Ticks an island may stay lit and empty before life begins again.
+const REGENESIS_AFTER: u32 = 100;
 /// The most ticks one pump catches up (a minute), after a throttled timer.
 const MAX_CATCH_UP: u32 = 600;
 const FEED_LEN: usize = 7;
@@ -61,7 +66,10 @@ pub struct App {
     pub net: Net,
     pub place: Place,
     pub author: String,
-    pub mine: Vec<u64>,
+    pub mine: Vec<(u64, String)>,
+    /// A mind waiting for its person to say where it begins.
+    pub placing: Option<(String, String)>,
+    empty_for: u32,
     pub feed: VecDeque<FeedItem>,
     pub flyers: Vec<Flyer>,
     pub ripples: Vec<Ripple>,
@@ -103,9 +111,13 @@ pub fn hue(lineage: u64) -> f64 {
             .map(|&(name, h)| (space::island::founder_lineage(name), h))
             .collect()
     });
+    // Everyone else's lineages take hues that stay clear of the founders'.
+    const OTHERS: [f64; 10] = [
+        48.0, 62.0, 78.0, 96.0, 112.0, 158.0, 214.0, 232.0, 288.0, 300.0,
+    ];
     match founders.iter().find(|f| f.0 == lineage) {
         Some(&(_, h)) => h,
-        None => (splitmix(lineage) % 360) as f64,
+        None => OTHERS[(splitmix(lineage) % OTHERS.len() as u64) as usize],
     }
 }
 
@@ -126,6 +138,8 @@ impl App {
             place,
             author,
             mine: store::mine(),
+            placing: None,
+            empty_for: 0,
             feed: VecDeque::new(),
             flyers: Vec::new(),
             ripples: Vec::new(),
@@ -236,12 +250,29 @@ impl App {
         let mut n = 0;
         while self.next_tick <= now && n < MAX_CATCH_UP {
             self.tick(self.next_tick);
-            self.next_tick += TICK_MS;
+            self.next_tick += self.tick_ms();
             n += 1;
         }
-        if self.next_tick < now - TICK_MS {
-            self.next_tick = now + TICK_MS;
+        if self.next_tick < now - self.tick_ms() {
+            self.next_tick = now + self.tick_ms();
         }
+    }
+
+    /// Real time between ticks: a day's pace while there is any sun.
+    pub fn tick_ms(&self) -> f64 {
+        if self.night() {
+            TICK_MS * NIGHT_SLOWDOWN
+        } else {
+            TICK_MS
+        }
+    }
+
+    pub fn night(&self) -> bool {
+        !self.island.watched && self.island.sun == 0
+    }
+
+    pub fn is_mine(&self, lineage: u64) -> bool {
+        self.mine.iter().any(|(id, _)| *id == lineage)
     }
 
     fn tick(&mut self, now: f64) {
@@ -259,6 +290,17 @@ impl App {
         }
         self.island.step();
         self.last_tick = now;
+        // Life begins again on a lit island that has none.
+        if self.island.motes().is_empty() && self.island.sun > 0 {
+            self.empty_for += 1;
+            if self.empty_for >= REGENESIS_AFTER {
+                self.empty_for = 0;
+                genesis(&mut self.island);
+                self.say(now, "life began again".into(), None);
+            }
+        } else {
+            self.empty_for = 0;
+        }
         self.departures(now, ms);
         self.island_events(now);
         let census = self.census();
@@ -431,12 +473,22 @@ impl App {
         }
     }
 
-    /// A person's mind, released into the warm spot.
-    pub fn release(&mut self, src: &str, name: &str, now: f64) -> Result<(), String> {
-        let (x, y) = space::island::spot(self.island.tick);
-        let lineage = self.island.release(src, name, &self.author, x, y)?;
-        store::add_mine(lineage);
-        self.mine.push(lineage);
+    /// A person's mind: checked now, released where they next tap.
+    pub fn prepare(&mut self, src: &str, name: &str) -> Result<(), String> {
+        space::genome::Genome::new(src).map_err(|d| d.to_string())?;
+        self.placing = Some((src.to_string(), name.to_string()));
+        Ok(())
+    }
+
+    /// Release the waiting mind at a cell.
+    pub fn place(&mut self, x: i64, y: i64, now: f64) -> Result<(), String> {
+        let Some((src, name)) = self.placing.clone() else {
+            return Ok(());
+        };
+        let lineage = self.island.release(&src, &name, &self.author, x, y)?;
+        self.placing = None;
+        store::add_mine(lineage, &name);
+        self.mine.push((lineage, name.clone()));
         self.say(now, format!("you released {name}"), Some(hue(lineage)));
         Ok(())
     }

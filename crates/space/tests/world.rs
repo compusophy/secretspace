@@ -142,25 +142,67 @@ fn nomads_flee_a_setting_sun_through_a_bright_portal() {
 }
 
 #[test]
-fn releasing_costs_the_land_and_starts_a_lineage() {
+fn releasing_clears_ground_and_starts_a_lineage() {
     let mut isl = world(2);
-    let before = isl.held();
+    isl.watched = true;
+    for _ in 0..300 {
+        isl.step();
+    }
+    let minted = isl.ledger.minted + isl.ledger.granted + isl.ledger.imported;
     let lineage = isl
         .release(space::founders::TEMPLATE, "mine", "tester", 20, 15)
         .expect("release");
+    assert!(isl.conserved());
     assert_eq!(
-        isl.held(),
-        before,
-        "release moves light into a mote, it mints nothing"
+        isl.ledger.minted + isl.ledger.granted + isl.ledger.imported,
+        minted,
+        "a release mints nothing"
     );
-    assert!(isl
+    let clutch: Vec<_> = isl
         .motes()
         .iter()
-        .any(|m| m.lineage == lineage && &*m.author == "tester"));
+        .filter(|m| m.lineage == lineage)
+        .collect();
+    assert_eq!(clutch.len(), CLUTCH);
+    assert!(clutch
+        .iter()
+        .all(|m| &*m.author == "tester" && m.balance == RELEASE_ENDOW));
+    let strangers = isl
+        .motes()
+        .iter()
+        .filter(|m| m.lineage != lineage)
+        .filter(|m| (m.x as i64 - 20).abs() <= CLEARING && (m.y as i64 - 15).abs() <= CLEARING)
+        .count();
+    assert_eq!(strangers, 0, "the ground is cleared");
     assert!(isl
         .release("fly()", "bad", "t", 1, 1)
         .unwrap_err()
         .contains("E0105"));
+}
+
+#[test]
+fn the_template_can_take_hold() {
+    let mut held = 0;
+    for seed in 1..=6 {
+        let mut isl = world(seed);
+        isl.watched = true;
+        for _ in 0..400 {
+            isl.step();
+        }
+        let lineage = isl
+            .release(space::founders::TEMPLATE, "t", "me", 24, 15)
+            .unwrap();
+        for _ in 0..2000 {
+            isl.step();
+        }
+        if isl.motes().iter().any(|m| m.lineage == lineage) {
+            held += 1;
+        }
+    }
+    assert!(
+        held >= 2,
+        "the template took hold on only {held} of 6 islands"
+    );
 }
 
 #[test]
