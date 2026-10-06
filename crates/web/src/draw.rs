@@ -42,7 +42,7 @@ impl Frame {
         }
     }
     /// Cell-space point under a screen point.
-    pub fn to_cell(&self, px: f64, py: f64) -> (f64, f64) {
+    pub fn cell_of(&self, px: f64, py: f64) -> (f64, f64) {
         if self.rot {
             (
                 (py - self.y) / self.cell,

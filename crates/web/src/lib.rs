@@ -249,7 +249,7 @@ fn inspect(p: &Page) {
 }
 
 fn pick(p: &mut Page, x: f64, y: f64) {
-    let (cx, cy) = p.frame.to_cell(x, y);
+    let (cx, cy) = p.frame.cell_of(x, y);
     if p.app.placing.is_some() {
         let inside =
             cx >= 0.0 && cy >= 0.0 && cx < space::laws::W as f64 && cy < space::laws::H as f64;

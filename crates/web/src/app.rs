@@ -141,9 +141,7 @@ pub fn hue(lineage: u64) -> f64 {
             .collect()
     });
     // Everyone else's lineages take hues that stay clear of the founders'.
-    const OTHERS: [f64; 10] = [
-        48.0, 62.0, 78.0, 96.0, 112.0, 158.0, 214.0, 232.0, 288.0, 300.0,
-    ];
+    const OTHERS: [f64; 9] = [40.0, 52.0, 64.0, 76.0, 88.0, 100.0, 225.0, 238.0, 290.0];
     match founders.iter().find(|f| f.0 == lineage) {
         Some(&(_, h)) => h,
         None => OTHERS[(splitmix(lineage) % OTHERS.len() as u64) as usize],
