@@ -4,16 +4,19 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
+use space::census::Census;
 use space::founders::genesis;
 use space::island::{EventKind, Island};
 use space::laws::{TICKS_PER_SEC, W};
-use space::net::{Net, NetEvent, Portal, WorldLineage};
+use space::net::{Net, NetEvent, Portal};
 use space::rng::splitmix;
-use space::wire::{decode, encode, CensusEntry, Hello, Msg, WorldEntry};
+use space::wire::{decode, encode, CensusEntry, Envelope, Hello, Msg, WorldEntry};
 
 use crate::place::{clock, Place};
 use crate::store;
 
+/// Ticks between census rounds (three seconds of day).
+const GOSSIP_EVERY: u64 = 30;
 pub const TICK_MS: f64 = 1000.0 / TICKS_PER_SEC as f64;
 /// In full darkness time crawls: one tick for every NIGHT_SLOWDOWN of day.
 /// An unwatched island fades over minutes, not seconds.
@@ -24,6 +27,28 @@ const REGENESIS_AFTER: u32 = 100;
 const MAX_CATCH_UP: u32 = 600;
 const FEED_LEN: usize = 7;
 const FOSSIL_KEEP: usize = 48;
+
+/// One lineage across the world, as far as this tab knows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorldLineage {
+    pub lineage: u64,
+    pub name: String,
+    pub author: String,
+    /// Islands it is alive on.
+    pub tabs: u32,
+    pub count: u32,
+    /// Counted exactly rather than estimated.
+    pub exact: bool,
+}
+
+/// Where an outgoing envelope goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Route {
+    /// Other islands: this browser's tabs, and devices over the mesh.
+    Islands,
+    /// This project's relay only (the census it sums).
+    Relay,
+}
 
 pub struct FeedItem {
     pub at: f64,
@@ -80,8 +105,10 @@ pub struct App {
     pub world: Vec<WorldLineage>,
     pub summary: Option<Summary>,
     away: Option<Away>,
-    /// Encoded envelopes waiting for the transports: (to, is a census, bytes).
-    pub outbox: Vec<(u64, bool, Vec<u8>)>,
+    /// Encoded envelopes waiting for the transports: (to, route, bytes).
+    pub outbox: Vec<(u64, Route, Vec<u8>)>,
+    /// The census nobody runs: gossiped sketches of the whole world.
+    census: Census,
     /// The relay's count of the whole world, when it was heard.
     relay_world: Option<(f64, u32, Vec<WorldEntry>)>,
     /// Islands online, by the relay's count.
@@ -153,6 +180,7 @@ impl App {
             summary: None,
             away: None,
             outbox: Vec::new(),
+            census: Census::default(),
             relay_world: None,
             islands_online: None,
             links_open: 0,
@@ -181,7 +209,7 @@ impl App {
             .unwrap_or_else(|| format!("the {}", SIDES[side as usize % 4]))
     }
 
-    fn census(&self) -> Vec<CensusEntry> {
+    fn census_entries(&self) -> Vec<CensusEntry> {
         self.island
             .census()
             .iter()
@@ -306,10 +334,12 @@ impl App {
         }
         self.departures(now, ms);
         self.island_events(now);
-        let census = self.census();
-        self.net.tick(ms, self.hello(), &census);
+        self.net.tick(ms, self.hello());
+        if self.island.tick.is_multiple_of(GOSSIP_EVERY) {
+            self.gossip();
+        }
         self.flush(now);
-        self.world = self.net.world(ms, &census);
+        self.world = self.census_view();
         self.merge_relay_world(now);
         for (side, p) in self.net.portals.iter().enumerate() {
             if let Portal::Open { peer, .. } = p {
@@ -393,6 +423,9 @@ impl App {
         for e in entries {
             match self.world.iter_mut().find(|w| w.lineage == e.lineage) {
                 Some(w) => {
+                    if e.tabs > w.tabs || e.count > w.count {
+                        w.exact = false;
+                    }
                     w.tabs = w.tabs.max(e.tabs);
                     w.count = w.count.max(e.count);
                 }
@@ -402,6 +435,7 @@ impl App {
                     author: e.author.clone(),
                     tabs: e.tabs,
                     count: e.count,
+                    exact: false,
                 }),
             }
         }
@@ -422,6 +456,47 @@ impl App {
         }
     }
 
+    /// Count this island into the census, and tell the neighbours (and
+    /// the relay, if there is one) what this island knows.
+    fn gossip(&mut self) {
+        let lineages = self.island.census();
+        let here: Vec<(u64, &str, &str, u32)> = lineages
+            .iter()
+            .map(|l| (l.id, &*l.name, &*l.author, l.count))
+            .collect();
+        let epoch = epoch_now();
+        self.census.note(epoch, self.island.id, &here);
+        let mine: Vec<u64> = lineages.iter().map(|l| l.id).collect();
+        let g = self.census.gossip(&mine);
+        let env = |msg| Envelope {
+            from: self.island.id,
+            to: 0,
+            msg,
+        };
+        self.outbox
+            .push((0, Route::Islands, encode(&env(Msg::Gossip(g)))));
+        self.outbox.push((
+            0,
+            Route::Relay,
+            encode(&env(Msg::Census(self.census_entries()))),
+        ));
+    }
+
+    fn census_view(&self) -> Vec<WorldLineage> {
+        self.census
+            .view()
+            .into_iter()
+            .map(|k| WorldLineage {
+                lineage: k.lineage,
+                name: k.name,
+                author: k.author,
+                tabs: k.islands,
+                count: k.motes,
+                exact: k.exact,
+            })
+            .collect()
+    }
+
     /// Envelopes from another tab.
     pub fn receive(&mut self, now: f64, bytes: &[u8]) {
         let Ok(env) = decode(bytes) else { return };
@@ -431,10 +506,8 @@ impl App {
 
     fn flush(&mut self, now: f64) {
         let (out, events) = self.net.drain();
-        self.outbox.extend(
-            out.iter()
-                .map(|e| (e.to, matches!(e.msg, Msg::Census(_)), encode(e))),
-        );
+        self.outbox
+            .extend(out.iter().map(|e| (e.to, Route::Islands, encode(e))));
         for e in events {
             match e {
                 NetEvent::Arrive { side, traveler } => {
@@ -471,6 +544,7 @@ impl App {
                     let to = self.beyond_name(side);
                     self.say(now, format!("the portal to {to} closed"), None);
                 }
+                NetEvent::Gossip(g) => self.census.merge(epoch_now(), &g),
                 NetEvent::Delivered { .. } => {}
             }
         }
@@ -502,7 +576,7 @@ impl App {
         self.net.bye();
         let (out, _) = self.net.drain();
         self.outbox
-            .extend(out.iter().map(|e| (e.to, false, encode(e))));
+            .extend(out.iter().map(|e| (e.to, Route::Islands, encode(e))));
     }
 
     /// Islands this one can hear directly, itself included.
@@ -512,9 +586,12 @@ impl App {
 
     /// Islands in the world as far as this tab knows.
     pub fn islands(&self) -> usize {
-        self.islands_online
-            .map_or(0, |n| n as usize)
-            .max(self.heard())
+        let counted = self
+            .islands_online
+            .unwrap_or(0)
+            .max(self.swarm.unwrap_or(0))
+            .max(self.census.islands());
+        (counted as usize).max(self.heard())
     }
 }
 
@@ -528,4 +605,9 @@ pub fn edge_point(side: u8, offset: u16) -> (f64, f64) {
         2 => (o.min(w - 0.5), h),
         _ => (0.0, o.min(h - 0.5)),
     }
+}
+
+/// The census epoch: minutes since 1970, by this device's clock.
+fn epoch_now() -> u32 {
+    (js_sys::Date::now() / 60_000.0) as u32
 }

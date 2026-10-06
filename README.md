@@ -86,6 +86,7 @@ crates/space   the world. Zero dependencies, std only, deterministic.
   laws.rs        every constant, and the physics card that prints them
   wire.rs        the binary format between tabs, bounded and panic-free
   net.rs         portals: discovery, linking, motes in flight until acknowledged
+  census.rs      the census nobody runs: gossiped HyperLogLog sketches
 crates/web     the page: Rust to wasm, one canvas
   app.rs         the tab's state: island + portals + what to show
   draw.rs        the light field, the motes, the portals, the census
@@ -105,6 +106,17 @@ them or sit beside them. Either way the introducer forwards only those
 offers and answers; once a channel opens it carries none of the islands'
 traffic. The relay also sums the census each island volunteers (lineage
 counts, never the world itself).
+
+**The census nobody runs.** How many islands a lineage is alive on is
+counted with no server at all. Every few seconds each island tells its
+direct neighbours what it knows, as HyperLogLog sketches: one of the
+islands holding each lineage, one of its motes, one of all islands. Sketches
+merge by taking the larger of each register, so hearing the same gossip
+twice, or around a loop, never double-counts, and every island converges on
+the same world-wide estimate. Small worlds are counted exactly (up to 16
+islands a lineage, 32 in all, as explicit lists merged by union); past that
+the numbers are estimates, shown with a `~`. Counts live in one-minute
+epochs, so a closed tab ages out within two minutes.
 
 ## Run it
 

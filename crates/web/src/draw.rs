@@ -91,6 +91,31 @@ fn paint_field(field: &HtmlCanvasElement, app: &App) {
     }
 }
 
+/// 2413 -> "2,413".
+fn grouped(n: u32) -> String {
+    let d = n.to_string();
+    let mut out = String::new();
+    for (i, c) in d.chars().enumerate() {
+        if i > 0 && (d.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// "41 tabs · 2,413 motes", with "~" when the census estimated them.
+fn spread(l: &crate::app::WorldLineage) -> String {
+    let about = if l.exact { "" } else { "~" };
+    format!(
+        "{about}{} tab{} · {about}{} mote{}",
+        grouped(l.tabs),
+        if l.tabs == 1 { "" } else { "s" },
+        grouped(l.count),
+        if l.count == 1 { "" } else { "s" }
+    )
+}
+
 fn text(ctx: &Ctx, s: &str, x: f64, y: f64) {
     let _ = ctx.fill_text(s, x, y);
 }
@@ -366,19 +391,7 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
         } else {
             format!(" by {}", l.author)
         };
-        text(
-            ctx,
-            &format!(
-                "{}{by} — {} tab{} · {} mote{}",
-                l.name,
-                l.tabs,
-                if l.tabs == 1 { "" } else { "s" },
-                l.count,
-                if l.count == 1 { "" } else { "s" }
-            ),
-            x + 14.0,
-            y,
-        );
+        text(ctx, &format!("{}{by} — {}", l.name, spread(l)), x + 14.0, y);
     }
 
     // Yours, alive or not.
@@ -400,13 +413,7 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
         ctx.fill();
         ctx.set_font(&format!("600 12px {SANS}"));
         let line = match app.world.iter().find(|l| l.lineage == *id) {
-            Some(l) => format!(
-                "{name} (yours) — {} tab{} · {} mote{}",
-                l.tabs,
-                if l.tabs == 1 { "" } else { "s" },
-                l.count,
-                if l.count == 1 { "" } else { "s" }
-            ),
+            Some(l) => format!("{name} (yours) — {}", spread(l)),
             None => format!("{name} (yours) — gone from every island in reach"),
         };
         ctx.set_fill_style_str("rgba(255,255,255,0.85)");

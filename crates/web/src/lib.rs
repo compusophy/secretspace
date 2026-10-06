@@ -101,14 +101,20 @@ fn random_id() -> u64 {
 /// Hand queued envelopes to every transport: the tabs of this browser
 /// hear everything; a device hears what is addressed to it or to all.
 fn flush(p: &mut Page) {
-    for (to, census, bytes) in p.app.outbox.drain(..) {
-        if let Some(bus) = &p.bus {
-            bus.post(&bytes);
-        }
-        if let Some(mesh) = &p.mesh {
-            mesh.send(to, &bytes);
-            if census {
-                mesh.census(&bytes);
+    for (to, route, bytes) in p.app.outbox.drain(..) {
+        match route {
+            app::Route::Islands => {
+                if let Some(bus) = &p.bus {
+                    bus.post(&bytes);
+                }
+                if let Some(mesh) = &p.mesh {
+                    mesh.send(to, &bytes);
+                }
+            }
+            app::Route::Relay => {
+                if let Some(mesh) = &p.mesh {
+                    mesh.census(&bytes);
+                }
             }
         }
     }

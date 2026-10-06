@@ -307,6 +307,11 @@ fn wire_round_trips_every_message() {
             author: "genesis".into(),
         }]),
         Msg::Bye,
+        Msg::Gossip({
+            let mut c = space::census::Census::default();
+            c.note(9, 1, &[(5, "drifter", "genesis", 40)]);
+            c.gossip(&[5])
+        }),
         Msg::World {
             islands: 1200,
             entries: vec![space::wire::WorldEntry {
@@ -401,18 +406,7 @@ fn simulate(
             }
         }
         for tab in tabs.iter_mut().filter(|x| x.alive) {
-            let census: Vec<CensusEntry> = tab
-                .island
-                .census()
-                .iter()
-                .map(|l| CensusEntry {
-                    lineage: l.id,
-                    count: l.count,
-                    name: l.name.to_string(),
-                    author: l.author.to_string(),
-                })
-                .collect();
-            tab.net.tick(now, hello(&tab.island), &census);
+            tab.net.tick(now, hello(&tab.island));
             let (out, events) = tab.net.drain();
             for e in events {
                 match e {
@@ -572,39 +566,4 @@ fn a_sleeping_island_shuts_its_portals() {
         .portals
         .iter()
         .any(|p| matches!(p, Portal::Open { .. })));
-}
-
-#[test]
-fn the_census_counts_islands() {
-    let mut rng = Rng::new(6);
-    let mut clock = Clock(0);
-    let mut world = tabs(3);
-    simulate(&mut world, &mut clock, 400, &mut rng, 0, 0);
-    let entries = |isl: &Island| -> Vec<CensusEntry> {
-        isl.census()
-            .iter()
-            .map(|l| CensusEntry {
-                lineage: l.id,
-                count: l.count,
-                name: l.name.to_string(),
-                author: l.author.to_string(),
-            })
-            .collect()
-    };
-    // Each island's last census reached the others within one census period.
-    let w = world[0].net.world(clock.0, &entries(&world[0].island));
-    assert!(!w.is_empty());
-    for l in &w {
-        assert!(l.tabs >= 1 && l.tabs <= 3);
-    }
-    let top = &w[0];
-    let holders = world
-        .iter()
-        .filter(|t| t.island.census().iter().any(|c| c.id == top.lineage))
-        .count() as u32;
-    assert!(
-        top.tabs.abs_diff(holders) <= 1,
-        "census says {} tabs, islands say {holders}",
-        top.tabs
-    );
 }

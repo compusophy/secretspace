@@ -38,8 +38,8 @@ mutate and cross portals. The sun is attention: document visibility.
 ## Map
 
 ```
-crates/space/src  mind caps genome island laws founders wire net rng hash
-crates/space/tests mind.rs (language guarantees) world.rs (physics, wire, nets)
+crates/space/src  mind caps genome island laws founders wire net census rng hash
+crates/space/tests mind.rs (language) world.rs (physics, wire, nets) census.rs
 crates/space/examples run genomes release   headless experiments
 crates/web/src    lib (wiring, panels) app (tab state) draw (canvas)
                   bus (BroadcastChannel) mesh (WebRTC) place store
@@ -56,7 +56,9 @@ composted, occupancy rebuilt).
 
 Page loop: a 50 ms interval pumps due ticks (100 ms apart; 2 s apart in
 full dark; up to 600 caught up after a throttled timer), then flushes
-envelopes to the bus, the mesh, and the relay (census only). rAF only draws.
+envelopes to the bus and the mesh, and the census to the relay only. Every
+30 ticks the island notes itself in the census and gossips its sketches to
+its neighbours (`census` epochs are wall-clock minutes). rAF only draws.
 
 ## Commands
 

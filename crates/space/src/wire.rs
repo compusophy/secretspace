@@ -2,6 +2,7 @@
 //! everywhere: every byte comes from a stranger, so decoding never panics
 //! and never allocates past the limits below.
 
+use crate::census::{Exact, Gossip, Sketch, Tally, EXACT, EXACT_WORLD, GOSSIP_LINEAGES, REGS};
 use crate::island::Traveler;
 use crate::laws::{MAX_SOURCE, MEM_SLOTS};
 
@@ -77,6 +78,8 @@ pub enum Msg {
         islands: u32,
         entries: Vec<WorldEntry>,
     },
+    /// An island's census sketches, for its neighbours to merge.
+    Gossip(Gossip),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -216,6 +219,7 @@ pub fn encode(env: &Envelope) -> Vec<u8> {
         Msg::Census(_) => 8,
         Msg::Bye => 9,
         Msg::World { .. } => 10,
+        Msg::Gossip(_) => 11,
     };
     w.u8(kind);
     w.u64(env.from);
@@ -255,6 +259,38 @@ pub fn encode(env: &Envelope) -> Vec<u8> {
                 w.str(&e.author, MAX_NAME);
             }
         }
+        Msg::Gossip(g) => {
+            w.u32(g.epoch);
+            w.0.extend_from_slice(&g.world.0);
+            match &g.world_exact {
+                Some(ids) if ids.len() <= EXACT_WORLD => {
+                    w.u8(ids.len() as u8);
+                    for id in ids {
+                        w.u64(*id);
+                    }
+                }
+                _ => w.u8(0xff),
+            }
+            let n = g.lineages.len().min(GOSSIP_LINEAGES);
+            w.u8(n as u8);
+            for (lineage, t) in &g.lineages[..n] {
+                w.u64(*lineage);
+                w.str(&t.name, MAX_NAME);
+                w.str(&t.author, MAX_NAME);
+                w.0.extend_from_slice(&t.islands.0);
+                w.0.extend_from_slice(&t.motes.0);
+                match &t.exact {
+                    Some(list) if list.len() <= EXACT => {
+                        w.u8(list.len() as u8);
+                        for (island, n) in list {
+                            w.u64(*island);
+                            w.u32(*n);
+                        }
+                    }
+                    _ => w.u8(0xff),
+                }
+            }
+        }
         Msg::World { islands, entries } => {
             w.u32(*islands);
             let n = entries.len().min(MAX_CENSUS);
@@ -269,6 +305,30 @@ pub fn encode(env: &Envelope) -> Vec<u8> {
         }
     }
     w.0
+}
+
+/// A sketch's registers; no honest register exceeds 64.
+fn sketch(r: &mut R) -> Result<Sketch, WireError> {
+    let mut regs = [0u8; REGS];
+    for (reg, b) in regs.iter_mut().zip(r.take(REGS)?) {
+        *reg = (*b).min(64);
+    }
+    Ok(Sketch(regs))
+}
+
+/// An exact list of (island, motes), capped at one mote a cell.
+fn exact(r: &mut R) -> Result<Exact, WireError> {
+    match r.u8()? {
+        0xff => Ok(None),
+        k if k as usize <= EXACT => {
+            let mut list = Vec::with_capacity(k as usize);
+            for _ in 0..k {
+                list.push((r.u64()?, r.u32()?.min(crate::laws::CELLS as u32)));
+            }
+            Ok(Some(list))
+        }
+        _ => Err(WireError::TooLong),
+    }
 }
 
 pub fn decode(b: &[u8]) -> Result<Envelope, WireError> {
@@ -343,6 +403,46 @@ pub fn decode(b: &[u8]) -> Result<Envelope, WireError> {
                 });
             }
             Msg::World { islands, entries }
+        }
+        11 => {
+            let epoch = r.u32()?;
+            let world = sketch(&mut r)?;
+            let world_exact = match r.u8()? {
+                0xff => None,
+                k if k as usize <= EXACT_WORLD => {
+                    Some((0..k).map(|_| r.u64()).collect::<Result<Vec<u64>, _>>()?)
+                }
+                _ => return Err(WireError::TooLong),
+            };
+            let n = r.u8()? as usize;
+            if n > GOSSIP_LINEAGES {
+                return Err(WireError::TooLong);
+            }
+            let mut lineages = Vec::with_capacity(n);
+            for _ in 0..n {
+                let lineage = r.u64()?;
+                let name = r.str(MAX_NAME)?;
+                let author = r.str(MAX_NAME)?;
+                let islands = sketch(&mut r)?;
+                let motes = sketch(&mut r)?;
+                let exact = exact(&mut r)?;
+                lineages.push((
+                    lineage,
+                    Tally {
+                        name,
+                        author,
+                        islands,
+                        motes,
+                        exact,
+                    },
+                ));
+            }
+            Msg::Gossip(Gossip {
+                epoch,
+                world,
+                world_exact,
+                lineages,
+            })
         }
         _ => return Err(WireError::Kind),
     };

@@ -13,17 +13,16 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+use crate::census::Gossip;
 use crate::island::Traveler;
 use crate::laws::opposite;
 use crate::rng::splitmix;
-use crate::wire::{CensusEntry, Envelope, Hello, Msg};
+use crate::wire::{Envelope, Hello, Msg};
 
 pub const HELLO_MS: u64 = 1000;
 pub const PEER_TIMEOUT_MS: u64 = 6000;
 pub const LINK_TIMEOUT_MS: u64 = 2500;
 pub const RESEND_MS: u64 = 700;
-pub const CENSUS_MS: u64 = 3000;
-pub const CENSUS_TTL_MS: u64 = 12_000;
 const MAX_PEERS: usize = 64;
 const DEDUPE: usize = 256;
 
@@ -38,8 +37,6 @@ pub enum Portal {
 pub struct Peer {
     pub hello: Hello,
     pub seen: u64,
-    pub census: Vec<CensusEntry>,
-    pub census_at: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -52,22 +49,26 @@ struct Flight {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NetEvent {
-    Arrive { side: u8, traveler: Traveler },
-    Delivered { peer: u64 },
-    Lost { traveler: Traveler },
-    Opened { side: u8, peer: u64 },
-    Closed { side: u8, peer: u64 },
-}
-
-/// One lineage across every island this one can hear.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WorldLineage {
-    pub lineage: u64,
-    pub name: String,
-    pub author: String,
-    /// Islands it is alive on.
-    pub tabs: u32,
-    pub count: u32,
+    Arrive {
+        side: u8,
+        traveler: Traveler,
+    },
+    Delivered {
+        peer: u64,
+    },
+    Lost {
+        traveler: Traveler,
+    },
+    Opened {
+        side: u8,
+        peer: u64,
+    },
+    Closed {
+        side: u8,
+        peer: u64,
+    },
+    /// A neighbour's census sketches.
+    Gossip(Gossip),
 }
 
 pub struct Net {
@@ -79,7 +80,6 @@ pub struct Net {
     next_seq: u64,
     seen: BTreeMap<u64, VecDeque<u64>>,
     last_hello: Option<u64>,
-    last_census: Option<u64>,
     out: Vec<Envelope>,
     events: Vec<NetEvent>,
 }
@@ -95,7 +95,6 @@ impl Net {
             next_seq: 1,
             seen: BTreeMap::new(),
             last_hello: None,
-            last_census: None,
             out: Vec::new(),
             events: Vec::new(),
         }
@@ -185,7 +184,7 @@ impl Net {
     }
 
     /// Advance the clock: greet, expire, link, resend.
-    pub fn tick(&mut self, now: u64, hello: Hello, census: &[CensusEntry]) {
+    pub fn tick(&mut self, now: u64, hello: Hello) {
         let greet = self.last_hello.is_none_or(|t| now >= t + HELLO_MS);
         if greet {
             self.last_hello = Some(now);
@@ -193,10 +192,6 @@ impl Net {
             hello.asleep = self.asleep;
             hello.free = self.free_sides();
             self.send(0, Msg::Hello(hello));
-        }
-        if self.last_census.is_none_or(|t| now >= t + CENSUS_MS) {
-            self.last_census = Some(now);
-            self.send(0, Msg::Census(census.to_vec()));
         }
         let gone: Vec<u64> = self
             .peers
@@ -339,8 +334,6 @@ impl Net {
             let p = self.peers.entry(from).or_insert_with(|| Peer {
                 hello: h.clone(),
                 seen: now,
-                census: Vec::new(),
-                census_at: 0,
             });
             p.hello = h;
             p.seen = now;
@@ -419,14 +412,10 @@ impl Net {
                     self.events.push(NetEvent::Delivered { peer: from });
                 }
             }
-            Msg::Census(entries) => {
-                if let Some(p) = self.peers.get_mut(&from) {
-                    p.census = entries;
-                    p.census_at = now;
-                }
-            }
-            Msg::Bye => self.drop_peer(from),
+            Msg::Gossip(g) => self.events.push(NetEvent::Gossip(g)),
             // The relay's to read, not a neighbor's.
+            Msg::Census(_) => {}
+            Msg::Bye => self.drop_peer(from),
             Msg::World { .. } => {}
         }
     }
@@ -486,40 +475,5 @@ impl Net {
                 yours: theirs,
             },
         );
-    }
-
-    /// Every lineage this island can hear of, with how many islands it is
-    /// alive on. `mine` is this island's own census.
-    pub fn world(&self, now: u64, mine: &[CensusEntry]) -> Vec<WorldLineage> {
-        let mut by: BTreeMap<u64, WorldLineage> = BTreeMap::new();
-        let fresh = self
-            .peers
-            .values()
-            .filter(|p| p.census_at > 0 && now <= p.census_at + CENSUS_TTL_MS)
-            .map(|p| p.census.as_slice());
-        for census in std::iter::once(mine).chain(fresh) {
-            for e in census.iter().filter(|e| e.count > 0) {
-                let w = by.entry(e.lineage).or_insert_with(|| WorldLineage {
-                    lineage: e.lineage,
-                    name: e.name.clone(),
-                    author: e.author.clone(),
-                    tabs: 0,
-                    count: 0,
-                });
-                w.tabs += 1;
-                // An island holds at most one mote a cell, whatever it says.
-                w.count = w
-                    .count
-                    .saturating_add(e.count.min(crate::laws::CELLS as u32));
-            }
-        }
-        let mut v: Vec<WorldLineage> = by.into_values().collect();
-        v.sort_by(|a, b| {
-            b.tabs
-                .cmp(&a.tabs)
-                .then(b.count.cmp(&a.count))
-                .then(a.lineage.cmp(&b.lineage))
-        });
-        v
     }
 }

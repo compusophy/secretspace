@@ -8,10 +8,11 @@
 //!
 //! This crate is the world itself, with no dependencies: the mind language
 //! (`mind`), what minds may do (`caps`), heredity (`genome`), one island and
-//! its ledger (`island`), the wire format (`wire`) and the portal protocol
-//! (`net`). Every law is in `laws`.
+//! its ledger (`island`), the wire format (`wire`), the portal protocol
+//! (`net`) and the census nobody runs (`census`). Every law is in `laws`.
 
 pub mod caps;
+pub mod census;
 pub mod founders;
 pub mod genome;
 pub mod hash;
