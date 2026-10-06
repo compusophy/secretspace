@@ -18,18 +18,39 @@ pub struct Frame {
     pub x: f64,
     pub y: f64,
     pub cell: f64,
+    /// Turned a quarter clockwise, so a tall phone shows the island long:
+    /// the island's north edge on the right, east at the bottom.
+    pub rot: bool,
 }
 
 impl Frame {
     pub fn w(&self) -> f64 {
-        self.cell * W as f64
+        self.cell * if self.rot { H } else { W } as f64
     }
     pub fn h(&self) -> f64 {
-        self.cell * H as f64
+        self.cell * if self.rot { W } else { H } as f64
     }
     /// Screen point of a cell-space point.
     pub fn at(&self, cx: f64, cy: f64) -> (f64, f64) {
-        (self.x + cx * self.cell, self.y + cy * self.cell)
+        if self.rot {
+            (
+                self.x + (H as f64 - cy) * self.cell,
+                self.y + cx * self.cell,
+            )
+        } else {
+            (self.x + cx * self.cell, self.y + cy * self.cell)
+        }
+    }
+    /// Cell-space point under a screen point.
+    pub fn to_cell(&self, px: f64, py: f64) -> (f64, f64) {
+        if self.rot {
+            (
+                (py - self.y) / self.cell,
+                H as f64 - (px - self.x) / self.cell,
+            )
+        } else {
+            ((px - self.x) / self.cell, (py - self.y) / self.cell)
+        }
     }
 }
 
@@ -42,15 +63,26 @@ pub fn layout(w: f64, h: f64) -> Frame {
     } else {
         (110.0, 92.0, 150.0)
     };
-    let cell = ((w - 2.0 * side) / W as f64)
-        .min((h - top - bottom) / H as f64)
-        .max(4.0)
-        .floor();
-    let (iw, ih) = (cell * W as f64, cell * H as f64);
+    let fit = |across: usize, down: usize| {
+        ((w - 2.0 * side) / across as f64)
+            .min((h - top - bottom) / down as f64)
+            .max(4.0)
+            .floor()
+    };
+    // Turn the island when that makes its cells bigger (a tall phone).
+    let (flat, turned) = (fit(W, H), fit(H, W));
+    let rot = narrow && turned > flat;
+    let cell = if rot { turned } else { flat };
+    let (iw, ih) = if rot {
+        (cell * H as f64, cell * W as f64)
+    } else {
+        (cell * W as f64, cell * H as f64)
+    };
     Frame {
         x: ((w - iw) / 2.0).floor(),
         y: (top + ((h - top - bottom - ih) / 2.0).max(0.0)).floor(),
         cell,
+        rot,
     }
 }
 
@@ -137,12 +169,19 @@ pub fn frame(ctx: &Ctx, field: &HtmlCanvasElement, app: &App, w: f64, h: f64, no
     ctx.clip();
     ctx.set_filter(&format!("blur({:.1}px)", f.cell * 0.55));
     let pad = f.cell;
+    if f.rot {
+        let _ = ctx.translate(f.x + f.w(), f.y);
+        let _ = ctx.rotate(TAU / 4.0);
+    } else {
+        let _ = ctx.translate(f.x, f.y);
+    }
+    let (fw, fh) = (f.cell * W as f64, f.cell * H as f64);
     let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(
         field,
-        f.x - pad,
-        f.y - pad,
-        f.w() + 2.0 * pad,
-        f.h() + 2.0 * pad,
+        -pad,
+        -pad,
+        fw + 2.0 * pad,
+        fh + 2.0 * pad,
     );
     ctx.restore();
 
@@ -221,12 +260,27 @@ pub fn frame(ctx: &Ctx, field: &HtmlCanvasElement, app: &App, w: f64, h: f64, no
 fn portals(ctx: &Ctx, app: &App, f: Frame, now: f64) {
     let (x0, y0, x1, y1) = (f.x, f.y, f.x + f.w(), f.y + f.h());
     let narrow = f.w() < 600.0;
+    let (wf, hf) = (W as f64, H as f64);
     for side in 0..4usize {
-        let (ax, ay, bx, by) = match side {
-            0 => (x0, y0, x1, y0),
-            1 => (x1, y0, x1, y1),
-            2 => (x0, y1, x1, y1),
-            _ => (x0, y0, x0, y1),
+        // The edge in cell space, then wherever it lands on screen.
+        let ((ca, cb), (cc, cd)) = match side {
+            0 => ((0.0, 0.0), (wf, 0.0)),
+            1 => ((wf, 0.0), (wf, hf)),
+            2 => ((0.0, hf), (wf, hf)),
+            _ => ((0.0, 0.0), (0.0, hf)),
+        };
+        let ((ax, ay), (bx, by)) = (f.at(ca, cb), f.at(cc, cd));
+        // Which side of the screen: 0 top, 1 right, 2 bottom, 3 left.
+        let screen = if ay == by {
+            if (ay - y0).abs() < 0.5 {
+                0
+            } else {
+                2
+            }
+        } else if (ax - x1).abs() < 0.5 {
+            1
+        } else {
+            3
         };
         let open = app.net.beyond(side);
         let (style, width) = match (app.net.portals[side], &open) {
@@ -276,9 +330,9 @@ fn portals(ctx: &Ctx, app: &App, f: Frame, now: f64) {
         };
         ctx.set_fill_style_str(dim);
         ctx.set_font(&format!("12px {SANS}"));
-        let arrow = ["↑", "→", "↓", "←"][side];
+        let arrow = ["↑", "→", "↓", "←"][screen];
         let s = format!("{arrow} {label}");
-        match side {
+        match screen {
             0 => {
                 ctx.set_text_align("center");
                 ctx.set_text_baseline("bottom");
@@ -292,7 +346,7 @@ fn portals(ctx: &Ctx, app: &App, f: Frame, now: f64) {
             _ => {
                 // Side labels run along the edge.
                 ctx.save();
-                let (x, rot) = if side == 1 {
+                let (x, rot) = if screen == 1 {
                     (x1 + 10.0, TAU / 4.0)
                 } else {
                     (x0 - 10.0, -TAU / 4.0)
@@ -444,16 +498,15 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
     } else {
         (f.x + f.w()).min(w - pad)
     };
-    let fy = if narrow {
-        base + 18.0 + rows as f64 * 18.0 + 10.0
-    } else {
-        base
-    };
+    // On a phone the feed goes under the rows just drawn; else beside them.
+    let fy = if narrow { y + 6.0 } else { base };
     ctx.set_text_align(if narrow { "left" } else { "right" });
     for (i, item) in app.feed.iter().rev().enumerate() {
         let age = (now - item.at) / 1000.0;
         let a = (1.0 - (age - 8.0) / 6.0).clamp(0.0, 1.0) * (1.0 - i as f64 * 0.12);
-        if a <= 0.0 || (narrow && i >= 3) {
+        // Never into the receipt line at the bottom.
+        let y = fy + i as f64 * 18.0;
+        if a <= 0.0 || (narrow && i >= 3) || y + 16.0 > h - 24.0 {
             continue;
         }
         ctx.set_font(&format!("12px {SANS}"));
@@ -461,7 +514,7 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
             Some(hu) => hsl(hu, 70.0, 75.0, a),
             None => format!("rgba(255,236,210,{a:.2})"),
         });
-        text(ctx, &item.text, fx, fy + i as f64 * 18.0);
+        text(ctx, &item.text, fx, y);
     }
 
     // The receipt.
@@ -494,10 +547,10 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
             0.55 + 0.25 * (now / 900.0).sin()
         ));
         let (cx, cy) = (f.x + f.w() / 2.0, f.y + f.h() / 2.0);
-        text(ctx, "you are the only island.", cx, cy - 10.0);
+        text(ctx, "you are the only island so far.", cx, cy - 10.0);
         text(
             ctx,
-            "open this page in another window — islands link at their edges.",
+            "open this page on another device, or another window: islands link at their edges.",
             cx,
             cy + 10.0,
         );

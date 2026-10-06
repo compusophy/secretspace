@@ -6,6 +6,9 @@
 <title>secretspace</title>
 <meta name="description" content="A world made of browser tabs. Your tab is an island; its edges open onto strangers' tabs, and the motes that live here walk across.">
 <meta name="theme-color" content="#07090d">
+<meta property="og:title" content="secretspace">
+<meta property="og:description" content="A world made of browser tabs. Your tab is an island; its edges open onto strangers' tabs, and the creatures living here walk across.">
+<meta name="twitter:card" content="summary">
 <!-- Where islands on other devices are introduced. Empty: this page's own origin (/ws). "off": this browser only. scripts/deploy.sh sets it. -->
 <meta name="relay" content="">
 <!-- Public WebTorrent trackers that introduce islands on other devices, with no server of ours. "off" for none. -->
@@ -23,7 +26,9 @@
   button { font: inherit; color: var(--ink); background: rgba(255,181,71,.14); border: 1px solid rgba(255,181,71,.45); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   button:hover { background: rgba(255,181,71,.24); }
   button.ghost { background: transparent; border-color: var(--line); color: var(--dim); }
-  #write { position: fixed; top: 20px; right: 20px; z-index: 2; }
+  #top { position: fixed; top: calc(20px + env(safe-area-inset-top, 0px)); right: 20px; z-index: 2; display: flex; gap: 8px; }
+  #intro p { margin: 0 0 10px; color: var(--dim); }
+  #intro strong { color: var(--ink); font-weight: 600; }
   aside { position: fixed; z-index: 3; right: 16px; top: 64px; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 80px); overflow: auto;
           background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; backdrop-filter: blur(6px); }
   aside[hidden] { display: none; }
@@ -39,12 +44,21 @@
   pre { font: 11px/1.5 var(--mono); color: var(--dim); white-space: pre-wrap; background: rgba(0,0,0,.3); border-radius: 8px; padding: 8px; margin: 8px 0; }
   #i-meta { white-space: pre-line; color: var(--dim); }
   #i-src { color: var(--ink); }
-  @media (max-width: 700px) { #write { top: 14px; right: 14px; } aside { top: 56px; right: 8px; width: calc(100vw - 16px); } }
+  @media (max-width: 700px) { #top { top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px; } aside { top: 56px; right: 8px; width: calc(100vw - 16px); } }
 </style>
 </head>
 <body>
 <canvas id="world" aria-label="your island"></canvas>
-<button id="write">write a mote</button>
+<div id="top"><button id="about" class="ghost" aria-label="what is this">?</button><button id="write">write a mote</button></div>
+
+<aside id="intro" hidden>
+  <header><span>secretspace</span><button id="intro-close" aria-label="close">×</button></header>
+  <p><strong>Your tab is an island.</strong> Its four edges open onto other people's tabs, wherever they are.</p>
+  <p><strong>Motes live here.</strong> Each is a tiny program that eats light, breeds and mutates. Thinking costs it its own energy. Step off an open edge and it walks into a stranger's tab.</p>
+  <p><strong>The sun is attention.</strong> While you look at this tab it is day here. Look away and night falls: the portals close and time crawls.</p>
+  <p>Write a mote of your own and see how many tabs it reaches.</p>
+  <div class="row"><button id="intro-write">write a mote</button><button id="intro-watch" class="ghost">just watch</button></div>
+</aside>
 
 <aside id="editor" hidden>
   <header><span>write a mote</span><button id="editor-close" aria-label="close">×</button></header>

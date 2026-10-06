@@ -249,9 +249,7 @@ fn inspect(p: &Page) {
 }
 
 fn pick(p: &mut Page, x: f64, y: f64) {
-    let f = p.frame;
-    let cx = (x - f.x) / f.cell;
-    let cy = (y - f.y) / f.cell;
+    let (cx, cy) = p.frame.to_cell(x, y);
     if p.app.placing.is_some() {
         let inside =
             cx >= 0.0 && cy >= 0.0 && cx < space::laws::W as f64 && cy < space::laws::H as f64;
@@ -278,17 +276,41 @@ fn pick(p: &mut Page, x: f64, y: f64) {
     inspect(p);
 }
 
+fn open_editor() {
+    let src: HtmlTextAreaElement = el("m-src");
+    if src.value().trim().is_empty() {
+        src.set_value(space::founders::TEMPLATE);
+    }
+    let author: HtmlInputElement = el("m-author");
+    author.set_value(&store::author());
+    show("intro", false);
+    show("editor", true);
+}
+
+fn close_intro() {
+    show("intro", false);
+    store::set(store::SEEN, "1");
+}
+
 fn wire_panels() {
-    let write: HtmlElement = el("write");
-    on(&write, "click", |_| {
-        let src: HtmlTextAreaElement = el("m-src");
-        if src.value().trim().is_empty() {
-            src.set_value(space::founders::TEMPLATE);
-        }
-        let author: HtmlInputElement = el("m-author");
-        author.set_value(&store::author());
-        show("editor", true);
+    on(&el::<HtmlElement>("write"), "click", |_| open_editor());
+    on(&el::<HtmlElement>("about"), "click", |_| {
+        show("editor", false);
+        show("intro", true);
     });
+    on(&el::<HtmlElement>("intro-close"), "click", |_| {
+        close_intro()
+    });
+    on(&el::<HtmlElement>("intro-watch"), "click", |_| {
+        close_intro()
+    });
+    on(&el::<HtmlElement>("intro-write"), "click", |_| {
+        close_intro();
+        open_editor();
+    });
+    if store::get(store::SEEN).is_none() {
+        show("intro", true);
+    }
     on(&el::<HtmlElement>("editor-close"), "click", |_| {
         show("editor", false)
     });
@@ -322,9 +344,7 @@ fn wire_panels() {
         if let Some(src) = src {
             let t: HtmlTextAreaElement = el("m-src");
             t.set_value(&src);
-            let a: HtmlInputElement = el("m-author");
-            a.set_value(&store::author());
-            show("editor", true);
+            open_editor();
         }
     });
     on(&el::<HtmlElement>("m-release"), "click", |_| {
@@ -448,6 +468,9 @@ pub fn start() -> Result<(), JsValue> {
         if let Ok(e) = e.dyn_into::<web_sys::KeyboardEvent>() {
             if e.key() == "Escape" {
                 show("editor", false);
+                if !el::<HtmlElement>("intro").hidden() {
+                    close_intro();
+                }
                 with(|p| {
                     p.app.placing = None;
                     p.app.selected = None;

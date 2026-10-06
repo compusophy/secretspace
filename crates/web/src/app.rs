@@ -335,7 +335,7 @@ impl App {
         self.departures(now, ms);
         self.island_events(now);
         self.net.tick(ms, self.hello());
-        if self.island.tick.is_multiple_of(GOSSIP_EVERY) {
+        if self.island.tick == 1 || self.island.tick.is_multiple_of(GOSSIP_EVERY) {
             self.gossip();
         }
         self.flush(now);

@@ -7,6 +7,8 @@ use space::wire::{decode, encode, Envelope, Msg};
 const FOSSILS: &str = "secretspace/fossils";
 const AUTHOR: &str = "secretspace/author";
 const MINE: &str = "secretspace/mine";
+/// Set once the first-visit card has been read.
+pub const SEEN: &str = "secretspace/seen";
 
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
