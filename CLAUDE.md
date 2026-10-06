@@ -41,7 +41,8 @@ mutate and cross portals. The sun is attention: document visibility.
 crates/space/src  mind caps genome island laws founders wire net census rng hash
 crates/space/tests mind.rs (language) world.rs (physics, wire, nets) census.rs
 crates/space/examples run genomes release   headless experiments
-crates/web/src    lib (wiring, panels) app (tab state) draw (canvas)
+crates/web/src    lib (wiring, panels) app (tab state) draw (canvas; a tall
+                  phone shows the island turned a quarter: Frame::at, cell_of)
                   bus (BroadcastChannel) mesh (WebRTC) place store
 crates/relay/src  main (http, ws session, static files) hub (tracker
                   protocol: swarms, offers, answers; census sum) json ws
