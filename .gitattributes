@@ -1,0 +1,4 @@
+# Scripts and Dockerfiles run on Linux: keep LF even in a Windows checkout.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yml text eol=lf
