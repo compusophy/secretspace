@@ -1,0 +1,75 @@
+# Every push to main or a claude/ branch: test, build the page, deploy it to
+# Vercel production. Needs repository secrets VERCEL_TOKEN, VERCEL_ORG_ID and
+# VERCEL_PROJECT_ID; the optional repository variable RELAY sets the page's
+# relay (default "off": public trackers only).
+name: deploy
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust with the wasm target
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      - name: The wasm-bindgen CLI version Cargo.lock pins
+        id: wb
+        run: echo "version=$(awk '/name = "wasm-bindgen"/{getline; gsub(/[^0-9.]/,""); print; exit}' Cargo.lock)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: deploy-${{ runner.os }}-${{ steps.wb.outputs.version }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: deploy-${{ runner.os }}-${{ steps.wb.outputs.version }}-
+
+      - name: Install wasm-bindgen CLI
+        run: |
+          if [ "$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')" != "${{ steps.wb.outputs.version }}" ]; then
+            cargo install wasm-bindgen-cli --version "${{ steps.wb.outputs.version }}" --locked --force
+          fi
+
+      - name: Test
+        run: cargo test --workspace --quiet
+
+      - name: Build the page
+        run: bash scripts/build-web.sh
+
+      - name: Set the relay
+        env:
+          RELAY: ${{ vars.RELAY }}
+        run: |
+          relay="${RELAY:-off}"
+          sed -i "s|<meta name=\"relay\" content=\"[^\"]*\">|<meta name=\"relay\" content=\"$relay\">|" dist/index.html
+          grep -q "name=\"relay\" content=\"$relay\"" dist/index.html
+          cp web/vercel.json dist/
+
+      - name: Deploy to Vercel production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::Set the VERCEL_TOKEN, VERCEL_ORG_ID and VERCEL_PROJECT_ID repository secrets."
+            exit 1
+          fi
+          url=$(npx --yes vercel@latest deploy dist --prod --yes --token "$VERCEL_TOKEN")
+          echo "Deployed: $url"
+          echo "### Deployed to production: $url" >> "$GITHUB_STEP_SUMMARY"
