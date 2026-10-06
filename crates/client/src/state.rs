@@ -13,6 +13,21 @@ pub struct Gulp {
     pub at: f64,
 }
 
+/// A snake bursting: a ring and sparks where its head was.
+pub struct Burst {
+    pub x: f32,
+    pub y: f32,
+    pub hue: u8,
+    pub r: f32,
+    pub at: f64,
+}
+
+/// "you ate noodle": shown big for a moment.
+pub struct Toast {
+    pub text: String,
+    pub at: f64,
+}
+
 pub struct Death {
     pub by: String,
     pub score: u32,
@@ -28,6 +43,8 @@ pub struct State {
     pub board: Board,
     pub feed: VecDeque<(f64, String)>,
     pub gulps: Vec<Gulp>,
+    pub bursts: Vec<Burst>,
+    pub toast: Option<Toast>,
     pub death: Option<Death>,
     /// The longest this browser has been.
     pub best: u32,
@@ -47,6 +64,8 @@ impl State {
             board: Board::default(),
             feed: VecDeque::new(),
             gulps: Vec::new(),
+            bursts: Vec::new(),
+            toast: None,
             death: None,
             best,
             connected: false,
@@ -79,6 +98,15 @@ impl State {
                     self.gap += (g - self.gap) * 0.1;
                 }
                 self.frame_at = now;
+                for &(x, y, hue, r) in &f.bursts {
+                    self.bursts.push(Burst {
+                        x: game::proto::unq(x),
+                        y: game::proto::unq(y),
+                        hue,
+                        r: r as f32,
+                        at: now,
+                    });
+                }
                 for (pellet, by) in self.mirror.apply(&f) {
                     if by != 0 {
                         self.gulps.push(Gulp {
@@ -102,6 +130,17 @@ impl State {
                 victim,
                 score,
             } => {
+                let me = self
+                    .mirror
+                    .snakes
+                    .get(&self.mirror.you)
+                    .map(|s| s.name.as_str());
+                if me == Some(killer.as_str()) {
+                    self.toast = Some(Toast {
+                        text: format!("you ate {victim}!"),
+                        at: now,
+                    });
+                }
                 self.feed
                     .push_back((now, format!("{killer} ate {victim} ({score})")));
                 while self.feed.len() > 4 {
@@ -115,6 +154,10 @@ impl State {
 
     /// Feed lines fade on their own even when nothing new arrives.
     pub fn age(&mut self, now: f64) {
+        self.bursts.retain(|b| now - b.at < 700.0);
+        if self.toast.as_ref().is_some_and(|t| now - t.at > 2200.0) {
+            self.toast = None;
+        }
         self.gulps.retain(|g| now - g.at < 250.0);
         self.feed.retain(|f| now - f.0 < 7000.0);
     }

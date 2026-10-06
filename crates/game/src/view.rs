@@ -121,6 +121,12 @@ impl Viewer {
             .collect();
         f.eaten.sort_unstable();
         self.food = here;
+        f.bursts = w
+            .bursts
+            .iter()
+            .filter(|b| b.0 >= x0 && b.0 <= x1 && b.1 >= y0 && b.1 <= y1)
+            .map(|&(x, y, hue, r)| (q(x), q(y), hue, r as u8))
+            .collect();
         proto::encode_frame(&f)
     }
 

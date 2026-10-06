@@ -115,7 +115,37 @@ pub fn frame(ctx: &Ctx, st: &mut State, w: f64, h: f64, now: f64, steer: Option<
         snake(ctx, &v, s, alpha, s.id == m.you, steer, now);
     }
 
+    bursts(ctx, st, &v, now);
     hud(ctx, st, &v, now);
+}
+
+/// A burst: a ring flying out and sparks, where a snake ran into someone.
+fn bursts(ctx: &Ctx, st: &State, v: &View, now: f64) {
+    for b in &st.bursts {
+        let t = ((now - b.at) / 700.0).clamp(0.0, 1.0);
+        let (x, y) = v.at((b.x, b.y));
+        let r = b.r as f64 * v.scale;
+        let fade = 1.0 - t;
+        ctx.set_stroke_style_str(&hsl(b.hue, 100.0, 70.0, 0.8 * fade));
+        ctx.set_line_width(3.0 * fade + 1.0);
+        ctx.begin_path();
+        let _ = ctx.arc(x, y, r * (1.0 + 5.0 * t), 0.0, TAU);
+        ctx.stroke();
+        ctx.set_fill_style_str(&hsl(b.hue, 100.0, 75.0, fade));
+        for k in 0..12 {
+            let a = k as f64 / 12.0 * TAU + b.at % 1.0;
+            let d = r * (1.0 + 7.0 * t);
+            ctx.begin_path();
+            let _ = ctx.arc(
+                x + a.cos() * d,
+                y + a.sin() * d,
+                (r * 0.25 * fade).max(1.0),
+                0.0,
+                TAU,
+            );
+            ctx.fill();
+        }
+    }
 }
 
 fn ground(ctx: &Ctx, v: &View, arena: f32) {
@@ -336,6 +366,20 @@ fn hud(ctx: &Ctx, st: &State, v: &View, now: f64) {
         "○ connecting…".to_string()
     };
     let _ = ctx.fill_text(&line, pad, pad + if narrow { 44.0 } else { 52.0 });
+
+    // "you ate noodle!"
+    if let Some(t) = &st.toast {
+        let age = now - t.at;
+        let a = (1.0 - (age - 1400.0) / 800.0).clamp(0.0, 1.0);
+        let lift = (age / 2200.0) * 20.0;
+        ctx.set_text_align("center");
+        ctx.set_text_baseline("middle");
+        ctx.set_font(&format!("800 {}px {SANS}", if narrow { 24 } else { 34 }));
+        ctx.set_fill_style_str(&format!("rgba(255,224,102,{a:.2})"));
+        let _ = ctx.fill_text(&t.text, v.w / 2.0, v.h * 0.3 - lift);
+        ctx.set_text_align("left");
+        ctx.set_text_baseline("top");
+    }
 
     // The leaderboard.
     let lw = if narrow { 150.0 } else { 200.0 };

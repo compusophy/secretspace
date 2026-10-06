@@ -107,7 +107,7 @@ pub fn think(w: &World, i: usize) -> (f32, bool) {
     }
 
     // Bold bots cut across the path of a smaller snake nearby.
-    if nerve > 170 && s.mass > 45.0 {
+    if nerve > 200 && s.mass > 80.0 {
         let prey = w
             .snakes
             .iter()

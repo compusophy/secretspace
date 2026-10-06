@@ -182,6 +182,8 @@ pub struct Frame {
     pub food: Vec<FoodInfo>,
     /// Food that was eaten (by that snake; 0 if it rotted or left view).
     pub eaten: Vec<(u32, u16)>,
+    /// Snakes that burst in view: x, y, hue, radius (whole units).
+    pub bursts: Vec<(i16, i16, u8, u8)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -271,6 +273,10 @@ pub fn encode_frame(f: &Frame) -> Vec<u8> {
     w.u16(f.eaten.len() as u16);
     for &(id, by) in &f.eaten {
         w.u32(id).u16(by);
+    }
+    w.u8(f.bursts.len().min(255) as u8);
+    for &(x, y, hue, r) in f.bursts.iter().take(255) {
+        w.i16(x).i16(y).u8(hue).u8(r);
     }
     w.0
 }
@@ -404,6 +410,11 @@ fn decode_frame(r: &mut Reader) -> Option<Frame> {
     f.eaten.reserve(r.room(n, 6)?);
     for _ in 0..n {
         f.eaten.push((r.u32()?, r.u16()?));
+    }
+    let n = r.u8()? as usize;
+    f.bursts.reserve(r.room(n, 6)?);
+    for _ in 0..n {
+        f.bursts.push((r.i16()?, r.i16()?, r.u8()?, r.u8()?));
     }
     Some(f)
 }

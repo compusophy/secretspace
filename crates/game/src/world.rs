@@ -91,6 +91,8 @@ pub struct World {
     bot_at: u32,
     /// Food eaten on the last tick, and by whom.
     pub eaten: Vec<(u32, u16)>,
+    /// Snakes that burst on the last tick: where, their hue, their radius.
+    pub bursts: Vec<(f32, f32, u8, f32)>,
 }
 
 impl World {
@@ -106,6 +108,7 @@ impl World {
             next_food: 1,
             bot_at: 0,
             eaten: Vec::new(),
+            bursts: Vec::new(),
         };
         while w.food.len() < FOOD_TARGET {
             w.grow_food();
@@ -296,6 +299,7 @@ impl World {
     pub fn step(&mut self) -> Vec<Death> {
         self.tick = self.tick.wrapping_add(1);
         self.eaten.clear();
+        self.bursts.clear();
 
         // Bots decide where to go.
         let plans: Vec<(usize, f32, bool)> = (0..self.snakes.len())
@@ -463,6 +467,8 @@ impl World {
     /// Turn a snake into food along where its body lay.
     fn burst_with(&mut self, i: usize, killer: Option<(u16, String)>) -> Death {
         let s = self.snakes.remove(i);
+        let (hx, hy) = s.head();
+        self.bursts.push((hx, hy, s.hue, s.radius()));
         let total = s.mass * DEATH_DROP;
         let r = s.radius();
         let points: Vec<(f32, f32)> = s.body.iter().step_by(2).copied().collect();
