@@ -442,8 +442,11 @@ impl Island {
 
     /// Queue a mote that came through the portal on `side`; it lands at
     /// the start of the next tick.
+    /// A full border refuses newcomers; nothing of theirs is imported.
     pub fn arrive(&mut self, side: u8, t: Traveler) {
-        self.arrivals.push((side % 4, t));
+        if self.arrivals.len() < ARRIVALS_WAITING {
+            self.arrivals.push((side % 4, t));
+        }
     }
 
     /// Motes that crossed a portal since the last call.
@@ -464,7 +467,10 @@ impl Island {
         }
     }
 
-    fn admit(&mut self, side: u8, t: Traveler) {
+    fn admit(&mut self, side: u8, mut t: Traveler) {
+        // No one carries more than the law allows, whatever a stranger's tab
+        // claims; the excess never existed here.
+        t.balance = t.balance.min(MAX_CARRY);
         self.ledger.imported += t.balance;
         self.counts.arrivals += 1;
         let (ex, ey) = Island::entry(side, t.offset);
@@ -508,7 +514,7 @@ impl Island {
         let m = &mut self.motes[i];
         m.gen = t.gen;
         m.hops = t.hops;
-        m.age = t.age;
+        m.age = t.age.min(MAX_AGE);
         m.mem = t.mem;
         self.event(EventKind::Arrived(side), name, t.lineage);
     }
@@ -545,7 +551,7 @@ impl Island {
             let m = &mut self.motes[i];
             m.gen = t.gen;
             m.hops = t.hops;
-            m.age = t.age;
+            m.age = t.age.min(MAX_AGE);
             m.mem = t.mem;
         }
     }
@@ -576,7 +582,9 @@ impl Island {
         } else if self.sun > target {
             self.sun = self.sun.saturating_sub(SUN_RAMP).max(target);
         }
-        for (side, t) in std::mem::take(&mut self.arrivals) {
+        let n = self.arrivals.len().min(ARRIVALS_PER_TICK);
+        let landing: Vec<(u8, Traveler)> = self.arrivals.drain(..n).collect();
+        for (side, t) in landing {
             self.admit(side, t);
         }
         self.shine();
@@ -643,7 +651,7 @@ impl Island {
         self.ledger.burned += used;
         let m = &mut self.motes[i];
         m.balance += tank - used;
-        m.age += 1;
+        m.age = m.age.saturating_add(1);
         m.last_used = used as u32;
     }
 
@@ -659,7 +667,7 @@ impl Island {
                 self.counts.departures += 1;
                 let offset = if side % 2 == 0 { m.x } else { m.y };
                 let mut t = Island::traveler(&m, carry, offset);
-                t.hops += 1;
+                t.hops = t.hops.saturating_add(1);
                 self.departures.push((side, t));
                 self.event(EventKind::Departed(side), m.name.clone(), m.lineage);
                 continue;
@@ -792,7 +800,12 @@ impl Island {
         };
         let id = self.next_id();
         let p = &self.motes[me];
-        let (lineage, name, author, gen) = (p.lineage, p.name.clone(), p.author.clone(), p.gen + 1);
+        let (lineage, name, author, gen) = (
+            p.lineage,
+            p.name.clone(),
+            p.author.clone(),
+            p.gen.saturating_add(1),
+        );
         self.motes[me].balance -= ENDOW;
         let i = self.place(c, id, lineage, name, author, genome, ENDOW);
         self.motes[i].gen = gen;

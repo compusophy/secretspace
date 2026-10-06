@@ -79,6 +79,10 @@ pub const MAX_AGE: u32 = 4000;
 /// The most ergs a mote may carry across a portal; the rest stays behind
 /// as light at the edge it left from.
 pub const MAX_CARRY: u64 = 4000;
+/// The most arrivals an island admits in one tick, and holds waiting. A
+/// flood from a hostile tab queues, then is refused at the border.
+pub const ARRIVALS_PER_TICK: usize = 48;
+pub const ARRIVALS_WAITING: usize = 512;
 /// A new mind is released as a clutch: one mote alone on a full island is
 /// almost always lost to drift, however good its mind. Each is endowed
 /// RELEASE_ENDOW, drawn from the island's brightest cells wherever they

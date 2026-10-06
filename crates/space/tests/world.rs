@@ -74,6 +74,48 @@ fn every_erg_is_accounted_for_every_tick() {
 }
 
 #[test]
+fn a_hostile_tab_cannot_mint_or_flood() {
+    let mut isl = world(21);
+    isl.watched = true;
+    isl.portals = [0, 50, 0, 0];
+    let liar = Traveler {
+        id: 1,
+        lineage: 2,
+        name: "liar".into(),
+        author: "x".into(),
+        gen: u32::MAX,
+        hops: u32::MAX,
+        age: u32::MAX,
+        balance: u64::MAX,
+        mem: [i64::MIN; 8],
+        genome: "harvest()\nif energy() > 500 { spawn() }\ngo(1)".into(),
+        offset: u16::MAX,
+    };
+    for i in 0..2000 {
+        let mut t = liar.clone();
+        t.age = if i % 2 == 0 { u32::MAX } else { 0 };
+        isl.arrive(1, t);
+    }
+    let before = isl.ledger.imported;
+    isl.step();
+    assert!(isl.conserved());
+    assert!(
+        isl.ledger.imported - before <= ARRIVALS_PER_TICK as u64 * MAX_CARRY,
+        "a tick imports at most its quota, each at most MAX_CARRY"
+    );
+    assert!(isl
+        .motes()
+        .iter()
+        .all(|m| m.balance <= MAX_CARRY + TANK_MAX));
+    for _ in 0..40 {
+        isl.step();
+        assert!(isl.conserved());
+        isl.take_departures();
+    }
+    assert!(isl.motes().len() <= CELLS);
+}
+
+#[test]
 fn the_sun_follows_attention() {
     let mut isl = world(1);
     isl.watched = true;

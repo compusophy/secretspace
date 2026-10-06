@@ -140,7 +140,9 @@ impl Hub {
                     author: e.author.clone(),
                 });
                 w.tabs += 1;
-                w.count = w.count.saturating_add(e.count);
+                w.count = w
+                    .count
+                    .saturating_add(e.count.min(space::laws::CELLS as u32));
             }
         }
         let mut entries: Vec<WorldEntry> = by.into_values().collect();

@@ -507,7 +507,10 @@ impl Net {
                     count: 0,
                 });
                 w.tabs += 1;
-                w.count += e.count;
+                // An island holds at most one mote a cell, whatever it says.
+                w.count = w
+                    .count
+                    .saturating_add(e.count.min(crate::laws::CELLS as u32));
             }
         }
         let mut v: Vec<WorldLineage> = by.into_values().collect();
