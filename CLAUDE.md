@@ -110,6 +110,11 @@ Fake dusk by redefining `document.visibilityState` and dispatching
   offers yet; while seeking, announce again as soon as offers are ready.
 - A tracker reports swarm size only in its reply to an announce, so that
   count goes stale between announces (90 s once settled).
+- **Announce `left: 1`.** openwebtorrent never pairs two complete
+  (`left: 0`) peers. Checked live 2026-10-06: openwebtorrent, webtorrent.dev
+  and novage forward offers; files.fm, btorrent.xyz, ghostchu are dead.
+  This container's proxy breaks Chromium WebSockets, so test real trackers
+  with a Node `ws` bridge (ws://localhost -> tracker via HttpsProxyAgent).
 - `Net` accepts envelopes only from islands it has heard greet (`Hello`).
   Dedupe is per peer by sequence number; the same island heard over both
   the bus and the mesh is harmless.

@@ -406,7 +406,8 @@ impl Mesh {
         set(&msg, "peer_id", self.peer_id.as_str());
         set(&msg, "uploaded", 0);
         set(&msg, "downloaded", 0);
-        set(&msg, "left", 0);
+        // Not "complete": some trackers never pair two complete peers.
+        set(&msg, "left", 1);
         if self.trackers[i].announced == 0.0 {
             set(&msg, "event", "started");
         }

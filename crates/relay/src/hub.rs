@@ -178,8 +178,10 @@ impl Hub {
             ("action", s("announce")),
             ("interval", Json::Num(INTERVAL)),
             ("info_hash", s(&hash)),
-            ("complete", Json::Num(size as f64)),
-            ("incomplete", Json::Num(0.0)),
+            // Every island is still seeking; count them all as incomplete,
+            // as public trackers do for the "left": 1 the page announces.
+            ("complete", Json::Num(0.0)),
+            ("incomplete", Json::Num(size as f64)),
         ]);
         g.send(conn, &stats);
 
@@ -321,7 +323,7 @@ mod tests {
         hub.message(b, &announce(pb, 0));
         hub.message(a, &announce(pa, 2));
         // A hears the swarm's size; B gets one of A's offers (only one other island).
-        assert!(text(&ra).iter().any(|m| m.num("complete") == Some(2.0)));
+        assert!(text(&ra).iter().any(|m| m.num("incomplete") == Some(2.0)));
         let got = text(&rb);
         let offer = got
             .iter()
@@ -355,7 +357,7 @@ mod tests {
         hub.disconnect(b);
         hub.message(a, &announce(pa, 1));
         assert!(
-            text(&ra).iter().any(|m| m.num("complete") == Some(1.0)),
+            text(&ra).iter().any(|m| m.num("incomplete") == Some(1.0)),
             "B left the swarm"
         );
     }
