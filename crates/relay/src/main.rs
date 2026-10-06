@@ -1,12 +1,14 @@
 //! secretspace relay: introduces islands to each other, then gets out of
 //! the way.
 //!
-//! A browser opens a WebSocket to `/ws`, says `hi <id>`, and is told about a
-//! few other islands (`peers <id> ...`). It offers each a WebRTC channel
-//! through `to <id> <payload>` / `from <id> <payload>`; once a channel opens,
-//! the two talk directly and nothing they say passes through here. Each
-//! island also sends its census (a binary wire envelope) every few seconds;
-//! the relay sums them and tells everyone the size of the world.
+//! A browser opens a WebSocket to `/ws` and speaks the WebTorrent tracker
+//! protocol (JSON text frames): it announces itself in a swarm with a few
+//! WebRTC offers, the relay hands each offer to another island, and the
+//! answer comes back. Once a channel opens, the two talk directly and
+//! nothing they say passes through here. Because it is the tracker protocol,
+//! a page can use this relay and public trackers side by side. Each island
+//! may also send its census (a binary wire envelope); the relay sums them
+//! and tells everyone who sent one the size of the world.
 //!
 //! Optionally serves the page itself (`--static dist`), so one process is
 //! the whole deployment. std only, plus the world crate's wire format.
@@ -14,6 +16,7 @@
 //! `relay [--port 8787] [--static dist]`; PORT in the environment wins.
 
 mod hub;
+mod json;
 mod ws;
 
 use std::fs;
@@ -179,7 +182,12 @@ fn session(mut reader: impl Read, writer: TcpStream, hub: &Hub) -> std::io::Resu
         let _ = w.shutdown(std::net::Shutdown::Both);
     });
 
-    let mut me: Option<u64> = None;
+    let Some(conn) = hub.connect(tx.clone()) else {
+        let _ = tx.send(Out::Close);
+        drop(tx);
+        let _ = pump.join();
+        return Ok(());
+    };
     let (mut window, mut count) = (Instant::now(), 0u32);
     let result = loop {
         let frame = match ws::read(&mut reader) {
@@ -199,51 +207,21 @@ fn session(mut reader: impl Read, writer: TcpStream, hub: &Hub) -> std::io::Resu
             ws::Frame::Ping(p) => {
                 let _ = tx.send(Out::Pong(p));
             }
-            ws::Frame::Text(line) => {
-                let mut parts = line.splitn(3, ' ');
-                match (parts.next(), parts.next(), parts.next()) {
-                    (Some("hi"), Some(id), _) if me.is_none() => {
-                        let Ok(id) = u64::from_str_radix(id, 16) else {
-                            break Ok(());
-                        };
-                        if !hub.join(id, tx.clone()) {
-                            let _ = tx.send(Out::Text("taken".into()));
-                            break Ok(());
-                        }
-                        me = Some(id);
-                        let peers: Vec<String> =
-                            hub.introduce(id).iter().map(|p| format!("{p:x}")).collect();
-                        let _ = tx.send(Out::Text(format!("peers {}", peers.join(" "))));
-                    }
-                    (Some("more"), _, _) => {
-                        if let Some(id) = me {
-                            let peers: Vec<String> =
-                                hub.introduce(id).iter().map(|p| format!("{p:x}")).collect();
-                            let _ = tx.send(Out::Text(format!("peers {}", peers.join(" "))));
-                        }
-                    }
-                    (Some("to"), Some(to), Some(payload)) => {
-                        if let (Some(from), Ok(to)) = (me, u64::from_str_radix(to, 16)) {
-                            if !hub.forward(from, to, payload) {
-                                let _ = tx.send(Out::Text(format!("gone {to:x}")));
-                            }
-                        }
-                    }
-                    _ => {}
+            ws::Frame::Text(text) => {
+                if let Some(msg) = json::parse(&text) {
+                    hub.message(conn, &msg);
                 }
             }
             ws::Frame::Binary(b) => {
-                if let (Some(id), Ok(env)) = (me, decode(&b)) {
+                if let Ok(env) = decode(&b) {
                     if let Msg::Census(entries) = env.msg {
-                        hub.census(id, entries);
+                        hub.census(conn, entries);
                     }
                 }
             }
         }
     };
-    if let Some(id) = me {
-        hub.leave(id);
-    }
+    hub.disconnect(conn);
     let _ = tx.send(Out::Close);
     drop(tx);
     let _ = pump.join();

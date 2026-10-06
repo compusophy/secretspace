@@ -114,34 +114,6 @@ fn flush(p: &mut Page) {
     }
 }
 
-/// A text line from the relay.
-fn mesh_text(p: &mut Page, line: &str) {
-    let now = now();
-    let Some(mesh) = p.mesh.as_mut() else { return };
-    let mut parts = line.splitn(3, ' ');
-    match (parts.next(), parts.next(), parts.next()) {
-        (Some("peers"), first, rest) => {
-            let ids: Vec<u64> = first
-                .into_iter()
-                .chain(rest.into_iter().flat_map(|r| r.split(' ')))
-                .filter_map(|x| u64::from_str_radix(x, 16).ok())
-                .collect();
-            mesh.introduced(&ids, now);
-        }
-        (Some("from"), Some(id), Some(payload)) => {
-            if let Ok(id) = u64::from_str_radix(id, 16) {
-                mesh.signaled(id, payload, now);
-            }
-        }
-        (Some("gone"), Some(id), _) => {
-            if let Ok(id) = u64::from_str_radix(id, 16) {
-                mesh.drop_link(id);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// A binary message from the relay: the world's census.
 fn relay_bytes(p: &mut Page, bytes: &[u8]) {
     p.app.relay(now(), bytes);
@@ -153,30 +125,46 @@ fn envelope_bytes(p: &mut Page, bytes: &[u8]) {
     flush(p);
 }
 
-/// Where the relay is: `<meta name="relay">`, else `?relay=`, else this
-/// page's own origin. `?relay=off` keeps the island to this browser.
-fn relay_url() -> Option<String> {
-    let meta = document()
-        .query_selector("meta[name=relay]")
+fn meta(name: &str) -> Option<String> {
+    document()
+        .query_selector(&format!("meta[name={name}]"))
         .ok()
         .flatten()
         .and_then(|m| m.get_attribute("content"))
-        .filter(|c| !c.trim().is_empty());
-    let param = place::param("relay");
-    match param.or(meta) {
-        Some(u) if u == "off" => None,
-        Some(u) => Some(u),
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+}
+
+/// Who introduces this island to islands on other devices: this project's
+/// relay (`<meta name="relay">`, else `?relay=`, else this page's own
+/// origin; "off" for none) and public trackers (`<meta name="trackers">`,
+/// comma separated; `?trackers=off` for none). Each is (url, is ours).
+fn trackers() -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    match place::param("relay").or_else(|| meta("relay")) {
+        Some(u) if u == "off" => {}
+        Some(u) => out.push((u, true)),
         None => {
             let loc = window().location();
-            let host = loc.host().ok()?;
-            let scheme = if loc.protocol().ok()? == "https:" {
-                "wss"
-            } else {
-                "ws"
-            };
-            Some(format!("{scheme}://{host}/ws"))
+            if let (Ok(host), Ok(proto)) = (loc.host(), loc.protocol()) {
+                let scheme = if proto == "https:" { "wss" } else { "ws" };
+                out.push((format!("{scheme}://{host}/ws"), true));
+            }
         }
     }
+    let public = place::param("trackers")
+        .or_else(|| meta("trackers"))
+        .unwrap_or_default();
+    if public != "off" {
+        for url in public
+            .split(',')
+            .map(str::trim)
+            .filter(|u| u.starts_with("ws"))
+        {
+            out.push((url.to_string(), false));
+        }
+    }
+    out
 }
 
 fn resize(p: &mut Page) {
@@ -380,7 +368,7 @@ pub fn start() -> Result<(), JsValue> {
     let mut page = Page {
         app,
         bus: None,
-        mesh: relay_url().map(|u| Mesh::new(id, u)),
+        mesh: Some(Mesh::new(id, trackers())),
         ctx,
         canvas: canvas.clone(),
         field,
@@ -407,7 +395,8 @@ pub fn start() -> Result<(), JsValue> {
             if let Some(m) = p.mesh.as_mut() {
                 m.maintain(t);
                 p.app.links_open = m.open_links();
-                p.app.relay_up = m.relay_up();
+                p.app.relay_up = m.trackers_up() > 0;
+                p.app.swarm = m.swarm();
             }
             p.app.pump(t);
             flush(p);

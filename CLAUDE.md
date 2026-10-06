@@ -7,7 +7,8 @@ the lineage.
 
 A world made of browser tabs. Each tab holds one island; its four edges are
 portals to strangers' islands (same browser: BroadcastChannel; other
-devices: WebRTC introduced by the relay). Motes are minds in a total,
+devices: WebRTC, introduced over the WebTorrent tracker protocol by public
+trackers and/or the relay). Motes are minds in a total,
 fuel-metered language whose fuel is their own balance; they eat light, breed,
 mutate and cross portals. The sun is attention: document visibility.
 
@@ -42,8 +43,8 @@ crates/space/tests mind.rs (language guarantees) world.rs (physics, wire, nets)
 crates/space/examples run genomes release   headless experiments
 crates/web/src    lib (wiring, panels) app (tab state) draw (canvas)
                   bus (BroadcastChannel) mesh (WebRTC) place store
-crates/relay/src  main (http, ws session, static files) hub (introduce,
-                  forward, census sum) ws (handshake, frames, sha1, base64)
+crates/relay/src  main (http, ws session, static files) hub (tracker
+                  protocol: swarms, offers, answers; census sum) json ws
 web/index.html    the page: canvas + two panels + a one-line bootstrap
 scripts/          build-web.sh (dist/), caps.sh
 ```
@@ -101,6 +102,11 @@ Fake dusk by redefining `document.visibilityState` and dispatching
   the pattern. Track the relay's PID instead.
 - Test harnesses that call `simulate` repeatedly must carry one clock
   across calls; restarting at 0 makes timeouts never fire.
+- **Trackers carry no trickled ICE.** Offers and answers go out with their
+  candidates gathered (up to 3 s), so the first announce on connect has no
+  offers yet; while seeking, announce again as soon as offers are ready.
+- A tracker reports swarm size only in its reply to an announce, so that
+  count goes stale between announces (90 s once settled).
 - `Net` accepts envelopes only from islands it has heard greet (`Hello`).
   Dedupe is per peer by sequence number; the same island heard over both
   the bus and the mesh is harmless.

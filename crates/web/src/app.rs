@@ -89,6 +89,8 @@ pub struct App {
     /// Direct channels to other devices, and whether the relay is up.
     pub links_open: usize,
     pub relay_up: bool,
+    /// Islands in the trackers' swarm.
+    pub swarm: Option<u32>,
     /// The last place each side opened to, for the feed after it shuts.
     last_beyond: [Option<String>; 4],
 }
@@ -155,6 +157,7 @@ impl App {
             islands_online: None,
             links_open: 0,
             relay_up: false,
+            swarm: None,
             last_beyond: Default::default(),
         };
         if woke > 0 {

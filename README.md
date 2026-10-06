@@ -95,12 +95,16 @@ crates/relay   introduces islands, counts the world, gets out of the way. std on
 ```
 
 Two transports carry the same envelopes. **BroadcastChannel** links every
-tab of one browser, with no server at all. **WebRTC** links devices. The
-relay only introduces them: it forwards the few signalling lines two
-browsers need to open a data channel, and after that carries none of their
-traffic. Each island also sends the relay a census (lineage counts, never
-the world itself), and the relay sums them so every tab can show how many
-islands a lineage is alive on.
+tab of one browser, with no server at all. **WebRTC** links devices, and
+they are introduced through the **WebTorrent tracker protocol**: an island
+announces itself in one swarm with a few WebRTC offers, a tracker hands each
+offer to another island, and the answer comes back. By default the page uses
+public WebTorrent trackers, so devices link with no server of this
+project's at all. The relay speaks the same protocol and can stand in for
+them or sit beside them. Either way the introducer forwards only those
+offers and answers; once a channel opens it carries none of the islands'
+traffic. The relay also sums the census each island volunteers (lineage
+counts, never the world itself).
 
 ## Run it
 
@@ -113,7 +117,8 @@ cargo run -p secretspace-relay --release -- --static dist   # http://localhost:8
 
 Open `http://localhost:8787` in two windows. `?place=Lisbon&tz=60` makes a
 tab stand in for another city, `?relay=off` keeps it to one browser, and
-`?relay=wss://…/ws` points it at another relay.
+`?relay=wss://…/ws` points it at another relay, and `?trackers=off` (or
+`?trackers=wss://a,wss://b`) changes the public trackers.
 
 Headless:
 

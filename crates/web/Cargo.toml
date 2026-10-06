@@ -58,7 +58,6 @@ features = [
   "RtcDataChannelEvent",
   "RtcSdpType",
   "RtcSessionDescriptionInit",
-  "RtcIceCandidate",
-  "RtcIceCandidateInit",
-  "RtcPeerConnectionIceEvent",
+  "RtcIceGatheringState",
+  "RtcSessionDescription",
 ]
