@@ -1,7 +1,11 @@
-# Every push to main or a claude/ branch: test, build the page, deploy it to
-# Vercel production. Needs repository secrets VERCEL_TOKEN, VERCEL_ORG_ID and
-# VERCEL_PROJECT_ID; the optional repository variable RELAY sets the page's
-# relay (default "off": public trackers only).
+# Every push to main or a claude/ branch: test, build, then ship the arena
+# server to Railway and the page to Vercel production.
+#
+# Railway (the server): repository secret RAILWAY_TOKEN (a project token)
+# and variable RAILWAY_SERVICE (default "game").
+# Vercel (the page): secrets VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID,
+# and variable RELAY, the server's WebSocket (wss://<domain>/ws). The page
+# is not deployed until RELAY is set: a page with no server is no game.
 name: deploy
 
 on:
@@ -16,13 +20,13 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
 
-      - name: Rust with the wasm target
+      - name: Rust with the wasm and musl targets
         run: |
-          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown --target x86_64-unknown-linux-musl
           rustup default stable
 
       - name: The wasm-bindgen CLI version Cargo.lock pins
@@ -48,19 +52,39 @@ jobs:
       - name: Test
         run: cargo test --workspace --quiet
 
-      - name: Build the page
-        run: bash scripts/build-web.sh
+      - name: Build the page and the server
+        run: bash scripts/build-web.sh && bash scripts/ship.sh
 
-      - name: Set the relay
+      - name: Ship the server to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          SERVICE: ${{ vars.RAILWAY_SERVICE }}
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::warning::No RAILWAY_TOKEN secret: the server was not deployed."
+            exit 0
+          fi
+          cd ship
+          npx --yes @railway/cli@latest up --ci --service "${SERVICE:-game}"
+          echo "### Server shipped to Railway (service ${SERVICE:-game})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Point the page at the server
+        id: page
         env:
           RELAY: ${{ vars.RELAY }}
         run: |
-          relay="${RELAY:-off}"
-          sed -i "s|<meta name=\"relay\" content=\"[^\"]*\">|<meta name=\"relay\" content=\"$relay\">|" dist/index.html
-          grep -q "name=\"relay\" content=\"$relay\"" dist/index.html
+          if [ -z "$RELAY" ]; then
+            echo "::warning::No RELAY variable (the server's wss://.../ws): the page was not deployed."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sed -i "s|<meta name=\"server\" content=\"[^\"]*\">|<meta name=\"server\" content=\"$RELAY\">|" dist/index.html
+          grep -q "name=\"server\" content=\"$RELAY\"" dist/index.html
           cp web/vercel.json dist/
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to Vercel production
+      - name: Deploy the page to Vercel production
+        if: steps.page.outputs.ready == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -72,4 +96,4 @@ jobs:
           fi
           url=$(npx --yes vercel@latest deploy dist --prod --yes --token "$VERCEL_TOKEN")
           echo "Deployed: $url"
-          echo "### Deployed to production: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Page deployed to production: $url" >> "$GITHUB_STEP_SUMMARY"

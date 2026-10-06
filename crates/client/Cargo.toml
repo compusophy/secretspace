@@ -1,0 +1,46 @@
+[package]
+name = "secretspace-client"
+description = "The page: the arena drawn on a canvas, steered with a mouse or a finger."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+game = { package = "secretspace-game", path = "../game" }
+wasm-bindgen = "=0.2.129"
+js-sys = "0.3"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "Window",
+  "Document",
+  "Element",
+  "HtmlElement",
+  "HtmlCanvasElement",
+  "HtmlInputElement",
+  "CanvasRenderingContext2d",
+  "TextMetrics",
+  "Event",
+  "EventTarget",
+  "MessageEvent",
+  "PointerEvent",
+  "MouseEvent",
+  "KeyboardEvent",
+  "TouchEvent",
+  "TouchList",
+  "Touch",
+  "Storage",
+  "Performance",
+  "Location",
+  "WebSocket",
+  "BinaryType",
+  "CloseEvent",
+  "CanvasGradient",
+  "CanvasWindingRule",
+]

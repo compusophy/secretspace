@@ -1,121 +1,90 @@
 # CLAUDE.md: secretspace
 
-Read this first: the operating map. README.md is the pitch, the rules and
-the lineage.
+Read this first: the operating map. README.md is the pitch.
 
 ## What this is
 
-A world made of browser tabs. Each tab holds one island; its four edges are
-portals to strangers' islands (same browser: BroadcastChannel; other
-devices: WebRTC, introduced over the WebTorrent tracker protocol by public
-trackers and/or the relay). Motes are minds in a total,
-fuel-metered language whose fuel is their own balance; they eat light, breed,
-mutate and cross portals. The sun is attention: document visibility.
+One arena everybody plays in, in the browser: steer a snake with the mouse
+or a finger, eat glowing food to grow, boost to cut people off; run into
+someone's body and you burst into food for everyone else. Bots keep the
+arena busy when few people are in it and step out as people arrive.
 
-## Constitution (scripts/caps.sh enforces what it can)
+The server is authoritative: it runs the one `World` at 20 ticks a second
+and sends each browser only what changed in its view. The page is Rust
+compiled to wasm, drawing on a canvas.
 
-1. **`crates/space` has zero dependencies.** std only. The relay may depend
-   on it; it depends on nothing.
-2. **Deterministic world.** In `space` there are no floats in the physics,
-   no HashMap/HashSet, no clocks and no randomness but `rng`. An island is
-   a pure function of its id and its inputs (watched per tick, portal view,
-   arrivals). Same inputs mean the same `hash()`.
-3. **The ledger is the only money path.** Every erg moves through `Island`'s
-   own acts; `conserved()` must hold after every tick and every release.
-   Never move ergs around it.
-4. **The physics never faults.** Capabilities return sentinels (0/-1), never
-   errors. Compile failures are coded `E01xx` with line and column.
-5. **Every law lives in `laws.rs`.** The physics card prints them; caps docs
-   name their numbers, so keep them in step when a law changes.
-6. **Untrusted bytes never panic.** `wire::decode` is bounded and fuzzed;
-   the mind compiler is fuzzed. Keep both tests.
-7. **Caps:** a source file holds at most 1,000 lines; `crates/space/src` at
-   most 5,000; this file at most 8,000 characters. At a cap: split, shrink,
-   or delete. Never raise one.
-8. **wasm32 always green:** `cargo check -p secretspace-web --target
-   wasm32-unknown-unknown`.
+(The earlier game, a world of browser-tab islands, still sits in
+`crates/space`, `crates/web` and `crates/relay`. Nothing ships it; it is
+kept until its owner decides to delete it. History: commit 70dd617.)
+
+## Rules
+
+1. **`crates/game` has zero dependencies.** std only; the server and the
+   page both build on it, so the wire format and the laws live once.
+2. **Every number that tunes play lives in `game/src/laws.rs`.**
+3. **The server never trusts a browser.** `proto` decoding is bounded and
+   fuzzed (`hostile_bytes_never_panic`); names are cleaned; a browser that
+   floods is cut off; one that cannot keep up is let go, never waited on.
+4. **Frames rebuild bodies exactly.** A known snake is sent only its new
+   head points; `mirror` must reproduce the server's body point for point
+   (`the_browser_rebuilds_every_body_exactly`). Never send a lossy update.
+5. **Caps:** a source file holds at most 1,000 lines; this file at most
+   8,000 characters. At a cap: split, shrink, or delete. Never raise one.
+6. **wasm32 always green:** `cargo clippy -p secretspace-client --target
+   wasm32-unknown-unknown -- -D warnings`.
 
 ## Map
 
 ```
-crates/space/src  mind caps genome island laws founders wire net census rng hash
-crates/space/tests mind.rs (language) world.rs (physics, wire, nets) census.rs
-crates/space/examples run genomes release   headless experiments
-crates/web/src    lib (wiring, panels) app (tab state) draw (canvas; a tall
-                  phone shows the island turned a quarter: Frame::at, cell_of)
-                  bus (BroadcastChannel) mesh (WebRTC) place store
-                  history (lineage counts every 20 ticks, drawn under it)
-crates/relay/src  main (http, ws session, static files) hub (tracker
-                  protocol: swarms, offers, answers; census sum) json ws
-web/index.html    the page: canvas + two panels + a one-line bootstrap
-scripts/          build-web.sh (dist/), caps.sh
+crates/game/src    laws world (move, eat, collide, burst, food) bots grid
+                   proto (wire) view (one browser's frame, the board)
+                   mirror (the browser's copy) rng
+crates/game/tests  arena.rs
+crates/server/src  main (http, static files, ws sessions, the world thread) ws
+crates/client/src  lib (dom, input, websocket) state render (canvas)
+web/index.html     the page: canvas, menu, boost button
+scripts/           build-web.sh (dist/), ship.sh (ship/: image for Railway), caps.sh
 ```
 
-Tick order (`Island::step`): sun eases toward watched, arrivals land, light
-is minted (dithered hundredths), every mote that existed before the loop
-thinks (newborns wait), then settle (departures exported, the starved and old
-composted, occupancy rebuilt).
+Tick (`World::step`): bots decide, everyone moves (one step, two when
+boosting; boosting burns mass and drops some behind), everyone eats what
+is under its mouth, heads that touch another body or the edge burst into
+food, food regrows and dropped food rots, bots fill or leave.
 
-Page loop: a 50 ms interval pumps due ticks (100 ms apart; 2 s apart in
-full dark; up to 600 caught up after a throttled timer), then flushes
-envelopes to the bus and the mesh, and the census to the relay only. Every
-30 ticks the island notes itself in the census and gossips its sketches to
-its neighbours (`census` epochs are wall-clock minutes). rAF only draws.
+Each tick the server sends every browser a frame (its view: snakes seen
+for the first time in full, known ones as new head points, food in and
+out of view); twice a second a board (leaderboard, minimap, people here).
+The page draws at 60 fps, easing each body along its path between frames.
 
 ## Commands
 
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p secretspace-web --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p secretspace-client --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 bash scripts/caps.sh
-bash scripts/build-web.sh          # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen
-cargo run -p secretspace-relay --release -- --static dist   # :8787, page + relay
-RELAY=wss://…/ws bash scripts/deploy.sh   # page to Vercel (needs the CLI logged in)
-.\scripts\deploy.ps1 -Relay wss://…/ws    # the same, in PowerShell
+bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen
+cargo run -p secretspace-server --release -- --static dist   # :8787, page + server
 ```
 
+Deploys are automatic (`.github/workflows/deploy.yml`) on every push to
+main or a `claude/` branch: tests, then the server to Railway (`railway
+up` of `ship/`, secret RAILWAY_TOKEN, variable RAILWAY_SERVICE) and the
+page to Vercel (secrets VERCEL_*), pointed at the server by the variable
+RELAY (`wss://<railway domain>/ws`). No RELAY, no page deploy.
+
 Browser checks: Playwright with `executablePath` at the preinstalled
-Chromium. Separate *contexts* behave as separate devices (no shared
-BroadcastChannel), so they test the WebRTC path; launch with
-`--disable-features=WebRtcHideLocalIpsWithMdns` so local candidates resolve.
-Fake dusk by redefining `document.visibilityState` and dispatching
-`visibilitychange`.
+Chromium; separate contexts are separate players; `hasTouch, isMobile`
+for a phone.
 
-## Gotchas (each cost a debugging session)
+## Gotchas
 
-- **The cheapest mind that breeds wins a full island.** Left alone, founders
-  evolve down to `harvest()` plus a spawn line within ~2,000 ticks, so most
-  of a lineage's motes can be sterile minimal variants. That is the physics
-  working; judge minds on a world with night in it.
-- **A lone newcomer is lost to drift.** No single released mote, not even a
-  copy of the dominant genome, took hold on a mature island (0/18). Hence
-  release = a clutch of 8 on ground cleared for it, endowment drawn from the
-  clearing's light first. `examples/release` measures it; the template must
-  stay viable (`the_template_can_take_hold`).
-- **Release must not starve its own newborns.** Drawing the endowment from
-  the cells around the spot left them in a desert.
-- **Night was too lethal at day speed:** ~95% died within 15 s of a tab
-  being hidden. Full dark now ticks 20x slower; a lit, empty island
-  re-runs genesis after 100 ticks.
-- **Thinking costs dominate.** A 60-step mind cannot live on a mature
-  island's ~30 ergs a tick. Before blaming the code, check `last_used` (the
-  inspector shows it).
-- **`pkill -f relay` kills your own shell** when the command line contains
-  the pattern. Track the relay's PID instead.
-- Test harnesses that call `simulate` repeatedly must carry one clock
-  across calls; restarting at 0 makes timeouts never fire.
-- **Trackers carry no trickled ICE.** Offers and answers go out with their
-  candidates gathered (up to 3 s), so the first announce on connect has no
-  offers yet; while seeking, announce again as soon as offers are ready.
-- A tracker reports swarm size only in its reply to an announce, so that
-  count goes stale between announces (90 s once settled).
-- **Announce `left: 1`.** openwebtorrent never pairs two complete
-  (`left: 0`) peers. Checked live 2026-10-06: openwebtorrent, webtorrent.dev
-  and novage forward offers; files.fm, btorrent.xyz, ghostchu are dead.
-  This container's proxy breaks Chromium WebSockets, so test real trackers
-  with a Node `ws` bridge (ws://localhost -> tracker via HttpsProxyAgent).
-- `Net` accepts envelopes only from islands it has heard greet (`Hello`).
-  Dedupe is per peer by sequence number; the same island heard over both
-  the bus and the mesh is harmless.
+- **`pkill -f server` kills your own shell** when the command line holds
+  the pattern. Track the server's PID.
+- New people are ghosts for `GHOST_TICKS`: they cannot die or kill. Without
+  it, test players died within eight seconds of joining.
+- Bodies are rebuilt into the grid after deaths and before spawning; a
+  stale grid indexes snakes that are gone.
+- The page steers by the pointer's angle from the screen's centre, where
+  the camera keeps your head.

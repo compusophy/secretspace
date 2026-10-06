@@ -1,0 +1,13 @@
+//! The arena: snakes steering through a shared disc, eating, growing, and
+//! bursting into food when they run into someone. One server runs the
+//! `World`; every browser gets its own `view` of it over the `proto` wire.
+//! std only, so the server and the wasm page share every line of it.
+
+pub mod bots;
+pub mod grid;
+pub mod laws;
+pub mod mirror;
+pub mod proto;
+pub mod rng;
+pub mod view;
+pub mod world;

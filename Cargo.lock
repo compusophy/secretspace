@@ -86,10 +86,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "secretspace-client"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "secretspace-game",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "secretspace-game"
+version = "0.1.0"
+
+[[package]]
 name = "secretspace-relay"
 version = "0.1.0"
 dependencies = [
  "secretspace-space",
+]
+
+[[package]]
+name = "secretspace-server"
+version = "0.1.0"
+dependencies = [
+ "secretspace-game",
 ]
 
 [[package]]
