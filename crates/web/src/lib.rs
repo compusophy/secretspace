@@ -6,6 +6,7 @@
 mod app;
 mod bus;
 mod draw;
+mod history;
 mod mesh;
 mod place;
 mod store;
@@ -37,6 +38,8 @@ struct Page {
     frame: draw::Frame,
     w: f64,
     h: f64,
+    /// Whether the "open a neighbour" button shows: alone, on a wide screen.
+    lonely: bool,
 }
 
 /// A frame callback that schedules itself again.
@@ -196,6 +199,33 @@ fn resize(p: &mut Page) {
 
 fn draw(p: &mut Page) {
     p.frame = draw::frame(&p.ctx, &p.field, &p.app, p.w, p.h, now());
+    let lonely = p.app.islands() == 1 && p.w >= 700.0;
+    if lonely != p.lonely {
+        p.lonely = lonely;
+        show("neighbour", lonely);
+    }
+}
+
+/// A second window beside this one: another island, linked at once over
+/// this browser's channel, so the portals can be seen working.
+fn open_neighbour() {
+    let w = window();
+    let (aw, ah, al, at) = w.screen().map_or((1280, 800, 0, 0), |s| {
+        (
+            s.avail_width().unwrap_or(1280),
+            s.avail_height().unwrap_or(800),
+            s.avail_left().unwrap_or(0),
+            s.avail_top().unwrap_or(0),
+        )
+    });
+    let features = format!(
+        "popup,width={},height={},left={},top={at}",
+        aw / 2,
+        ah,
+        al + aw / 2
+    );
+    let url = w.location().href().unwrap_or_else(|_| "/".into());
+    let _ = w.open_with_url_and_target_and_features(&url, "_blank", &features);
 }
 
 // ---- panels --------------------------------------------------------------
@@ -294,6 +324,9 @@ fn close_intro() {
 
 fn wire_panels() {
     on(&el::<HtmlElement>("write"), "click", |_| open_editor());
+    on(&el::<HtmlElement>("neighbour"), "click", |_| {
+        open_neighbour()
+    });
     on(&el::<HtmlElement>("about"), "click", |_| {
         show("editor", false);
         show("intro", true);
@@ -401,6 +434,7 @@ pub fn start() -> Result<(), JsValue> {
         frame: draw::layout(800.0, 600.0),
         w: 800.0,
         h: 600.0,
+        lonely: false,
     };
     resize(&mut page);
     PAGE.with(|p| *p.borrow_mut() = Some(page));
@@ -482,8 +516,20 @@ pub fn start() -> Result<(), JsValue> {
     on(&canvas, "pointerdown", |e| {
         if let Ok(e) = e.dyn_into::<PointerEvent>() {
             let (x, y) = (e.client_x() as f64, e.client_y() as f64);
-            with(|p| pick(p, x, y));
+            with(|p| {
+                p.app.pointer = Some((x, y));
+                pick(p, x, y)
+            });
         }
+    });
+    on(&canvas, "pointermove", |e| {
+        if let Ok(e) = e.dyn_into::<PointerEvent>() {
+            let (x, y) = (e.client_x() as f64, e.client_y() as f64);
+            with(|p| p.app.pointer = Some((x, y)));
+        }
+    });
+    on(&canvas, "pointerleave", |_| {
+        with(|p| p.app.pointer = None);
     });
     wire_panels();
     Ok(())

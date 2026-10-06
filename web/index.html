@@ -6,6 +6,7 @@
 <title>secretspace</title>
 <meta name="description" content="A world made of browser tabs. Your tab is an island; its edges open onto strangers' tabs, and the motes that live here walk across.">
 <meta name="theme-color" content="#07090d">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307090d'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23ffb547' opacity='.35'/%3E%3Ccircle cx='13' cy='14' r='3' fill='%2357d6e8'/%3E%3Ccircle cx='20' cy='18' r='3' fill='%23ef5fc6'/%3E%3Ccircle cx='15' cy='22' r='2' fill='%2348e06a'/%3E%3C/svg%3E">
 <meta property="og:title" content="secretspace">
 <meta property="og:description" content="A world made of browser tabs. Your tab is an island; its edges open onto strangers' tabs, and the creatures living here walk across.">
 <meta name="twitter:card" content="summary">
@@ -26,6 +27,7 @@
   button { font: inherit; color: var(--ink); background: rgba(255,181,71,.14); border: 1px solid rgba(255,181,71,.45); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
   button:hover { background: rgba(255,181,71,.24); }
   button.ghost { background: transparent; border-color: var(--line); color: var(--dim); }
+  button[hidden] { display: none; }
   #top { position: fixed; top: calc(20px + env(safe-area-inset-top, 0px)); right: 20px; z-index: 2; display: flex; gap: 8px; }
   #intro p { margin: 0 0 10px; color: var(--dim); }
   #intro strong { color: var(--ink); font-weight: 600; }
@@ -49,7 +51,7 @@
 </head>
 <body>
 <canvas id="world" aria-label="your island"></canvas>
-<div id="top"><button id="about" class="ghost" aria-label="what is this">?</button><button id="write">write a mote</button></div>
+<div id="top"><button id="neighbour" class="ghost" hidden>open a neighbour</button><button id="about" class="ghost" aria-label="what is this">?</button><button id="write">write a mote</button></div>
 
 <aside id="intro" hidden>
   <header><span>secretspace</span><button id="intro-close" aria-label="close">×</button></header>

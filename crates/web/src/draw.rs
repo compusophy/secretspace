@@ -54,14 +54,25 @@ impl Frame {
     }
 }
 
+/// Below the island: its edge's label, then its history, then the world.
+const HISTORY_TOP: f64 = 30.0;
+
+fn history_h(narrow: bool) -> f64 {
+    if narrow {
+        34.0
+    } else {
+        40.0
+    }
+}
+
 /// Fit the island in the window, leaving room for the portals' labels and
 /// the text around it.
 pub fn layout(w: f64, h: f64) -> Frame {
     let narrow = w < 700.0;
     let (side, top, bottom) = if narrow {
-        (14.0, 96.0, 190.0)
+        (14.0, 96.0, 222.0)
     } else {
-        (110.0, 92.0, 150.0)
+        (110.0, 92.0, 204.0)
     };
     let fit = |across: usize, down: usize| {
         ((w - 2.0 * side) / across as f64)
@@ -419,13 +430,18 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
         );
     }
 
+    let hy = f.y + f.h() + HISTORY_TOP;
+    history(ctx, app, f.x, hy, f.w(), history_h(narrow));
+
     // The world as far as this tab can hear: lineages by how many islands
     // they are alive on.
-    let base = f.y + f.h() + 34.0;
+    let base = hy + history_h(narrow) + 18.0;
+    ctx.set_text_align("left");
+    ctx.set_text_baseline("top");
     ctx.set_font(&format!("11px {SANS}"));
     ctx.set_fill_style_str("rgba(255,255,255,0.38)");
     text(ctx, "ALIVE ON", pad.max(f.x), base);
-    let rows = if narrow { 4 } else { 5 };
+    let rows = if narrow { 3 } else { 5 };
     for (i, l) in app.world.iter().take(rows).enumerate() {
         let y = base + 18.0 + i as f64 * 18.0;
         let x = pad.max(f.x);
@@ -542,18 +558,36 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
     if app.islands() == 1 {
         ctx.set_text_baseline("middle");
         ctx.set_font(&format!("13px {SANS}"));
+        let (cx, cy) = (f.x + f.w() / 2.0, f.y + f.h() / 2.0);
+        let lines: &[&str] = if narrow {
+            &[
+                "you are the only island so far.",
+                "open this page on another device:",
+                "islands link at their edges.",
+            ]
+        } else {
+            &[
+                "you are the only island so far.",
+                "open a neighbour, or this page on another device: islands link at their edges.",
+            ]
+        };
+        // A dark pane behind, so a crowded island cannot hide it.
+        let bw = lines
+            .iter()
+            .map(|l| ctx.measure_text(l).map_or(300.0, |m| m.width()))
+            .fold(0.0, f64::max)
+            + 28.0;
+        let bh = 20.0 * lines.len() as f64 + 16.0;
+        ctx.set_fill_style_str("rgba(7,9,13,0.78)");
+        ctx.fill_rect(cx - bw / 2.0, cy - bh / 2.0, bw, bh);
         ctx.set_fill_style_str(&format!(
             "rgba(255,236,210,{:.2})",
-            0.55 + 0.25 * (now / 900.0).sin()
+            0.7 + 0.2 * (now / 900.0).sin()
         ));
-        let (cx, cy) = (f.x + f.w() / 2.0, f.y + f.h() / 2.0);
-        text(ctx, "you are the only island so far.", cx, cy - 10.0);
-        text(
-            ctx,
-            "open this page on another device, or another window: islands link at their edges.",
-            cx,
-            cy + 10.0,
-        );
+        for (i, line) in lines.iter().enumerate() {
+            let dy = (i as f64 - (lines.len() - 1) as f64 / 2.0) * 20.0;
+            text(ctx, line, cx, cy + dy);
+        }
     }
 
     // Back from the dark.
@@ -574,5 +608,153 @@ fn hud(ctx: &Ctx, app: &App, f: Frame, w: f64, h: f64, now: f64) {
                 text(ctx, line, cx, cy - 4.0 + i as f64 * 20.0);
             }
         }
+    }
+}
+
+/// Samples across the history's width before it starts to gather up.
+const MIN_SPAN: usize = 30;
+
+/// The island's story: a line for each of its lineages over the last
+/// minutes, newest at the right, with the night shaded behind them. Where
+/// the pointer rests, what lived here then.
+fn history(ctx: &Ctx, app: &App, x: f64, y: f64, w: f64, h: f64) {
+    let hist = &app.history;
+    let n = hist.samples.len();
+    let series = hist.series(|id| app.is_mine(id), 6);
+    let peak = hist.peak(&series);
+
+    ctx.set_font(&format!("11px {SANS}"));
+    ctx.set_fill_style_str("rgba(255,255,255,0.38)");
+    // On the row of the south edge's label, either side of it.
+    ctx.set_text_baseline("top");
+    ctx.set_text_align("left");
+    text(ctx, "THIS ISLAND", x, y - HISTORY_TOP + 9.0);
+    if n > 1 {
+        ctx.set_text_align("right");
+        text(
+            ctx,
+            &format!("up to {} motes", grouped(peak)),
+            x + w,
+            y - HISTORY_TOP + 9.0,
+        );
+    }
+
+    // A minute fills the width; after that it gathers up to the most kept.
+    let dx = w / (n.max(MIN_SPAN) - 1) as f64;
+    let px = |i: usize| x + w - (n - 1 - i) as f64 * dx;
+    let py = |c: u32| y + h - c as f64 / peak as f64 * (h - 3.0);
+
+    // Night behind.
+    for (i, s) in hist.samples.iter().enumerate() {
+        let dark = 1.0 - s.sun as f64 / SUN_MAX as f64;
+        if dark > 0.02 {
+            ctx.set_fill_style_str(&format!("rgba(90,110,255,{:.3})", 0.16 * dark));
+            ctx.fill_rect(px(i) - dx / 2.0, y, dx + 0.5, h);
+        }
+    }
+    ctx.set_fill_style_str("rgba(255,255,255,0.12)");
+    ctx.fill_rect(x, y + h, w, 1.0);
+    if n < 2 {
+        return;
+    }
+
+    // Others first, so the person's own lineages draw on top.
+    let mut order = series.clone();
+    order.sort_by_key(|&id| app.is_mine(id));
+    ctx.set_line_join("round");
+    for &id in &order {
+        let mine = app.is_mine(id);
+        ctx.set_stroke_style_str(&hsl(hue(id), 85.0, 62.0, 0.95));
+        ctx.set_line_width(if mine { 2.0 } else { 1.5 });
+        ctx.begin_path();
+        for (i, s) in hist.samples.iter().enumerate() {
+            let (sx, sy) = (px(i), py(s.count(id)));
+            if i == 0 {
+                ctx.move_to(sx, sy);
+            } else {
+                ctx.line_to(sx, sy);
+            }
+        }
+        ctx.stroke();
+        // Where it stands now.
+        if let Some(last) = hist.samples.back() {
+            let c = last.count(id);
+            if c > 0 {
+                ctx.set_fill_style_str(&hsl(hue(id), 85.0, 62.0, 1.0));
+                ctx.set_stroke_style_str("#07090d");
+                ctx.set_line_width(2.0);
+                ctx.begin_path();
+                let _ = ctx.arc(px(n - 1), py(c), 3.0, 0.0, TAU);
+                ctx.stroke();
+                ctx.fill();
+            }
+        }
+    }
+
+    // The readout under the pointer.
+    let Some((mx, my)) = app.pointer else { return };
+    if mx < x - 4.0 || mx > x + w + 4.0 || my < y - 6.0 || my > y + h + 6.0 {
+        return;
+    }
+    let i = ((n - 1) as f64 - ((x + w - mx) / dx).round()).clamp(0.0, (n - 1) as f64) as usize;
+    let s = &hist.samples[i];
+    let sx = px(i);
+    ctx.set_fill_style_str("rgba(255,255,255,0.4)");
+    ctx.fill_rect(sx - 0.5, y, 1.0, h);
+
+    let mut lines: Vec<(Option<f64>, String)> = vec![(
+        None,
+        format!(
+            "tick {} · {}",
+            grouped(s.tick.min(u32::MAX as u64) as u32),
+            if s.sun == 0 {
+                "night".to_string()
+            } else {
+                format!("sun {}", s.sun)
+            }
+        ),
+    )];
+    for &(id, c) in s.counts.iter().take(6) {
+        lines.push((Some(hue(id)), format!("{} {}", grouped(c), hist.name(id))));
+    }
+    if s.counts.len() > 6 {
+        let rest: u32 = s.counts[6..].iter().map(|c| c.1).sum();
+        lines.push((
+            None,
+            format!("{} more of {} others", grouped(rest), s.counts.len() - 6),
+        ));
+    }
+    if s.counts.is_empty() {
+        lines.push((None, "no one".to_string()));
+    }
+    ctx.set_font(&format!("12px {SANS}"));
+    let tw = lines
+        .iter()
+        .map(|l| ctx.measure_text(&l.1).map_or(120.0, |m| m.width()))
+        .fold(0.0, f64::max);
+    let (bw, bh) = (tw + 34.0, 12.0 + 18.0 * lines.len() as f64);
+    let bx = (sx - bw / 2.0).clamp(4.0, (x + w + 4.0 - bw).max(4.0));
+    let by = y - 8.0 - bh;
+    ctx.set_fill_style_str("rgba(12,15,21,0.94)");
+    ctx.fill_rect(bx, by, bw, bh);
+    ctx.set_stroke_style_str("rgba(255,255,255,0.12)");
+    ctx.set_line_width(1.0);
+    ctx.stroke_rect(bx + 0.5, by + 0.5, bw - 1.0, bh - 1.0);
+    ctx.set_text_align("left");
+    ctx.set_text_baseline("top");
+    for (k, (hu, line)) in lines.iter().enumerate() {
+        let ly = by + 7.0 + 18.0 * k as f64;
+        if let Some(hu) = hu {
+            ctx.set_fill_style_str(&hsl(*hu, 85.0, 62.0, 1.0));
+            ctx.begin_path();
+            let _ = ctx.arc(bx + 14.0, ly + 7.0, 4.0, 0.0, TAU);
+            ctx.fill();
+        }
+        ctx.set_fill_style_str(if k == 0 {
+            "rgba(255,255,255,0.55)"
+        } else {
+            "rgba(255,255,255,0.85)"
+        });
+        text(ctx, line, bx + 24.0, ly);
     }
 }

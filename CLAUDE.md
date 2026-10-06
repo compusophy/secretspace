@@ -44,6 +44,7 @@ crates/space/examples run genomes release   headless experiments
 crates/web/src    lib (wiring, panels) app (tab state) draw (canvas; a tall
                   phone shows the island turned a quarter: Frame::at, cell_of)
                   bus (BroadcastChannel) mesh (WebRTC) place store
+                  history (lineage counts every 20 ticks, drawn under it)
 crates/relay/src  main (http, ws session, static files) hub (tracker
                   protocol: swarms, offers, answers; census sum) json ws
 web/index.html    the page: canvas + two panels + a one-line bootstrap

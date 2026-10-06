@@ -12,6 +12,7 @@ use space::net::{Net, NetEvent, Portal};
 use space::rng::splitmix;
 use space::wire::{decode, encode, CensusEntry, Envelope, Hello, Msg, WorldEntry};
 
+use crate::history::{self, History};
 use crate::place::{clock, Place};
 use crate::store;
 
@@ -120,6 +121,10 @@ pub struct App {
     pub swarm: Option<u32>,
     /// The last place each side opened to, for the feed after it shuts.
     last_beyond: [Option<String>; 4],
+    /// Who lived here, sampled over the last minutes.
+    pub history: History,
+    /// Where the pointer rests over the page, for the history's readout.
+    pub pointer: Option<(f64, f64)>,
 }
 
 /// The founders' colours, fixed so they read apart at a glance.
@@ -185,6 +190,8 @@ impl App {
             relay_up: false,
             swarm: None,
             last_beyond: Default::default(),
+            history: History::default(),
+            pointer: None,
         };
         if woke > 0 {
             app.say(now, format!("{woke} motes woke from amber"), None);
@@ -329,6 +336,13 @@ impl App {
             }
         } else {
             self.empty_for = 0;
+        }
+        if self.island.tick.is_multiple_of(history::EVERY) {
+            let lineages = self.island.census();
+            let here: Vec<(u64, &str, u32)> =
+                lineages.iter().map(|l| (l.id, &*l.name, l.count)).collect();
+            self.history
+                .note(self.island.tick, self.island.sun as u8, &here);
         }
         self.departures(now, ms);
         self.island_events(now);

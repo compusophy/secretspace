@@ -43,6 +43,7 @@ features = [
   "Storage",
   "Performance",
   "Location",
+  "Screen",
   "VisibilityState",
   "Crypto",
   "WebSocket",
