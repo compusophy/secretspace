@@ -4,6 +4,7 @@
 //! server and the page, and deterministic (Q16.16, `engine::fixed`) so the
 //! page can predict exactly what the server will do.
 
+pub mod beasts;
 pub mod bots;
 pub mod build;
 pub mod combat;

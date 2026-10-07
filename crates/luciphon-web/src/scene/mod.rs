@@ -121,6 +121,8 @@ pub struct Scene {
     glow: Mesh,
     mote: Mesh,
     glim: Mesh,
+    /// Every kind of monster: its body and its light.
+    beasts: Vec<(Mesh, Mesh)>,
     hand: Mesh,
     cube: Mesh,
     ring: Mesh,
@@ -132,6 +134,18 @@ pub struct Scene {
 
 fn mesh(gl: &GL, g: &shapes::Geo) -> Result<Mesh, String> {
     Mesh::of(gl, &LAYOUT, GL::TRIANGLES, &g.v).ok_or_else(|| "no mesh".to_string())
+}
+
+/// A rarity's colour (0 common glim gold, then fine, rare, radiant), for
+/// gear lying on the ground.
+pub fn rarity(item: u8) -> V3 {
+    match luciphon::gear::get(item).map(|g| g.rarity) {
+        Some(1) => rgb(127, 224, 255),
+        Some(2) => rgb(200, 150, 255),
+        Some(3) => rgb(255, 236, 160),
+        Some(_) => rgb(244, 238, 222),
+        None => GOLD,
+    }
 }
 
 /// A flame's colour: embers when low, gold, then white-hot when full.
@@ -157,6 +171,12 @@ impl Scene {
             glow: mesh(gl, &glow)?,
             mote: mesh(gl, &things::mote())?,
             glim: mesh(gl, &things::glim())?,
+            beasts: (0..3u8)
+                .map(|k| {
+                    let (body, glow) = things::beast(k);
+                    Ok((mesh(gl, &body)?, mesh(gl, &glow)?))
+                })
+                .collect::<Result<Vec<_>, String>>()?,
             hand: mesh(gl, &things::hand())?,
             cube: mesh(gl, &things::cube())?,
             ring: mesh(gl, &things::ring())?,
@@ -226,8 +246,13 @@ impl Scene {
                 }),
                 kind::PICKUP => all.push(Light {
                     p: [at[0], 0.4, at[2]],
-                    r: 1.8,
-                    c: scale(GOLD, 0.5),
+                    r: if t.hue != 0 { 2.8 } else { 1.8 },
+                    c: scale(rarity(t.hue), 0.6),
+                }),
+                kind::BEAST if t.state & 7 == 2 => all.push(Light {
+                    p: [at[0], 1.5, at[2]],
+                    r: 4.0,
+                    c: scale(rgb(127, 224, 255), 0.5),
                 }),
                 _ => {}
             }
@@ -467,9 +492,41 @@ impl Scene {
             kind::PICKUP => {
                 let spin = (now / 500.0) as f32;
                 let bob = 0.25 + 0.06 * ((now / 300.0 + t.id as f64).sin() as f32);
-                let k = 0.8 + 0.1 * (t.glim as f32).min(10.0);
-                let m = m4::place([at[0], bob, at[2]], spin, [k, k, k]);
-                self.put(gl, &self.glim, &m, [GOLD[0], GOLD[1], GOLD[2], 1.0], 0.9);
+                // A piece of gear floats higher and bigger, in its rarity's
+                // colour.
+                let (k, lift) = if t.hue != 0 {
+                    (1.8, 0.35)
+                } else {
+                    (0.8 + 0.1 * (t.glim as f32).min(10.0), 0.0)
+                };
+                let c = rarity(t.hue);
+                let m = m4::place([at[0], bob + lift, at[2]], spin, [k, k, k]);
+                self.put(gl, &self.glim, &m, [c[0], c[1], c[2], 1.0], 0.9);
+            }
+            kind::BEAST => {
+                let k = (t.state & 7).min(2) as usize;
+                let winding = t.state & 8 != 0;
+                let staggered = t.state & 16 != 0 && (now / 60.0) as i64 % 2 == 0;
+                let float = if k == 2 {
+                    0.15 + 0.1 * ((now / 400.0 + t.id as f64).sin() as f32)
+                } else {
+                    0.0
+                };
+                let pulse = if winding {
+                    1.0 + 0.08 * ((now / 50.0).sin() as f32).abs()
+                } else {
+                    1.0
+                };
+                let m = m4::place([at[0], float, at[2]], yaw, [pulse; 3]);
+                let tint = if staggered { [2.0, 2.0, 2.0] } else { [1.0; 3] };
+                let (body, glow) = &self.beasts[k];
+                self.put(gl, body, &m, [tint[0], tint[1], tint[2], 1.0], 0.0);
+                let eye = if winding {
+                    rgb(255, 70, 40)
+                } else {
+                    [rgb(200, 170, 255), rgb(255, 140, 60), rgb(127, 224, 255)][k]
+                };
+                self.put(gl, glow, &m, [eye[0], eye[1], eye[2], 1.0], 0.0);
             }
             _ => {}
         }

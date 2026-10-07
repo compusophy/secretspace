@@ -47,6 +47,7 @@ impl Luciphon {
             let brain = Brain::new(&mut world.rng);
             world.spawn(NAMES[k % NAMES.len()], 0, Some(brain));
         }
+        world.populate();
         Luciphon {
             world,
             viewers: HashMap::new(),
@@ -342,6 +343,7 @@ impl Room for Luciphon {
             ("waiting", self.held.len() as i64),
             ("motes", w.motes.len() as i64),
             ("pickups", w.pickups.len() as i64),
+            ("beasts", w.beasts.len() as i64),
         ];
         for k in [
             "gather",
@@ -354,6 +356,13 @@ impl Room for Luciphon {
             "fell to a strike",
             "fell to thorns",
             "fell to a wall",
+            "fell to a beast",
+            "bitten",
+            "hushling felled",
+            "gloomhound felled",
+            "rim wraith felled",
+            "gear dropped",
+            "crafted",
         ] {
             out.push((k, w.tally.get(k).copied().unwrap_or(0) as i64));
         }

@@ -13,7 +13,8 @@ use crate::world::{Cause, Event, Mote, Pickup, World};
 
 /// A wand fired: where its beam stopped (and the solid tile that stopped
 /// it), and everyone on its line, nearest first.
-type Shot = (Fx, Option<(i32, i32)>, Vec<(usize, Fx)>);
+/// And the monsters on its line.
+type Shot = (Fx, Option<(i32, i32)>, Vec<(usize, Fx)>, Vec<(usize, Fx)>);
 
 /// What kind of blow, for its numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,12 +72,14 @@ impl World {
             .add(Fx::milli(crate::gear::worn(me.gear).reach));
         let (end, stop) = beam(&self.tiles, x, y, aim, reach);
         let on = self.on_beam(i, end);
-        let id = me.id;
+        let beasts = self.beasts_on_beam(i, end);
+        let id = self.lumens[i].id;
         // Drawn to the first body it meets, unless it pierces.
+        let first = |v: &[(usize, Fx)]| v.first().map_or(end, |o| o.1);
         let shown = if big {
             end
         } else {
-            on.first().map_or(end, |o| o.1)
+            first(&on).min(first(&beasts))
         };
         self.events.push(Event::Beam {
             id,
@@ -84,17 +87,30 @@ impl World {
             len: shown,
             big,
         });
-        (end, stop, on)
+        (end, stop, on, beasts)
     }
 
     pub(crate) fn swing(&mut self, i: usize, s: Swing) {
         let id = self.lumens[i].id;
         match s {
             Swing::Strike => {
-                let (end, stop, on) = self.fire(i, false);
-                if let Some(&(j, _)) = on.first() {
-                    self.land(i, j, Blow::Strike, 0);
-                    return;
+                let (end, stop, on, beasts) = self.fire(i, false);
+                let bonus = crate::gear::worn(self.lumens[i].gear).bolt;
+                // The nearer of a Lumen and a monster takes it.
+                match (on.first(), beasts.first()) {
+                    (Some(&(_, dl)), Some(&(n, db))) if db < dl => {
+                        self.hurt_beast(i, n, self.laws.bolt + bonus, self.laws.bolt_kb);
+                        return;
+                    }
+                    (Some(&(j, _)), _) => {
+                        self.land(i, j, Blow::Strike, 0);
+                        return;
+                    }
+                    (None, Some(&(n, _))) => {
+                        self.hurt_beast(i, n, self.laws.bolt + bonus, self.laws.bolt_kb);
+                        return;
+                    }
+                    (None, None) => {}
                 }
                 // A node it meets close enough gives; or your own planter.
                 if let Some((tx, ty)) = stop.filter(|_| end <= self.laws.gather_reach) {
@@ -114,7 +130,7 @@ impl World {
                 self.events.push(Event::Whiff { id });
             }
             Swing::Lance | Swing::Heavy { .. } => {
-                let (_, _, on) = self.fire(i, true);
+                let (_, _, on, mut beasts) = self.fire(i, true);
                 let (blow, c) = match s {
                     Swing::Heavy { c } => (Blow::Heavy, c),
                     _ => (Blow::Lance, 0),
@@ -122,11 +138,26 @@ impl World {
                 if blow == Blow::Lance {
                     self.count("lance");
                 }
-                if on.is_empty() {
+                if on.is_empty() && beasts.is_empty() {
                     self.events.push(Event::Whiff { id });
                 }
                 for (j, _) in on {
                     self.land(i, j, blow, c);
+                }
+                // Monsters, the last first (one that falls leaves the list).
+                let bonus = crate::gear::worn(self.lumens[i].gear).bolt;
+                let (dmg, kb) = match s {
+                    Swing::Heavy { c } => {
+                        let (d, kb, _) = heavy(c, &self.laws);
+                        (d + 2 * bonus, kb)
+                    }
+                    _ => (self.laws.lance_damage + bonus, self.laws.bolt_kb),
+                };
+                beasts.sort_by_key(|b| std::cmp::Reverse(b.0));
+                for (n, _) in beasts {
+                    if self.lumens[i].alive() {
+                        self.hurt_beast(i, n, dmg, kb);
+                    }
                 }
             }
             Swing::Throw { c, range } => {

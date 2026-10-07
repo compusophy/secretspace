@@ -123,6 +123,50 @@ pub fn names(c: &mut Canvas, vp: &M4, eye: [f32; 3], things: &[Thing], u: i32) {
     }
 }
 
+/// Monsters near you: their names, and their health once hurt.
+pub fn beasts(c: &mut Canvas, vp: &M4, eye: [f32; 3], things: &[Thing], u: i32) {
+    for t in things.iter().filter(|t| t.kind == kind::BEAST) {
+        let d = ((t.x - eye[0]).powi(2) + (t.y - eye[2]).powi(2)).sqrt();
+        if d > 14.0 {
+            continue;
+        }
+        let k = (t.state & 7) as usize;
+        let Some(b) = luciphon::laws::BEASTS.get(k) else {
+            continue;
+        };
+        let top = [0.95, 1.4, 2.9][k.min(2)];
+        let Some((sx, sy)) = project(vp, c, [t.x, top, t.y]) else {
+            continue;
+        };
+        let a = (255.0 * (1.0 - (d - 9.0).max(0.0) / 5.0)) as u8;
+        let w = text_width(b.name, u);
+        let col = if t.state & 8 != 0 {
+            Rgba(255, 110, 80, a)
+        } else {
+            Rgba(200, 180, 240, a)
+        };
+        c.text_shadowed(sx as i32 - w / 2, sy as i32 - 8 * u, b.name, u, col);
+        if t.flame < 100 {
+            let bw = 30 * u;
+            let k = t.flame as f32 / 100.0;
+            c.fill_rect(
+                sx as i32 - bw / 2,
+                sy as i32 + 2 * u,
+                bw,
+                2 * u,
+                Rgba(0, 0, 10, a / 2),
+            );
+            c.fill_rect(
+                sx as i32 - bw / 2,
+                sy as i32 + 2 * u,
+                (bw as f32 * k) as i32,
+                2 * u,
+                Rgba(220, 70, 90, a),
+            );
+        }
+    }
+}
+
 /// A marker toward a world point: where it is if you can see it, else at
 /// the screen's edge on its side.
 pub fn marker(c: &mut Canvas, vp: &M4, p: [f32; 3], col: Rgba, u: i32) {

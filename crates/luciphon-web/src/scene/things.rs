@@ -455,6 +455,78 @@ pub fn lumen() -> (Geo, Geo) {
     (robe, glow)
 }
 
+/// A monster of each kind, facing +x: its body (to be tinted) and the
+/// light in its eyes and core (to be tinted by how near it is to biting).
+pub fn beast(kind: u8) -> (Geo, Geo) {
+    let (mut body, mut glow) = (Geo::default(), Geo::default());
+    let dusk = rgb(70, 62, 92);
+    let shade = rgb(44, 40, 60);
+    match kind {
+        // A hushling: a hunched thing of the Dim, low and spined.
+        0 => {
+            body.blob([0.0, 0.3, 0.0], [0.34, 0.28, 0.3], 11, dusk, 0.0);
+            body.blob([0.28, 0.4, 0.0], [0.2, 0.18, 0.18], 12, shade, 0.0);
+            for k in 0..3 {
+                let x = -0.15 + 0.15 * k as f32;
+                body.spike([x, 0.5, 0.0], [x - 0.12, 0.85, 0.0], 0.06, 4, shade, 0.0);
+            }
+            for z in [-0.07, 0.07] {
+                glow.blob([0.44, 0.44, z], [0.035, 0.03, 0.03], 13, [1.0; 3], 1.0);
+            }
+        }
+        // A gloomhound: long, low, four-legged, ember-eyed.
+        1 => {
+            body.blob([0.0, 0.6, 0.0], [0.55, 0.26, 0.24], 21, shade, 0.0);
+            body.blob([0.55, 0.75, 0.0], [0.24, 0.2, 0.18], 22, dusk, 0.0);
+            for (x, z) in [(0.3, 0.14), (0.3, -0.14), (-0.3, 0.14), (-0.3, -0.14)] {
+                body.column([x, 0.0, z], 4, (0.05, 0.07), 0.5, 0.3, shade, 0.0, false);
+            }
+            for z in [-0.08, 0.08] {
+                body.spike([0.5, 0.9, z], [0.45, 1.15, z * 1.5], 0.05, 4, dusk, 0.0);
+                glow.blob([0.75, 0.8, z * 0.8], [0.035, 0.03, 0.03], 23, [1.0; 3], 1.0);
+            }
+        }
+        // A rim wraith: tall, hooded, drifting over the ground, a cold
+        // light in its chest.
+        _ => {
+            body.column(
+                [0.0, 0.35, 0.0],
+                9,
+                (0.12, 0.62),
+                1.6,
+                0.0,
+                shade,
+                0.0,
+                false,
+            );
+            body.blob([0.0, 2.05, 0.0], [0.42, 0.4, 0.42], 31, dusk, 0.0);
+            body.spike([-0.1, 2.3, 0.0], [-0.45, 2.85, 0.0], 0.2, 5, shade, 0.0);
+            for z in [-1.0f32, 1.0] {
+                body.spike(
+                    [0.1, 1.7, 0.35 * z],
+                    [0.75, 1.0, 0.9 * z],
+                    0.1,
+                    4,
+                    shade,
+                    0.0,
+                );
+            }
+            body.blob(
+                [0.32, 2.05, 0.0],
+                [0.12, 0.2, 0.26],
+                32,
+                [0.03, 0.03, 0.05],
+                0.0,
+            );
+            for z in [-0.1, 0.1] {
+                glow.blob([0.42, 2.1, z], [0.04, 0.035, 0.035], 33, [1.0; 3], 1.0);
+            }
+            glow.blob([0.25, 1.45, 0.0], [0.14, 0.14, 0.14], 34, [1.0; 3], 1.0);
+        }
+    }
+    (body, glow)
+}
+
 /// A mote in flight, glim lying on the ground, and the hand you see: all
 /// white, to be tinted.
 pub fn mote() -> Geo {

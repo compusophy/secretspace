@@ -28,6 +28,8 @@ pub enum Cause {
     Thorns,
     Slam,
     Mote,
+    /// A monster's bite.
+    Beast,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -224,6 +226,12 @@ pub enum Event {
     Dream {
         id: u16,
     },
+    /// A monster fell (its kind), to whoever hurt it most.
+    Felled {
+        id: u16,
+        by: u16,
+        kind: u8,
+    },
     /// A piece of gear made (or found) and in the bag.
     Got {
         id: u16,
@@ -279,6 +287,9 @@ pub struct World {
     pub lumens: Vec<Lumen>,
     pub motes: Vec<Mote>,
     pub pickups: Vec<Pickup>,
+    /// Monsters, and the kinds waiting to come back (and when).
+    pub beasts: Vec<crate::beasts::Beast>,
+    pub beast_queue: Vec<(u8, u32)>,
     pub events: Vec<Event>,
     /// Where every Lumen was, newest first, for the last 12 ticks.
     pub history: VecDeque<Vec<(u16, Fx, Fx)>>,
@@ -313,6 +324,8 @@ impl World {
             lumens: Vec::new(),
             motes: Vec::new(),
             pickups: Vec::new(),
+            beasts: Vec::new(),
+            beast_queue: Vec::new(),
             events: Vec::new(),
             history: VecDeque::new(),
             tally: HashMap::new(),
@@ -339,7 +352,8 @@ impl World {
             self.next_id = self.next_id.wrapping_add(1).max(1);
             let used = self.lumens.iter().any(|l| l.id == id)
                 || self.motes.iter().any(|m| m.id == id)
-                || self.pickups.iter().any(|p| p.id == id);
+                || self.pickups.iter().any(|p| p.id == id)
+                || self.beasts.iter().any(|b| b.id == id);
             if !used {
                 return id;
             }
@@ -498,6 +512,7 @@ impl World {
             self.grow();
             self.tend_land();
         }
+        self.beasts_step();
         self.motes_and_pickups();
         self.vitals();
         self.sleepers();
@@ -687,6 +702,7 @@ impl World {
             Cause::Thorns => "fell to thorns",
             Cause::Slam => "fell to a wall",
             Cause::Mote => "fell to a mote",
+            Cause::Beast => "fell to a beast",
             _ => "fell to a strike",
         });
     }

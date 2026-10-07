@@ -106,6 +106,22 @@ pub fn ents(w: &World) -> Vec<(Ent, Fx, Fx)> {
         };
         out.push((e, m.x, m.y));
     }
+    for b in &w.beasts {
+        let k = b.kind();
+        let e = Ent {
+            id: b.id,
+            kind: kind::BEAST,
+            x: q(b.x),
+            y: q(b.y),
+            facing: b.facing,
+            // Its kind; winding up; staggered.
+            state: b.kind & 7 | ((b.wind > 0) as u8) << 3 | ((b.stun > 0) as u8) << 4,
+            // Health left, in hundredths.
+            flame: (b.hp.max(0) as i64 * 100 / k.hp.max(1) as i64) as u8,
+            ..Ent::default()
+        };
+        out.push((e, b.x, b.y));
+    }
     for p in &w.pickups {
         let e = Ent {
             id: p.id,
@@ -113,6 +129,8 @@ pub fn ents(w: &World) -> Vec<(Ent, Fx, Fx)> {
             x: q(p.x),
             y: q(p.y),
             glim: p.glim.min(255) as u8,
+            // A piece of gear lying there: its id.
+            hue: p.item,
             ..Ent::default()
         };
         out.push((e, p.x, p.y));
@@ -184,6 +202,7 @@ fn event(e: &Event) -> Ev {
         Event::Refused { id } => (23, id, 0, 0),
         Event::Dream { id } => (24, id, 0, 0),
         Event::Got { id, item, made } => (25, id, made as u16, item),
+        Event::Felled { id, by, kind } => (26, id, by, kind),
     };
     Ev { kind, a, b, n }
 }

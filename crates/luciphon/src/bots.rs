@@ -257,6 +257,36 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
         };
     }
 
+    // A monster near: hunt it, keeping its distance.
+    let prey = w
+        .beasts
+        .iter()
+        .map(|b| (b, len(b.x.sub(x), b.y.sub(y))))
+        .filter(|(_, d)| *d < Fx::int(10))
+        .min_by_key(|(_, d)| *d)
+        .map(|(b, d)| (atan2(b.y.sub(y), b.x.sub(x)), d));
+    if let Some((toward, d)) = prey {
+        let aim = toward.wrapping_add(brain.err as u16);
+        let clear = beam(&w.tiles, x, y, aim, d).1.is_none();
+        let verb = if clear && roll < 300 {
+            Verb::Tap
+        } else {
+            Verb::None
+        };
+        let way = if d < Fx::int(3) {
+            toward.wrapping_add(32768)
+        } else if d > Fx::int(7) {
+            toward
+        } else {
+            toward.wrapping_add(16384)
+        };
+        let h = fan(w, x, y, way, 2);
+        return Intent {
+            verb,
+            ..go(h, 200, aim)
+        };
+    }
+
     // Wander toward a goal on the island.
     let reached = len(brain.goal.0.sub(x), brain.goal.1.sub(y)) < Fx::int(2);
     if reached || tick >= brain.rethink {

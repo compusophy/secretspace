@@ -297,7 +297,7 @@ impl State {
             let (ux, uy) = (a.cos(), a.sin());
             let width = l.beam_width.to_f32();
             for t in self.things(now) {
-                if t.kind != kind::LUMEN || t.you {
+                if !matches!(t.kind, kind::LUMEN | kind::BEAST) || t.you {
                     continue;
                 }
                 let (dx, dy) = (t.x - x, t.y - y);
@@ -315,7 +315,9 @@ impl State {
         if id == self.you && self.pred.ready {
             return Some(self.drawn_self(now));
         }
-        self.snaps.back().and_then(|s| s.1.get(&id).copied())
+        // The newest frame that still had it (a monster that just fell is
+        // gone from the newest).
+        self.snaps.iter().rev().find_map(|s| s.1.get(&id).copied())
     }
 
     fn feel(&mut self, events: &[Ev], fx: &mut Fx, now: f64) {
@@ -402,6 +404,16 @@ impl State {
                     fx.burst([tx as f32 + 0.5, 0.5, ty as f32 + 0.5], 10, 3.0, GOLD, now);
                 }
                 23 if mine => self.toast = Some(("not here".into(), now)),
+                26 => {
+                    fx.burst(g(p, 0.6), 40, 5.0, Rgba::rgb(160, 130, 220), now);
+                    fx.ring(g(p, 0.0), 1.4, Rgba::rgb(160, 130, 220), now);
+                    if e.b == self.you {
+                        let name = luciphon::laws::BEASTS
+                            .get(e.n as usize)
+                            .map_or("a monster", |k| k.name);
+                        self.toast = Some((format!("{name} felled"), now));
+                    }
+                }
                 25 if mine => {
                     let name = luciphon::gear::get(e.n).map_or("gear", |g| g.name);
                     let how = if e.b != 0 { "crafted" } else { "found" };
@@ -468,7 +480,10 @@ impl State {
         let alpha = ((t - a.0) / span).clamp(0.0, 1.0) as f32;
         let mut out = Vec::new();
         for e in self.mirror.ents.values() {
-            if !matches!(e.kind, kind::LUMEN | kind::MOTE | kind::PICKUP) {
+            if !matches!(
+                e.kind,
+                kind::LUMEN | kind::MOTE | kind::PICKUP | kind::BEAST
+            ) {
                 continue;
             }
             let you = e.id == self.you && self.pred.ready;

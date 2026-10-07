@@ -494,6 +494,105 @@ pub const STARTING_GEAR: [u8; 3] = [1, 7, 0];
 pub const BAG: usize = 12;
 pub const CRAFT_NEAR: i32 = 6;
 
+/// A kind of monster: where it lives, how it fights, what it leaves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Beast {
+    pub name: &'static str,
+    /// It lives in the Dim (false: out on the Rim), and how many there are.
+    pub dim: bool,
+    pub count: u8,
+    /// Health and its body, thousandths and tiles.
+    pub hp: i32,
+    pub size: Fx,
+    pub speed: Fx,
+    /// Its bite: damage, knockback, reach, the wind-up you can see coming,
+    /// and the wait after.
+    pub bite: i32,
+    pub kb: Fx,
+    pub reach: Fx,
+    pub windup: u32,
+    pub cooldown: u32,
+    /// It notices you this close (tiles), and gives up this far from home.
+    pub aggro: i32,
+    pub leash: i32,
+    /// Valor for felling it; glim it leaves (from, to); wood and stone (up
+    /// to); and chances in a thousand of a fine, a rare and a radiant piece.
+    pub xp: u32,
+    pub glim: (u32, u32),
+    pub wood: u32,
+    pub stone: u32,
+    pub drops: [u32; 3],
+}
+
+/// Every kind of monster; its kind is its place here.
+pub const BEASTS: [Beast; 3] = [
+    Beast {
+        name: "hushling",
+        dim: true,
+        count: 12,
+        hp: 22_000,
+        size: tiles(300),
+        speed: tps(4_200),
+        bite: 6_000,
+        kb: tps(4_000),
+        reach: tiles(900),
+        windup: 9,
+        cooldown: 24,
+        aggro: 9,
+        leash: 18,
+        xp: 20,
+        glim: (2, 6),
+        wood: 3,
+        stone: 3,
+        drops: [40, 8, 0],
+    },
+    Beast {
+        name: "gloomhound",
+        dim: true,
+        count: 6,
+        hp: 40_000,
+        size: tiles(400),
+        speed: tps(6_000),
+        bite: 9_000,
+        kb: tps(5_500),
+        reach: tiles(1_100),
+        windup: 8,
+        cooldown: 30,
+        aggro: 12,
+        leash: 24,
+        xp: 40,
+        glim: (4, 10),
+        wood: 0,
+        stone: 6,
+        drops: [90, 25, 2],
+    },
+    Beast {
+        name: "rim wraith",
+        dim: false,
+        count: 4,
+        hp: 120_000,
+        size: tiles(600),
+        speed: tps(3_200),
+        bite: 18_000,
+        kb: tps(9_000),
+        reach: tiles(1_700),
+        windup: 16,
+        cooldown: 40,
+        aggro: 11,
+        leash: 20,
+        xp: 150,
+        glim: (15, 30),
+        wood: 10,
+        stone: 10,
+        drops: [300, 120, 30],
+    },
+];
+
+/// A fallen monster comes back after this long, somewhere in its ring, at
+/// least `BEAST_CLEAR` tiles from anyone.
+pub const BEAST_RESPAWN: u32 = 60 * HZ;
+pub const BEAST_CLEAR: i32 = 12;
+
 #[cfg(test)]
 mod tests {
     use super::*;

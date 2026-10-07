@@ -146,6 +146,7 @@ pub mod kind {
     pub const LUMEN: u8 = 1;
     pub const MOTE: u8 = 2;
     pub const PICKUP: u8 = 3;
+    pub const BEAST: u8 = 4;
 }
 
 /// An entity as a page knows it: quantized, and exactly what the page

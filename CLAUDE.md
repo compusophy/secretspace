@@ -64,8 +64,8 @@ crates/wyrm       the game: laws world bots grid proto view mirror room
 crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
 crates/luciphon   game #2's core: laws island tiles motion combat hits thumb
-                  bots world gather gear land build life persist proto
-                  view mirror predict room (its spec: docs/luciphon.md)
+                  bots beasts world gather gear land build life persist
+                  proto view mirror predict room (spec: docs/luciphon.md)
 crates/luciphon-look  the 2D look (the hub's preview)
 crates/luciphon-web   its page: controls state scene/ (3D) hud bag fx play first
 crates/server     main (routes) host (a Room's thread; panics rebuild it)

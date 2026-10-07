@@ -509,9 +509,27 @@ fn frame(p: &mut Page, now: f64) {
         let ms = kit::now() - now;
         *avg = *avg * 0.95 + ms * 0.05;
         let me = p.st.drawn_self(now);
+        // The nearest monster in sight: how far, which way.
+        let near = p
+            .st
+            .mirror
+            .ents
+            .values()
+            .filter(|e| e.kind == luciphon::proto::kind::BEAST)
+            .map(|e| {
+                let (dx, dy) = (e.x as f32 / 256.0 - me[0], e.y as f32 / 256.0 - me[1]);
+                ((dx * dx + dy * dy).sqrt(), dy.atan2(dx))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
         let line = format!(
-            "{:.2} ms {} verts @{:.1},{:.1} yaw {:.2}",
-            *avg, p.scene.vertices, me[0], me[1], p.ctl.yaw
+            "{:.2} ms {} verts @{:.1},{:.1} yaw {:.2} beast {:.1},{:.2}",
+            *avg,
+            p.scene.vertices,
+            me[0],
+            me[1],
+            p.ctl.yaw,
+            near.map_or(-1.0, |n| n.0),
+            near.map_or(0.0, |n| n.1)
         );
         let c = &mut p.gl.hud;
         c.text_shadowed(4, c.h - 12, &line, 1, palette::INK);
@@ -700,6 +718,7 @@ fn overlay(
         let l = &p.st.laws;
         let me = p.st.pred.me;
         hud::names(c, vp, cam.eye, things, u);
+        hud::beasts(c, vp, cam.eye, things, u);
         hud::marker(c, vp, [0.5, 4.6, 0.5], palette::GOLD, u);
         if let Some(info) = p.st.claims.get(&me.body.claim) {
             if let Some((hx, hy)) = info.hearth {

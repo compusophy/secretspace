@@ -49,3 +49,32 @@ fn ten_minutes_of_residents_use_every_technique() {
     .count();
     assert!(causes >= 3, "only {causes} ways to fall");
 }
+
+#[test]
+fn residents_and_monsters_meet_in_the_dark() {
+    let mut w = World::new(LAWS, 12);
+    for name in &NAMES[..RESIDENTS] {
+        let brain = Brain::new(&mut w.rng);
+        w.spawn(name, 0, Some(brain));
+    }
+    w.populate();
+    for _ in 0..HZ * 600 {
+        w.step();
+    }
+    let n = |k: &str| w.tally.get(k).copied().unwrap_or(0);
+    let felled = n("hushling felled") + n("gloomhound felled") + n("rim wraith felled");
+    eprintln!(
+        "bitten {}, felled {felled}, gear {}",
+        n("bitten"),
+        n("gear dropped")
+    );
+    assert!(n("bitten") > 0, "monsters bite");
+    assert!(felled > 0, "and fall");
+    for b in &w.beasts {
+        let r = w.ring_at(b.x, b.y);
+        assert!(matches!(
+            r,
+            luciphon::island::Ring::Dim | luciphon::island::Ring::Rim
+        ));
+    }
+}
