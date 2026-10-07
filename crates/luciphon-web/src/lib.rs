@@ -510,17 +510,16 @@ fn frame(p: &mut Page, now: f64) {
         *avg = *avg * 0.95 + ms * 0.05;
         let me = p.st.drawn_self(now);
         // The nearest monster in sight: how far, which way.
-        let near = p
-            .st
-            .mirror
-            .ents
-            .values()
-            .filter(|e| e.kind == luciphon::proto::kind::BEAST)
-            .map(|e| {
-                let (dx, dy) = (e.x as f32 / 256.0 - me[0], e.y as f32 / 256.0 - me[1]);
-                ((dx * dx + dy * dy).sqrt(), dy.atan2(dx))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let near =
+            p.st.mirror
+                .ents
+                .values()
+                .filter(|e| e.kind == luciphon::proto::kind::BEAST)
+                .map(|e| {
+                    let (dx, dy) = (e.x as f32 / 256.0 - me[0], e.y as f32 / 256.0 - me[1]);
+                    ((dx * dx + dy * dy).sqrt(), dy.atan2(dx))
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0));
         let line = format!(
             "{:.2} ms {} verts @{:.1},{:.1} yaw {:.2} beast {:.1},{:.2}",
             *avg,
