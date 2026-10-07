@@ -88,8 +88,9 @@ pub fn keys(c: &mut Canvas, building: bool, u: i32) {
         &[
             "wasd move   shift sprint   space jump   q dash",
             "click wand   hold great beam   right throw",
-            "e heart   b build   k kindle   r rekindle",
-            "t recall   / hide this",
+            "tab gear   e heart   b build   k kindle",
+            "r rekindle   t recall",
+            "/ hide this",
         ]
     };
     let mut y = c.h - (lines.len() as i32 * 9 + 4) * u;

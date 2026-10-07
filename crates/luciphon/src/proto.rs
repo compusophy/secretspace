@@ -10,7 +10,7 @@ use crate::combat::{Act, Action, Me};
 use crate::motion::{Body, Busy, Intent, Move, Verb};
 use crate::tiles::{rle, unrle, Tile};
 
-pub const PROTO: u16 = 3;
+pub const PROTO: u16 = 4;
 
 // Up.
 pub const JOIN: u8 = 1;
@@ -221,6 +221,9 @@ pub struct Own {
     pub channel: u8,
     pub home: bool,
     pub levels: [u8; 7],
+    /// Gear worn (wand, robe, charm) and carried (0: an empty place).
+    pub gear: [u8; 3],
+    pub bag: [u8; crate::laws::BAG],
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -372,13 +375,13 @@ fn put_action(w: &mut Writer, a: &Action) {
         .u32(a.c)
         .u16(a.aim)
         .u8(a.landed as u8);
-    w.u8(a.build as u8).i32(a.carry.0).u32(a.late);
+    w.u8(a.build as u8).i32(a.carry.0).u32(a.late).u8(a.haste);
 }
 
 fn get_action(r: &mut Reader) -> Option<Action> {
     let act = Act::from_code(r.u8()?)?;
     let (t, c, aim, landed) = (r.u32()?, r.u32()?, r.u16()?, r.u8()? != 0);
-    let (build, carry, late) = (r.u8()? != 0, Fx(r.i32()?), r.u32()?);
+    let (build, carry, late, haste) = (r.u8()? != 0, Fx(r.i32()?), r.u32()?, r.u8()?);
     Some(Action {
         act,
         t,
@@ -387,6 +390,7 @@ fn get_action(r: &mut Reader) -> Option<Action> {
         landed,
         carry,
         late,
+        haste,
         build,
     })
 }
@@ -407,6 +411,9 @@ fn put_own(w: &mut Writer, o: &Own) {
         .u8(o.home as u8);
     for l in o.levels {
         w.u8(l);
+    }
+    for g in o.gear.iter().chain(o.bag.iter()) {
+        w.u8(*g);
     }
 }
 
@@ -436,6 +443,14 @@ fn get_own(r: &mut Reader) -> Option<Own> {
                 *v = r.u8()?;
             }
             l
+        },
+        gear: [r.u8()?, r.u8()?, r.u8()?],
+        bag: {
+            let mut b = [0u8; crate::laws::BAG];
+            for v in &mut b {
+                *v = r.u8()?;
+            }
+            b
         },
     })
 }

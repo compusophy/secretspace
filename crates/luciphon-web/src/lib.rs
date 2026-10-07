@@ -4,6 +4,7 @@
 //! (`scene`, WebGL2 from Rust) with a pixel HUD over it (`hud`). `?perf=1`
 //! shows frame times.
 
+pub mod bag;
 pub mod controls;
 pub mod first;
 pub mod fx;
@@ -80,6 +81,10 @@ struct Page {
     asked: bool,
     /// The wand fired since the last frame (drawn at once).
     shots: Vec<Swing>,
+    /// Your gear's panel is open; the piece picked in it; where it was drawn.
+    bag_open: bool,
+    bag_pick: Option<usize>,
+    bag_spots: Vec<(Rect, bag::Pick)>,
 }
 
 thread_local! {
@@ -286,6 +291,8 @@ fn key(p: &mut Page, code: &str) {
         return;
     }
     match code {
+        "Tab" | "KeyI" => toggle_bag(p),
+        "Escape" if p.bag_open => toggle_bag(p),
         "KeyE" => p.wheel = !p.wheel && !p.picking,
         "KeyB" if building(p) || p.picking => {
             p.picking = false;
@@ -299,6 +306,55 @@ fn key(p: &mut Page, code: &str) {
         "Slash" => p.keys_hidden = !p.keys_hidden,
         _ => {}
     }
+}
+
+/// Open or close your gear; on a desktop the mouse is let go to use it,
+/// and taken back after.
+fn toggle_bag(p: &mut Page) {
+    p.bag_open = !p.bag_open;
+    p.bag_pick = None;
+    if !p.touch {
+        if p.bag_open {
+            kit::input::unlock();
+        } else {
+            kit::input::lock(p.gl.canvas());
+        }
+    }
+}
+
+/// A press on your gear's panel.
+fn bag_press(p: &mut Page, x: f32, y: f32) {
+    let Some(&(_, pick)) = p.bag_spots.iter().find(|s| s.0.contains(x, y)) else {
+        return;
+    };
+    match pick {
+        bag::Pick::Item(k) => p.bag_pick = Some(k),
+        bag::Pick::Wear | bag::Pick::Drop => {
+            if let Some(k) = p.bag_pick.take() {
+                let a = if pick == bag::Pick::Wear {
+                    act::EQUIP
+                } else {
+                    act::DROP
+                };
+                heart(p, a, k as u8);
+            }
+        }
+        bag::Pick::Craft(id) => heart(p, act::CRAFT, id),
+        bag::Pick::Close => toggle_bag(p),
+    }
+}
+
+/// Whether you stand near a light to craft by: the Luciphon, or your hearth.
+fn near_a_light(p: &Page) -> bool {
+    let b = &p.st.pred.me.body;
+    let (x, y) = (b.x.to_f32(), b.y.to_f32());
+    let near = |hx: f32, hy: f32| ((x - hx).powi(2) + (y - hy).powi(2)).sqrt() <= 6.0;
+    near(0.5, 0.5)
+        || p.st
+            .claims
+            .get(&b.claim)
+            .and_then(|c| c.hearth)
+            .is_some_and(|(hx, hy)| near(hx as f32 + 0.5, hy as f32 + 0.5))
 }
 
 fn hands(p: &mut Page, now: f64) {
@@ -343,6 +399,14 @@ fn hands(p: &mut Page, now: f64) {
             }
             continue;
         }
+        // Your gear's panel takes every press while it is open.
+        if p.bag_open {
+            if let Some((x, y)) = down {
+                let (x, y) = p.gl.to_px(x, y);
+                bag_press(p, x, y);
+            }
+            continue;
+        }
         // Dreaming: a touch wakes you where you lay.
         if dreaming(p, now) {
             if down.is_some() {
@@ -375,6 +439,9 @@ fn hands(p: &mut Page, now: f64) {
     }
     if std::mem::take(&mut p.ctl.heart) {
         p.wheel = !p.wheel;
+    }
+    if std::mem::take(&mut p.ctl.bag) {
+        toggle_bag(p);
     }
     p.ctl.tick(now, &FEEL);
     // Inputs, 30 a second.
@@ -648,9 +715,10 @@ fn overlay(
         if me.act.act == Act::Charge {
             hud::charge(c, me.act.c, l, u);
         }
+        let most = l.flame + luciphon::gear::worn(own.gear).flame;
         hud::vitals(
             c,
-            own.flame as f32 / l.flame as f32,
+            own.flame as f32 / most.max(1) as f32,
             me.body.breath as f32 / l.breath as f32,
             u,
         );
@@ -685,7 +753,7 @@ fn overlay(
             hud::touch(c, &p.ctl, p.gl.css, p.gl.scale, &FEEL, u);
         }
         if alive && !p.touch {
-            if !locked {
+            if !locked && !p.bag_open {
                 let a = (200.0 + 50.0 * (now / 400.0).sin()) as u8;
                 let y = c.h / 2 - 30 * u;
                 c.text_centred(c.w / 2, y, "click to play", 2 * u, Rgba(255, 210, 122, a));
@@ -704,6 +772,10 @@ fn overlay(
         }
         if let Some((col, _)) = p.fx.flash {
             hud::flash(c, col);
+        }
+        if alive && p.bag_open {
+            let near = near_a_light(p);
+            p.bag_spots = bag::draw(&mut p.gl.hud, &own, p.bag_pick, near, u);
         }
     }
     if p.st.descent > 0 {
@@ -820,6 +892,9 @@ pub fn start() -> Result<(), JsValue> {
             taught,
             asked: false,
             shots: Vec::new(),
+            bag_open: false,
+            bag_pick: None,
+            bag_spots: Vec::new(),
             hands,
             link,
             session,

@@ -107,6 +107,11 @@ pub struct Lumen {
     pub recall: u32,
     /// Return at the hearth (else at the Luciphon).
     pub home: bool,
+    /// Gear worn (wand, robe, charm) and carried; breath regeneration
+    /// before what is worn (Rekindled raises it).
+    pub gear: [u8; 3],
+    pub bag: Vec<u8>,
+    pub regen_base: i32,
 }
 
 impl Lumen {
@@ -168,6 +173,8 @@ pub struct Pickup {
     pub wood: u32,
     pub stone: u32,
     pub wheat: u32,
+    /// Or a piece of gear (0: none).
+    pub item: u8,
 }
 
 /// Something worth showing that happened this tick.
@@ -216,6 +223,12 @@ pub enum Event {
     },
     Dream {
         id: u16,
+    },
+    /// A piece of gear made (or found) and in the bag.
+    Got {
+        id: u16,
+        item: u8,
+        made: bool,
     },
     /// A wand fired along `aim`, drawn `len` long; `big`: it pierces.
     Beam {
@@ -381,6 +394,8 @@ impl World {
             glim: if resident { 30 } else { l.join_glim },
             ghost: l.ghost,
             home: true,
+            gear: crate::laws::STARTING_GEAR,
+            regen_base: 1000,
             played: if resident { l.sparks_ticks } else { 0 },
             ..Lumen::default()
         };
@@ -410,6 +425,7 @@ impl World {
         self.events.clear();
         self.dirty.clear();
         crate::bots::think(self);
+        self.wear();
 
         // Every Lumen: one Intent, fitted to a thumb, then its control.
         let mut swings = Vec::new();
@@ -616,6 +632,9 @@ impl World {
         if ring == Ring::Glow && l.spared.iter().any(|&(o, until)| o == by && until > tick) {
             return;
         }
+        // What it wears takes some of the blow (never the Dark's).
+        let armor = crate::gear::worn(l.gear).armor;
+        let dmg = dmg - dmg * armor / 1000;
         l.flame -= dmg;
         l.flame_rest = self.laws.flame_rest;
         if dmg >= self.laws.interrupt && l.me.act.act == crate::combat::Act::Charge {
@@ -688,7 +707,7 @@ impl World {
                     };
                     lum.me.body.claim = lum.claim;
                     lum.me.body.load = lum.materials();
-                    lum.flame = l.flame;
+                    lum.flame = lum.max_flame(&l);
                     lum.ghost = l.ghost;
                     lum.flow = 0;
                     lum.thumb = Thumb::default();
@@ -699,7 +718,7 @@ impl World {
                     let stacks = lum.deaths.len().min(3) as i32;
                     if stacks > 0 {
                         lum.rekindled_until = tick + l.rekindled;
-                        lum.me.body.regen = 1000 + l.rekindled_breath * stacks;
+                        lum.regen_base = 1000 + l.rekindled_breath * stacks;
                     }
                     let id = lum.id;
                     self.events.push(Event::Return { id });
@@ -711,7 +730,7 @@ impl World {
             lum.thorn_rest = lum.thorn_rest.saturating_sub(1);
             if lum.rekindled_until != 0 && tick >= lum.rekindled_until {
                 lum.rekindled_until = 0;
-                lum.me.body.regen = 1000;
+                lum.regen_base = 1000;
             }
             if lum.down > 0 {
                 lum.down -= 1;
@@ -722,7 +741,7 @@ impl World {
             } else if lum.flame_rest > 0 {
                 lum.flame_rest -= 1;
             } else {
-                lum.flame = (lum.flame + l.flame_regen).min(l.flame);
+                lum.flame = (lum.flame + l.flame_regen).min(lum.max_flame(&l));
             }
             if lum.flow > 0 && tick.wrapping_sub(lum.flow_at) > l.flow_window {
                 lum.flow -= 1;

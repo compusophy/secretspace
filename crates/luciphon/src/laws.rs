@@ -368,6 +368,132 @@ laws! {
     xp_way: u32 = 15,
 }
 
+/// A piece of gear: where it goes, how rare, what it does, and what it
+/// takes to craft (if it can be crafted at all; the rest only drop).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Gear {
+    pub name: &'static str,
+    /// 0 wand, 1 robe, 2 charm.
+    pub slot: u8,
+    /// 0 common, 1 fine, 2 rare, 3 radiant.
+    pub rarity: u8,
+    /// Damage a bolt adds (a great beam twice it), thousandths.
+    pub bolt: i32,
+    /// Beam reach added, milli-tiles.
+    pub reach: i32,
+    /// Ticks off the wand's recovery.
+    pub haste: u8,
+    /// Damage taken away, thousandths.
+    pub armor: i32,
+    /// Flame added to the most you can hold, thousandths.
+    pub flame: i32,
+    /// Breath regeneration added, thousandths.
+    pub breath: i32,
+    /// Wood, stone, glim, and the skill (0 hewing .. 6 voice) and level.
+    pub craft: Option<(u32, u32, u32, u8, u8)>,
+}
+
+const fn g(name: &'static str, slot: u8, rarity: u8) -> Gear {
+    Gear {
+        name,
+        slot,
+        rarity,
+        bolt: 0,
+        reach: 0,
+        haste: 0,
+        armor: 0,
+        flame: 0,
+        breath: 0,
+        craft: None,
+    }
+}
+
+/// Every piece of gear; its id is its place here plus one (0 is none).
+pub const GEAR: [Gear; 15] = [
+    // Wands.
+    g("birch wand", 0, 0),
+    Gear {
+        bolt: 2_000,
+        craft: Some((40, 0, 5, 0, 2)),
+        ..g("oak wand", 0, 0)
+    },
+    Gear {
+        bolt: 3_000,
+        reach: 3_000,
+        craft: Some((30, 40, 15, 1, 4)),
+        ..g("stonebound wand", 0, 1)
+    },
+    Gear {
+        bolt: 2_000,
+        haste: 2,
+        craft: Some((0, 20, 60, 2, 5)),
+        ..g("glass wand", 0, 1)
+    },
+    Gear {
+        bolt: 5_000,
+        reach: 2_000,
+        haste: 2,
+        ..g("shadebane", 0, 2)
+    },
+    Gear {
+        bolt: 7_000,
+        reach: 4_000,
+        haste: 3,
+        ..g("lantern staff", 0, 3)
+    },
+    // Robes.
+    g("plain robe", 1, 0),
+    Gear {
+        armor: 100,
+        craft: Some((20, 0, 10, 3, 2)),
+        ..g("woven robe", 1, 0)
+    },
+    Gear {
+        armor: 200,
+        craft: Some((0, 60, 10, 1, 6)),
+        ..g("stonescale robe", 1, 1)
+    },
+    Gear {
+        armor: 150,
+        flame: 10_000,
+        ..g("dusk robe", 1, 1)
+    },
+    Gear {
+        armor: 250,
+        flame: 20_000,
+        ..g("hushcloak", 1, 2)
+    },
+    // Charms.
+    Gear {
+        flame: 10_000,
+        craft: Some((0, 0, 25, 2, 3)),
+        ..g("ember charm", 2, 0)
+    },
+    Gear {
+        breath: 300,
+        craft: Some((10, 0, 30, 5, 3)),
+        ..g("feather charm", 2, 0)
+    },
+    Gear {
+        flame: 15_000,
+        breath: 200,
+        ..g("starshard", 2, 2)
+    },
+    Gear {
+        flame: 25_000,
+        breath: 400,
+        bolt: 2_000,
+        ..g("heart of the rim", 2, 3)
+    },
+];
+
+/// What a new soul starts with: a birch wand and a plain robe.
+pub const STARTING_GEAR: [u8; 3] = [1, 7, 0];
+/// Pieces a bag holds; gear is crafted within this many tiles of the
+/// Luciphon or your hearth.
+pub const BAG: usize = 12;
+pub const CRAFT_NEAR: i32 = 6;
+
 #[cfg(test)]
 mod tests {
     use super::*;

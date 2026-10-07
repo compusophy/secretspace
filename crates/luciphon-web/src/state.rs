@@ -285,7 +285,11 @@ impl State {
         let b = &self.pred.me.body;
         let aim = self.pred.me.act.aim;
         let l = &self.laws;
-        let (end, _) = luciphon::combat::beam(&self.mirror.tiles, b.x, b.y, aim, l.beam_reach);
+        let gear = self.mirror.own.map_or([0; 3], |o| o.gear);
+        let reach = l
+            .beam_reach
+            .add(engine::fixed::Fx::milli(luciphon::gear::worn(gear).reach));
+        let (end, _) = luciphon::combat::beam(&self.mirror.tiles, b.x, b.y, aim, reach);
         let mut end = end.to_f32();
         if !big {
             let (x, y) = (b.x.to_f32(), b.y.to_f32());
@@ -398,6 +402,12 @@ impl State {
                     fx.burst([tx as f32 + 0.5, 0.5, ty as f32 + 0.5], 10, 3.0, GOLD, now);
                 }
                 23 if mine => self.toast = Some(("not here".into(), now)),
+                25 if mine => {
+                    let name = luciphon::gear::get(e.n).map_or("gear", |g| g.name);
+                    let how = if e.b != 0 { "crafted" } else { "found" };
+                    self.toast = Some((format!("{how} {name}"), now));
+                    fx.burst(g(p, 1.0), 20, 4.0, GOLD, now);
+                }
                 _ => {}
             }
         }

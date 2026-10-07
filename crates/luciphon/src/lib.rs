@@ -8,6 +8,7 @@ pub mod bots;
 pub mod build;
 pub mod combat;
 pub mod gather;
+pub mod gear;
 pub mod hits;
 pub mod island;
 pub mod land;

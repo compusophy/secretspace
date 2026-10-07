@@ -25,9 +25,16 @@ pub enum Button {
     Dash,
     Throw,
     Heart,
+    Bag,
 }
 
-pub const BUTTONS: [Button; 4] = [Button::Jump, Button::Dash, Button::Throw, Button::Heart];
+pub const BUTTONS: [Button; 5] = [
+    Button::Jump,
+    Button::Dash,
+    Button::Throw,
+    Button::Heart,
+    Button::Bag,
+];
 
 /// Where a phone button is, in CSS pixels: centre and radius.
 pub fn button_at(b: Button, css: (f64, f64), f: &Feel) -> (f64, f64, f64) {
@@ -39,6 +46,7 @@ pub fn button_at(b: Button, css: (f64, f64), f: &Feel) -> (f64, f64, f64) {
         Button::Dash => (x - 2.4 * r, y + 0.25 * r, r * 0.9),
         Button::Throw => (x - 0.2 * r, y - 2.5 * r, r * 0.9),
         Button::Heart => (w - f.edge_px - r * 0.7, f.edge_px + r * 2.2, r * 0.7),
+        Button::Bag => (w - f.edge_px - r * 0.7, f.edge_px + r * 4.0, r * 0.7),
     }
 }
 
@@ -93,8 +101,10 @@ pub struct Controls {
     stick: Option<Stick>,
     look: Option<Look>,
     held: Vec<(i32, Button)>,
-    /// The Heart button was pressed (the page opens the wheel).
+    /// The Heart button was pressed (the page opens the wheel); the bag
+    /// button (the page opens your gear).
     pub heart: bool,
+    pub bag: bool,
     /// A click while the page did not have the mouse (the page takes it).
     pub want_lock: bool,
     /// Done at least once, for the hints: moved 1, struck 2, dashed 4,
@@ -180,6 +190,7 @@ impl Controls {
                             Button::Dash => self.verb(Verb::Flick),
                             Button::Throw => self.start(Charge::Throw, 0),
                             Button::Heart => self.heart = true,
+                            Button::Bag => self.bag = true,
                         }
                         return;
                     }

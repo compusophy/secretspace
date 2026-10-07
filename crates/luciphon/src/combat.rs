@@ -58,6 +58,8 @@ pub struct Action {
     pub late: u32,
     /// In build mode, a tap places and a hold removes: no strikes.
     pub build: bool,
+    /// Ticks the wand worn takes off its recovery.
+    pub haste: u8,
 }
 
 /// What a Lumen's own tick would do to others, for the world to settle.
@@ -97,6 +99,7 @@ pub fn control(
         // Struck, or falling: whatever was under way is lost.
         *a = Action {
             build: a.build,
+            haste: a.haste,
             ..Action::default()
         };
     }
@@ -111,7 +114,7 @@ pub fn control(
         Verb::Tap if b.mv == Move::Dash || (a.late > 0 && a.act == Act::Idle) => {
             swing = Some(Swing::Lance);
             a.act = Act::Recover;
-            a.t = l.recovery;
+            a.t = recovery(a, l);
             a.aim = it.aim;
         }
         Verb::Tap if a.act == Act::Idle => {
@@ -141,7 +144,7 @@ pub fn control(
             } else if range > 0 && glim >= l.throw_glim {
                 swing = Some(Swing::Throw { c, range });
                 a.act = Act::Recover;
-                a.t = l.recovery;
+                a.t = recovery(a, l);
             } else {
                 swing = Some(Swing::Heavy { c });
                 a.act = Act::Recover;
@@ -171,7 +174,7 @@ pub fn control(
             a.t = a.t.saturating_sub(1);
             if a.t == 0 {
                 a.act = Act::Recover;
-                a.t = l.recovery;
+                a.t = recovery(a, l);
             }
         }
         Act::Recover | Act::Lunge => {
@@ -194,6 +197,11 @@ pub fn control(
         a.t = 0;
     }
     (moved, swing)
+}
+
+/// The wand's recovery after a bolt, less its haste.
+fn recovery(a: &Action, l: &Laws) -> u32 {
+    l.recovery.saturating_sub(a.haste as u32).max(2)
 }
 
 /// Where a beam from (x, y) along `h` stops: at the first solid tile

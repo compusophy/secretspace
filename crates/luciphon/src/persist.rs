@@ -1,6 +1,7 @@
 //! The world kept (§12), schema 1: sections META, TILES, NODES, PIECES
 //! (crops), HEARTHS (claims and their vaults), LUMENS (every soul's Lumen,
-//! asleep or awake at the save), DROPS, OUTLINES. Unknown sections are
+//! asleep or awake at the save), DROPS, OUTLINES, and since gear GEAR and
+//! LOOT. Unknown sections are
 //! skipped and missing ones are empty; a known section that will not read
 //! fails the whole load. Schema 1 is frozen: `world-s1.snap` must always
 //! load (`every_old_world_still_loads`); later schemas migrate from it.
@@ -25,6 +26,10 @@ const HEARTHS: u16 = 14;
 const LUMENS: u16 = 15;
 const DROPS: u16 = 16;
 const OUTLINES: u16 = 17;
+/// Gear (added within schema 1: a save without it has starting gear):
+/// every soul's worn and carried pieces, and pieces lying on the ground.
+const GEAR: u16 = 18;
+const LOOT: u16 = 19;
 /// Far more than a world holds; a count past it is not ours.
 const MOST: usize = 1 << 16;
 
@@ -95,6 +100,10 @@ fn get_dreamer(r: &mut Reader) -> Option<(u64, bool, Dreamer)> {
             sparks_off,
             home,
             deaths: Vec::new(),
+            // Gear comes in its own section (GEAR); a soul saved before
+            // gear had the starting pieces.
+            gear: crate::laws::STARTING_GEAR,
+            bag: Vec::new(),
         },
     ))
 }
@@ -190,6 +199,37 @@ impl World {
             w.u16(i).u16(c).u64(until);
         }
         s.add(OUTLINES, &w.0);
+
+        let mut w = Writer::default();
+        let mut souls: Vec<(u64, [u8; 3], &[u8])> = self
+            .dreamers
+            .iter()
+            .map(|(&soul, d)| (soul, d.gear, d.bag.as_slice()))
+            .collect();
+        souls.extend(
+            self.lumens
+                .iter()
+                .filter(|l| l.soul != 0 && l.bot.is_none())
+                .map(|l| (l.soul, l.gear, l.bag.as_slice())),
+        );
+        souls.sort_by_key(|s| s.0);
+        w.u32(souls.len() as u32);
+        for (soul, gear, bag) in souls {
+            w.u64(soul).u8(gear[0]).u8(gear[1]).u8(gear[2]);
+            w.u8(bag.len().min(crate::laws::BAG) as u8);
+            for &g in bag.iter().take(crate::laws::BAG) {
+                w.u8(g);
+            }
+        }
+        s.add(GEAR, &w.0);
+
+        let mut w = Writer::default();
+        let loot: Vec<_> = self.pickups.iter().filter(|p| p.item != 0).collect();
+        w.u32(loot.len() as u32);
+        for p in loot {
+            w.i32(p.x.0).i32(p.y.0).u8(p.item);
+        }
+        s.add(LOOT, &w.0);
         s.finish()
     }
 
@@ -287,6 +327,39 @@ impl World {
                 dreamers.insert(soul, d);
             }
         }
+        if let Some(b) = get(GEAR) {
+            let mut r = Reader::new(b);
+            for _ in 0..count(&mut r, 12)? {
+                let g = (|| {
+                    let soul = r.u64()?;
+                    let gear = [r.u8()?, r.u8()?, r.u8()?];
+                    let n = (r.u8()? as usize).min(crate::laws::BAG);
+                    let mut bag = Vec::with_capacity(n);
+                    for _ in 0..n {
+                        bag.push(r.u8()?);
+                    }
+                    Some((soul, gear, bag))
+                })()
+                .ok_or("bad gear")?;
+                let real = |id: u8| id == 0 || crate::gear::get(id).is_some();
+                if let Some(d) = dreamers.get_mut(&g.0) {
+                    d.gear = g.1.map(|id| if real(id) { id } else { 0 });
+                    d.bag = g.2.into_iter().filter(|&id| id != 0 && real(id)).collect();
+                }
+            }
+        }
+        let mut loot = Vec::new();
+        if let Some(b) = get(LOOT) {
+            let mut r = Reader::new(b);
+            for _ in 0..count(&mut r, 9)? {
+                let (Some(x), Some(y), Some(item)) = (r.i32(), r.i32(), r.u8()) else {
+                    return Err("bad loot");
+                };
+                if crate::gear::get(item).is_some() {
+                    loot.push((Fx(x), Fx(y), item));
+                }
+            }
+        }
         let mut pickups = Vec::new();
         if let Some(b) = get(DROPS) {
             let mut r = Reader::new(b);
@@ -330,6 +403,17 @@ impl World {
                 wood: b.wood,
                 stone: b.stone,
                 wheat: b.wheat,
+                item: 0,
+            });
+        }
+        for (x, y, item) in loot {
+            let id = self.new_id();
+            self.pickups.push(Pickup {
+                id,
+                x,
+                y,
+                item,
+                ..Pickup::default()
             });
         }
         Ok(Some(awake))

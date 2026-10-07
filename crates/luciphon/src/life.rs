@@ -29,6 +29,9 @@ pub struct Dreamer {
     pub sparks_off: bool,
     pub home: bool,
     pub deaths: Vec<u32>,
+    /// Gear worn and carried.
+    pub gear: [u8; 3],
+    pub bag: Vec<u8>,
 }
 
 impl Dreamer {
@@ -49,6 +52,8 @@ impl Dreamer {
             sparks_off: l.sparks_off,
             home: l.home,
             deaths: l.deaths.clone(),
+            gear: l.gear,
+            bag: l.bag.clone(),
         }
     }
 }
@@ -116,7 +121,9 @@ impl World {
         lum.me.body.claim = claim;
         if let Some(d) = d {
             lum.hue = d.hue;
-            lum.flame = d.flame.clamp(1, l.flame);
+            lum.gear = d.gear;
+            lum.bag = d.bag;
+            lum.flame = d.flame.clamp(1, lum.max_flame(&l));
             (lum.glim, lum.wood, lum.stone, lum.wheat) = (d.glim, d.wood, d.stone, d.wheat);
             lum.xp = d.xp;
             lum.played = d.played;
@@ -257,6 +264,7 @@ impl World {
                 wood: w,
                 stone: s,
                 wheat: h,
+                item: 0,
             });
         }
         total

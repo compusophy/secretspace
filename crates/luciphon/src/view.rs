@@ -75,6 +75,14 @@ pub fn own(l: &Lumen) -> Own {
         channel: l.channel.map_or(0, |c| c.2.min(255) as u8),
         home: l.home,
         levels: l.xp.map(|x| crate::build::level(x) as u8),
+        gear: l.gear,
+        bag: {
+            let mut b = [0u8; crate::laws::BAG];
+            for (v, &g) in b.iter_mut().zip(&l.bag) {
+                *v = g;
+            }
+            b
+        },
     }
 }
 
@@ -175,6 +183,7 @@ fn event(e: &Event) -> Ev {
         Event::Removed { id, idx } => (22, id, idx, 0),
         Event::Refused { id } => (23, id, 0, 0),
         Event::Dream { id } => (24, id, 0, 0),
+        Event::Got { id, item, made } => (25, id, made as u16, item),
     };
     Ev { kind, a, b, n }
 }

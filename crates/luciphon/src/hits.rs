@@ -65,7 +65,11 @@ impl World {
         let me = &self.lumens[i];
         let (x, y) = me.pos();
         let aim = me.me.act.aim;
-        let (end, stop) = beam(&self.tiles, x, y, aim, self.laws.beam_reach);
+        let reach = self
+            .laws
+            .beam_reach
+            .add(Fx::milli(crate::gear::worn(me.gear).reach));
+        let (end, stop) = beam(&self.tiles, x, y, aim, reach);
         let on = self.on_beam(i, end);
         let id = me.id;
         // Drawn to the first body it meets, unless it pierces.
@@ -174,9 +178,10 @@ impl World {
             atan2(ty.sub(ay), tx.sub(ax))
         };
         let (ux, uy) = unit(dir);
+        let bonus = crate::gear::worn(self.lumens[i].gear).bolt;
         let (mut dmg, mut kb) = match blow {
-            Blow::Strike => (l.bolt, l.bolt_kb),
-            Blow::Lance => (l.lance_damage, milli(l.bolt_kb, l.lance_kb)),
+            Blow::Strike => (l.bolt + bonus, l.bolt_kb),
+            Blow::Lance => (l.lance_damage + bonus, milli(l.bolt_kb, l.lance_kb)),
             Blow::Heavy => {
                 let (d, kb, perfect) = heavy(c, &l);
                 if perfect {
@@ -184,7 +189,7 @@ impl World {
                 } else {
                     self.count("heavy");
                 }
-                (d, kb)
+                (d + 2 * bonus, kb)
             }
             Blow::Mote => (0, l.throw_kb),
         };
@@ -357,6 +362,20 @@ impl World {
                 continue;
             };
             let o = &mut self.lumens[i];
+            // A piece of gear goes in the bag, if there is room.
+            if p.item != 0 {
+                if o.bag.len() < crate::laws::BAG {
+                    o.bag.push(p.item);
+                    let (id, item) = (o.id, p.item);
+                    self.events.push(Event::Got {
+                        id,
+                        item,
+                        made: false,
+                    });
+                    self.pickups.remove(k);
+                }
+                continue;
+            }
             let g = p.glim.min(gmax.saturating_sub(o.glim));
             o.glim += g;
             let mut room = cmax.saturating_sub(o.materials());

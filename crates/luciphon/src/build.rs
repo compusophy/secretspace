@@ -43,6 +43,10 @@ pub mod act {
     pub const PIECE: u8 = 3;
     pub const HOME: u8 = 4;
     pub const DONE: u8 = 5;
+    /// Gear: craft (the gear's id), wear and drop (a place in the bag).
+    pub const CRAFT: u8 = 6;
+    pub const EQUIP: u8 = 7;
+    pub const DROP: u8 = 8;
 }
 
 pub fn cost(piece: u8, l: &crate::laws::Laws) -> Bag {
@@ -115,6 +119,15 @@ impl World {
         let l = self.laws.clone();
         match (a, arg) {
             (act::CHIRP, _) => self.events.push(Event::Emote { id, what: 0 }),
+            (act::CRAFT, g) => {
+                self.craft(i, g);
+            }
+            (act::EQUIP, k) => {
+                self.equip(i, k as usize);
+            }
+            (act::DROP, k) => {
+                self.discard(i, k as usize);
+            }
             (act::WHEEL, slot::BUILD) => {
                 self.lumens[i].build = Some(0);
                 self.lumens[i].build_idle = 0;
@@ -129,7 +142,7 @@ impl World {
             }
             (act::WHEEL, slot::REKINDLE) => {
                 let lum = &mut self.lumens[i];
-                if lum.rekindle == 0 && lum.flame < l.flame {
+                if lum.rekindle == 0 && lum.flame < lum.max_flame(&l) {
                     if lum.wheat > 0 {
                         lum.wheat -= 1;
                         lum.rekindle = l.rekindle_ticks;
@@ -169,8 +182,8 @@ impl World {
         let lum = &mut self.lumens[i];
         if lum.rekindle > 0 {
             lum.rekindle -= 1;
-            lum.flame =
-                (lum.flame + l.rekindle_flame / l.rekindle_ticks.max(1) as i32).min(l.flame);
+            lum.flame = (lum.flame + l.rekindle_flame / l.rekindle_ticks.max(1) as i32)
+                .min(lum.max_flame(&l));
         }
         if lum.recall > 0 {
             if stick || lum.me.body.speed() > Fx::milli(50) {

@@ -199,6 +199,7 @@ pub fn touch(c: &mut Canvas, ctl: &Controls, css: (f64, f64), scale: f64, f: &Fe
             Button::Dash => "dash",
             Button::Throw => "throw",
             Button::Heart => "heart",
+            Button::Bag => "bag",
         };
         let w = text_width(label, u);
         c.text(

@@ -16,8 +16,8 @@ use crate::proto::{ClaimInfo, Down, Up, PROTO};
 use crate::view::Viewer;
 use crate::world::World;
 
-/// The oldest page protocol this server still speaks (3: the wand).
-const OLDEST: u16 = 3;
+/// The oldest page protocol this server still speaks (4: gear).
+const OLDEST: u16 = 4;
 /// Boards go out this often, in ticks.
 const BOARD_EVERY: u32 = 2 * HZ;
 /// A Lumen loaded from a save waits this long for its soul.

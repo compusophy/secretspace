@@ -940,7 +940,9 @@ pub trait Room: Send {
 - `web/vercel.json`: the pkg path, and a no-cache rule for `version.txt`.
 - Check that `deploy.yml`'s RELAY injection covers the new page.
 
-### The wire (protocol 3)
+### The wire (protocol 4)
+
+*Protocol 4 (gear) adds gear worn and carried to your own state (3 + 12 bytes), the wand's haste to your action, the Heart's CRAFT (6), EQUIP (7) and DROP (8), and the Got event (kind 25: who, made or found, which piece).*
 
 *Protocol 3 (the wand) adds the Input's sprint bit (bit 5 of the verb byte), the body's winded and sprinting flags, and the Beam event (kind 4: shooter, aim, length in eighths of a tile, and whether it pierced).*
 
@@ -1149,6 +1151,16 @@ Browser checks are Playwright scripts kept in the scratchpad and **never committ
 - [x] **F.4** The page in 3D (`luciphon-web`): `controls.rs` (desktop and twin thumbs), `scene/` (chunk meshes, objects, Lumens, lights, fog, sky, sparks, the hand, the Underlight in negative), `hud.rs`, the title over the island turning.
 - **Done when** on a desktop and a phone you can join, look, run, jump, strike a birch for wood, dash, charge a heavy, throw, see the residents and fall off the edge into the Underlight.
   - *Built 2026-10-07. Played in headless Chromium on a desktop (pointer lock, WASD, jump, strike, a walk of 53 tiles off the Rim into the Underlight and back at the Luciphon) and on a 390x844 phone (twin thumbs through CDP touch: the stick, a look, a tap that struck a birch for wood, the jump button). Charges, heavies and throws are proven natively (`controls.rs`, `combat.rs`); `running_off_the_rim_falls_into_the_dark` and `prediction_matches_the_server` (bit for bit, with jumps) hold. A frame takes 1-3 ms of CPU. How it feels on a real phone is the owner's to try.*
+
+### The MMO turn (owner, after first person)
+
+The owner asked for more than an arena: something like WoW and RuneScape. Decided with the owner: **monsters and loot first**, **gear both crafted and dropped**, and **PvP only in the Dim and the Rim**.
+
+- [x] **M.1** Sprint on shift (breath), the dash on Q; on a phone the stick pushed to its edge sprints.
+- [x] **M.2** The wand: bolts, great beams and lances of light instead of melee (§4).
+- [x] **M.3** Gear (`gear.rs`, the table in `laws::GEAR`): a wand, a robe and a charm worn, twelve pieces carried, each adding damage, reach, haste, armor, Flame or breath. Seven pieces crafted from wood, stone and glim at a skill level, within 6 tiles of the Luciphon or your hearth; the rare and radiant ones only drop. Saved in two new sections (GEAR, LOOT) that older saves simply lack. The page's gear panel (Tab or I; the phone's bag button): worn, carried (wear or drop), materials, recipes, skills.
+- [ ] **M.4** Monsters in the Dim and the Rim, fighting back, dropping glim, materials and gear.
+- [ ] **M.5** PvP only in the Dim and the Rim.
 
 ### Stage 3: alive
 
