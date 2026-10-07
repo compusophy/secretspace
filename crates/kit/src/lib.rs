@@ -206,12 +206,13 @@ impl Screen {
         self.size((w / 960.0).ceil().clamp(1.0, 4.0), w, h);
     }
 
-    /// Match the window with the biggest pixels that still leave at least
-    /// `min_short` buffer pixels on the short side: a game that wants to be
-    /// seen the same on every screen.
+    /// Match the window as `fit` does, but with pixels small enough to leave
+    /// at least `min_short` buffer pixels on the short side whenever the
+    /// window allows: a game that must show so much of its world.
     pub fn fit_view(&mut self, min_short: f64) {
         let (w, h) = Self::window_css();
-        self.size((w.min(h) / min_short).floor().clamp(1.0, 8.0), w, h);
+        let s = (w / 960.0).ceil().min((w.min(h) / min_short).floor());
+        self.size(s.clamp(1.0, 4.0), w, h);
     }
 
     fn size(&mut self, scale: f64, w: f64, h: f64) {

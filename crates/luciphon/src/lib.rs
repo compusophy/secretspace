@@ -3,3 +3,18 @@
 //! `docs/luciphon.md`. The core is std and `engine` only, shared by the
 //! server and the page, and deterministic (Q16.16, `engine::fixed`) so the
 //! page can predict exactly what the server will do.
+
+pub mod bots;
+pub mod combat;
+pub mod hits;
+pub mod island;
+pub mod laws;
+pub mod mirror;
+pub mod motion;
+pub mod predict;
+pub mod proto;
+pub mod room;
+pub mod thumb;
+pub mod tiles;
+pub mod view;
+pub mod world;

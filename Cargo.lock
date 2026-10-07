@@ -129,6 +129,7 @@ name = "secretspace-server"
 version = "0.1.0"
 dependencies = [
  "secretspace-engine",
+ "secretspace-luciphon",
  "secretspace-wyrm",
 ]
 

@@ -14,3 +14,4 @@ path = "src/main.rs"
 [dependencies]
 engine = { package = "secretspace-engine", path = "../engine" }
 wyrm = { package = "secretspace-wyrm", path = "../wyrm" }
+luciphon = { package = "secretspace-luciphon", path = "../luciphon" }

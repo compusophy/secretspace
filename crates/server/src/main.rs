@@ -42,10 +42,14 @@ use souls::Souls;
 use store::{Factory, Store};
 
 /// Every game there is.
-const ROOMS: &[Factory] = &[wyrm_room];
+const ROOMS: &[Factory] = &[wyrm_room, luciphon_room];
 
 fn wyrm_room(seed: u64) -> Box<dyn Room> {
     Box::new(wyrm::room::Wyrm::new(seed))
+}
+
+fn luciphon_room(seed: u64) -> Box<dyn Room> {
+    Box::new(luciphon::room::Luciphon::new(seed))
 }
 
 /// The server's build: a hash of everything it is made from (`ship.sh`).
