@@ -1,9 +1,9 @@
-use arena::laws::{body_len, CROWD, START_MASS, TICK_HZ};
-use arena::mirror::Mirror;
-use arena::proto::{self, unq, Down, Up};
-use arena::view::Viewer;
-use arena::world::World;
 use engine::rng::Rng;
+use wyrm::laws::{body_len, CROWD, START_MASS, TICK_HZ};
+use wyrm::mirror::Mirror;
+use wyrm::proto::{self, unq, Down, Up};
+use wyrm::view::Viewer;
+use wyrm::world::World;
 
 #[test]
 fn a_new_arena_is_busy_and_bots_live_a_while() {
@@ -125,4 +125,37 @@ fn hostile_bytes_never_panic() {
         b.truncate(rng.below(b.len() as u64 + 1) as usize);
         let _ = Down::decode(&b);
     }
+}
+
+#[test]
+fn a_watcher_sees_the_game_but_cannot_play_and_is_not_counted() {
+    use engine::room::{Outbox, Room};
+    let mut room = wyrm::room::Wyrm::new(9);
+    let mut out = Outbox::default();
+    room.open(1, true, &mut out);
+    room.open(2, false, &mut out);
+    let join = Up::Join { name: "me".into() }.encode();
+    room.message(1, &join, &mut out);
+    room.message(2, &join, &mut out);
+    out.0.clear();
+    room.tick(&mut out);
+    assert_eq!(
+        room.people(),
+        1,
+        "only the player is one of the people here"
+    );
+    let frames: Vec<Down> = out
+        .0
+        .iter()
+        .filter(|(conn, _)| *conn == 1)
+        .filter_map(|(_, b)| Down::decode(b))
+        .collect();
+    let Some(Down::Frame(f)) = frames.first() else {
+        panic!("the watcher is sent frames");
+    };
+    assert_eq!(f.you, 0, "the watcher has no snake");
+    assert!(!f.snakes.is_empty(), "and sees the game");
+    room.close(1);
+    room.close(2);
+    assert_eq!(room.people(), 0);
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assemble ship/: a tiny image of the prebuilt arena server and the page,
+# Assemble ship/: a tiny image of the prebuilt server and the pages,
 # for `railway up`. Run after scripts/build-web.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."

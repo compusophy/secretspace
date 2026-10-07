@@ -18,14 +18,15 @@ pub trait Room: Send {
     fn id(&self) -> &'static str;
     /// Ticks a second.
     fn hz(&self) -> u32;
-    /// A browser connected.
-    fn open(&mut self, conn: u32, out: &mut Outbox);
+    /// A browser connected. A watcher only looks (the hub's live preview,
+    /// say): it cannot play, and it is not one of the people here.
+    fn open(&mut self, conn: u32, watch: bool, out: &mut Outbox);
     /// A browser said something (untrusted bytes).
     fn message(&mut self, conn: u32, bytes: &[u8], out: &mut Outbox);
     /// A browser left, or was let go.
     fn close(&mut self, conn: u32);
     /// One tick of the world.
     fn tick(&mut self, out: &mut Outbox);
-    /// Browsers here now.
+    /// People here now, watchers aside.
     fn people(&self) -> usize;
 }

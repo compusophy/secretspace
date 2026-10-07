@@ -7,9 +7,10 @@ in it right now; along the bottom, how many are online anywhere and how
 many visits there have ever been. Everyone who opens a game is in the same
 world as everyone else who has it open.
 
-## Arena
+## wyrm
 
 You are a small glowing snake in a dark arena shared with everyone else.
+Its card on the front page is the game itself, live.
 
 - **Steer** with the mouse (on a phone: drag).
 - **Eat** the glowing food to grow longer.
@@ -34,8 +35,8 @@ the bold ones cut across smaller snakes' paths.
   numbers) and each game's core are shared, line for line, by the server
   and the page.
 
-The arena is the template for the next games: copy it, change the world,
-add a card. CLAUDE.md has the steps.
+wyrm is the template for the next games: copy it, change the world, add a
+card. CLAUDE.md has the steps.
 
 ## Run it
 

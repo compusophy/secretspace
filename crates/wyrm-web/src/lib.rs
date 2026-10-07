@@ -1,6 +1,6 @@
-//! The arena's page: the game drawn pixel by pixel into one buffer, a menu
+//! wyrm's page: the game drawn pixel by pixel into one buffer, a menu
 //! drawn the same way, and the wiring between the browser (pointer, keys,
-//! the socket to the arena's room) and the game.
+//! the socket to its room) and the game.
 
 mod menu;
 mod render;
@@ -8,11 +8,11 @@ mod state;
 
 use std::cell::RefCell;
 
-use arena::proto::{angle_to_u16, Down, Up};
 use pixels::Rect;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{KeyboardEvent, PointerEvent};
+use wyrm::proto::{angle_to_u16, Down, Up};
 
 use state::State;
 
@@ -73,7 +73,7 @@ fn screen_msg(p: &Page) -> Up {
 }
 
 fn connect(p: &mut Page) {
-    let url = kit::room_url("arena", !p.counted);
+    let url = kit::room_url("wyrm", if p.counted { "" } else { "v=1" });
     p.counted = true;
     p.socket = kit::Socket::open(
         &url,
@@ -243,7 +243,7 @@ pub fn start() -> Result<(), JsValue> {
     let canvas = kit::document()
         .get_element_by_id("screen")
         .ok_or("no #screen")?;
-    let field = kit::TextField::new(arena::laws::MAX_NAME as u32, "your name");
+    let field = kit::TextField::new(wyrm::laws::MAX_NAME as u32, "your name");
     if let Some(n) = kit::load(NAME) {
         field.set_value(&n);
     }

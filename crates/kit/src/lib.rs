@@ -79,8 +79,9 @@ pub fn touch() -> bool {
 
 /// The WebSocket address of a room (or "hub"): `?server=` if given, else
 /// `<meta name="server">` (a `wss://host/ws` address), else this page's
-/// own origin. The first connection a page makes counts as a visit.
-pub fn room_url(room: &str, first: bool) -> String {
+/// own origin. `query` goes on the end: "v=1" on a page's first
+/// connection counts a visit; "watch=1" only looks.
+pub fn room_url(room: &str, query: &str) -> String {
     let loc = window().location();
     let param = loc.search().ok().and_then(|q| {
         q.trim_start_matches('?')
@@ -100,7 +101,12 @@ pub fn room_url(room: &str, first: bool) -> String {
         format!("{}://{host}/ws", if secure { "wss" } else { "ws" })
     });
     let base = base.trim_end_matches('/').trim_end_matches("/ws");
-    format!("{base}/ws/{room}{}", if first { "?v=1" } else { "" })
+    let q = if query.is_empty() {
+        String::new()
+    } else {
+        format!("?{query}")
+    };
+    format!("{base}/ws/{room}{q}")
 }
 
 /// The canvas, and the pixels drawn into it: one buffer pixel is `scale`

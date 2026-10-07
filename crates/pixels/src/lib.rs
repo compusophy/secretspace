@@ -292,6 +292,36 @@ impl Canvas {
         }
     }
 
+    /// Copy another canvas in at `(x, y)`, its corners rounded by `r`.
+    pub fn blit(&mut self, src: &Canvas, x: i32, y: i32, r: f32) {
+        let (w, h) = (src.w as f32, src.h as f32);
+        for sy in 0..src.h {
+            let ty = y + sy;
+            if ty < 0 || ty >= self.h {
+                continue;
+            }
+            let py = sy as f32 + 0.5;
+            for sx in 0..src.w {
+                let tx = x + sx;
+                if tx < 0 || tx >= self.w {
+                    continue;
+                }
+                let px = sx as f32 + 0.5;
+                // Coverage: whole, except in the rounded corners.
+                let qx = (r - px).max(px - (w - r)).max(0.0);
+                let qy = (r - py).max(py - (h - r)).max(0.0);
+                let cover = if qx > 0.0 && qy > 0.0 {
+                    (r - (qx * qx + qy * qy).sqrt() + 0.5).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let i = ((sy * src.w + sx) * 4) as usize;
+                let c = Rgba(src.data[i], src.data[i + 1], src.data[i + 2], 255);
+                self.blend((ty * self.w + tx) as usize, c, (cover * 255.0) as u32);
+            }
+        }
+    }
+
     /// Text in the pixel font at a whole-number scale. Returns its width.
     pub fn text(&mut self, x: i32, y: i32, s: &str, scale: i32, c: Rgba) -> i32 {
         let scale = scale.max(1);

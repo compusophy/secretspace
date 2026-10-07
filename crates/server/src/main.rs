@@ -1,8 +1,8 @@
 //! secretspace server: hosts every game, and the hub's live numbers.
 //!
 //! Each game is a `Room` running in a thread of its own at its own tick
-//! rate. A browser opens a WebSocket to `/ws/<game>` (plain `/ws` is the
-//! arena, for pages from before there was a hub) and the room takes it
+//! rate. A browser opens a WebSocket to `/ws/<game>` (plain `/ws` and
+//! `/ws/arena` are wyrm, for pages from before) and the room takes it
 //! from there; each connection has a reader thread and a writer thread,
 //! and a browser that cannot keep up is let go rather than allowed to hold
 //! its room back. `/ws/hub` is told once a second who is online where and
@@ -39,7 +39,8 @@ const RATE: u32 = 90;
 const IDLE: Duration = Duration::from_secs(45);
 
 enum Event {
-    Open(u32, SyncSender<Vec<u8>>),
+    /// A browser connected: its sender, and whether it only watches.
+    Open(u32, SyncSender<Vec<u8>>, bool),
     Say(u32, Vec<u8>),
     Close(u32),
 }
@@ -94,7 +95,7 @@ fn main() {
         .unwrap_or(1);
 
     // Every game there is.
-    let rooms: Vec<Box<dyn Room>> = vec![Box::new(arena::room::Arena::new(seed))];
+    let rooms: Vec<Box<dyn Room>> = vec![Box::new(wyrm::room::Wyrm::new(seed))];
 
     let visits = data
         .as_ref()
@@ -170,9 +171,9 @@ fn host(mut room: Box<dyn Room>, inbox: Receiver<Event>, game: &Game) {
         let mut out = Outbox::default();
         while let Ok(ev) = inbox.try_recv() {
             match ev {
-                Event::Open(conn, tx) => {
+                Event::Open(conn, tx, watch) => {
                     clients.insert(conn, tx);
-                    room.open(conn, &mut out);
+                    room.open(conn, watch, &mut out);
                 }
                 Event::Say(conn, bytes) => room.message(conn, &bytes, &mut out),
                 Event::Close(conn) => {
@@ -244,7 +245,12 @@ fn serve(
     let mut out = stream;
     if let Some(room) = path.strip_prefix("/ws") {
         let room = room.trim_start_matches('/');
-        let room = if room.is_empty() { "arena" } else { room };
+        // Pages from before the hub (`/ws`) and before the rename (`arena`)
+        // still reach wyrm.
+        let room = match room {
+            "" | "arena" => "wyrm",
+            r => r,
+        };
         let game = shared.games.iter().find(|g| g.id == room).cloned();
         if room != "hub" && game.is_none() {
             return respond(&mut out, "404 Not Found", "text/plain", b"no such game");
@@ -260,8 +266,9 @@ fn serve(
         if query.split('&').any(|kv| kv == "v=1") {
             shared.visits.fetch_add(1, Ordering::Relaxed);
         }
+        let watch = query.split('&').any(|kv| kv == "watch=1");
         return match game {
-            Some(game) => play(reader, out, conn, &game),
+            Some(game) => play(reader, out, conn, watch, &game),
             None => hub(reader, out, shared),
         };
     }
@@ -302,6 +309,13 @@ fn respond(out: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> std::i
 fn file(out: &mut TcpStream, root: &Path, path: &str) -> std::io::Result<()> {
     if path.split('/').any(|seg| seg == "..") {
         return respond(out, "400 Bad Request", "text/plain", b"no");
+    }
+    // The game was called arena once; old links still land on it.
+    if path == "/arena" || path.starts_with("/arena/") {
+        return write!(
+            out,
+            "HTTP/1.1 302 Found\r\nLocation: /wyrm/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
     }
     let rel = path.trim_start_matches('/');
     let mut p = root.join(rel);
@@ -350,7 +364,13 @@ fn listen(mut reader: impl Read, mut said: impl FnMut(Vec<u8>)) -> std::io::Resu
 
 /// A browser in a game: a writer thread drains what its room sends it;
 /// this thread reads what it says.
-fn play(reader: impl Read, writer: TcpStream, conn: u32, game: &Game) -> std::io::Result<()> {
+fn play(
+    reader: impl Read,
+    writer: TcpStream,
+    conn: u32,
+    watch: bool,
+    game: &Game,
+) -> std::io::Result<()> {
     writer.set_read_timeout(Some(IDLE))?;
     let (tx, rx) = sync_channel::<Vec<u8>>(BACKLOG);
     let mut w = writer.try_clone()?;
@@ -363,7 +383,7 @@ fn play(reader: impl Read, writer: TcpStream, conn: u32, game: &Game) -> std::io
         let _ = ws::write(&mut w, 8, &[]);
         let _ = w.shutdown(std::net::Shutdown::Both);
     });
-    if game.events.send(Event::Open(conn, tx)).is_err() {
+    if game.events.send(Event::Open(conn, tx, watch)).is_err() {
         return Ok(());
     }
     let result = listen(reader, |b| {

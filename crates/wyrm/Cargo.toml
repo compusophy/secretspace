@@ -1,6 +1,6 @@
 [package]
-name = "secretspace-arena"
-description = "The arena: snakes, food, bots, and what each browser sees of them. Builds only on the engine."
+name = "secretspace-wyrm"
+description = "wyrm: snakes in a shared arena, food, bots, and what each browser sees of them. Builds only on the engine."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ repository.workspace = true
 publish = false
 
 [lib]
-name = "arena"
+name = "wyrm"
 
 [dependencies]
 engine = { package = "secretspace-engine", path = "../engine" }

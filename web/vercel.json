@@ -1,11 +1,15 @@
 {
+  "redirects": [
+    { "source": "/arena", "destination": "/wyrm/", "permanent": false },
+    { "source": "/arena/(.*)", "destination": "/wyrm/", "permanent": false }
+  ],
   "headers": [
     {
       "source": "/pkg/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
     },
     {
-      "source": "/arena/pkg/(.*)",
+      "source": "/wyrm/pkg/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
     },
     {

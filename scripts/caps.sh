@@ -11,8 +11,8 @@ deps() { awk '/^\[dependencies\]/{f=1; next} /^\[/{f=0} f && NF' "crates/$1/Carg
 for c in engine pixels; do
   [ -z "$(deps $c)" ] || say "crates/$c has dependencies: $(deps $c)"
 done
-[ "$(deps arena)" = 'engine = { package = "secretspace-engine", path = "../engine" }' ] \
-  || say "crates/arena depends on more than the engine: $(deps arena)"
+[ "$(deps wyrm)" = 'engine = { package = "secretspace-engine", path = "../engine" }' ] \
+  || say "crates/wyrm depends on more than the engine: $(deps wyrm)"
 
 # 1. No hand-written JavaScript or TypeScript.
 js=$(git ls-files '*.js' '*.ts' '*.mjs' '*.jsx' '*.tsx')

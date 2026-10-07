@@ -86,24 +86,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
-name = "secretspace-arena"
-version = "0.1.0"
-dependencies = [
- "secretspace-engine",
-]
-
-[[package]]
-name = "secretspace-arena-web"
-version = "0.1.0"
-dependencies = [
- "secretspace-arena",
- "secretspace-kit",
- "secretspace-pixels",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "secretspace-engine"
 version = "0.1.0"
 
@@ -114,6 +96,8 @@ dependencies = [
  "secretspace-engine",
  "secretspace-kit",
  "secretspace-pixels",
+ "secretspace-wyrm",
+ "secretspace-wyrm-look",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -136,8 +120,35 @@ version = "0.1.0"
 name = "secretspace-server"
 version = "0.1.0"
 dependencies = [
- "secretspace-arena",
  "secretspace-engine",
+ "secretspace-wyrm",
+]
+
+[[package]]
+name = "secretspace-wyrm"
+version = "0.1.0"
+dependencies = [
+ "secretspace-engine",
+]
+
+[[package]]
+name = "secretspace-wyrm-look"
+version = "0.1.0"
+dependencies = [
+ "secretspace-pixels",
+ "secretspace-wyrm",
+]
+
+[[package]]
+name = "secretspace-wyrm-web"
+version = "0.1.0"
+dependencies = [
+ "secretspace-kit",
+ "secretspace-pixels",
+ "secretspace-wyrm",
+ "secretspace-wyrm-look",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

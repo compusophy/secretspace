@@ -1,7 +1,10 @@
 //! The front page: a card for every game, each showing how many people
 //! are in it right now, and along the bottom how many are online anywhere
 //! and how many visits there have ever been. The numbers come live from
-//! the server's `/ws/hub`. Every pixel is drawn here, in Rust.
+//! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`).
+//! Every pixel is drawn here, in Rust.
+
+mod watch;
 
 use std::cell::RefCell;
 
@@ -23,10 +26,10 @@ struct Card {
 
 const CARDS: &[Card] = &[
     Card {
-        id: "arena",
-        title: "ARENA",
+        id: "wyrm",
+        title: "WYRM",
         blurb: ["eat the glow, grow long,", "make them run into you"],
-        path: "/arena/",
+        path: "/wyrm/",
         hue: 140.0,
     },
     Card {
@@ -62,6 +65,8 @@ struct Hub {
     pointer: Option<(f32, f32)>,
     /// Where each card was drawn last frame, for clicks.
     hits: Vec<(Rect, usize)>,
+    /// wyrm, live, for its card.
+    watch: watch::Watch,
     /// How far the page is scrolled, and the most it can be.
     scroll: f32,
     max_scroll: f32,
@@ -79,7 +84,7 @@ fn with<R>(f: impl FnOnce(&mut Hub) -> R) -> Option<R> {
 }
 
 fn connect(h: &mut Hub) {
-    let url = kit::room_url("hub", !h.counted);
+    let url = kit::room_url("hub", if h.counted { "" } else { "v=1" });
     h.counted = true;
     h.socket = kit::Socket::open(
         &url,
@@ -118,29 +123,6 @@ fn grouped(n: u64) -> String {
     out
 }
 
-/// A little live picture of the arena: snakes winding over glowing food.
-fn arena_preview(c: &mut Canvas, b: Rect, t: f32, u: f32) {
-    c.round_rect(b, 6.0 * u, Rgba::rgb(10, 15, 28));
-    for k in 0..14 {
-        let x = b.x + ((k * 37 % 97) as f32 / 97.0) * b.w;
-        let y = b.y + ((k * 61 % 89) as f32 / 89.0) * b.h;
-        let hue = (k * 47 % 360) as f32;
-        c.glow(x, y, 5.0 * u, Rgba::hsl(hue, 1.0, 0.6).fade(0.45));
-        c.circle(x, y, 1.4 * u, Rgba::hsl(hue, 1.0, 0.7));
-    }
-    for (s, hue) in [(0.0f32, 140.0f32), (2.1, 200.0), (4.2, 320.0)] {
-        let r = 3.2 * u;
-        for i in (0..22).rev() {
-            let p = t * 0.9 + s - i as f32 * 0.09;
-            let x = b.x + b.w * (0.5 + 0.38 * (p * 0.7).sin() * (p * 0.23 + s).cos());
-            let y = b.y + b.h * (0.5 + 0.34 * (p * 1.1 + s).sin());
-            let light = if (i / 3) % 2 == 0 { 0.6 } else { 0.5 };
-            c.circle(x, y, r + 0.8 * u, Rgba::hsl(hue, 0.7, 0.18));
-            c.circle(x, y, r, Rgba::hsl(hue, 0.88, light));
-        }
-    }
-}
-
 /// A game not built yet: a slow shimmer and a question mark.
 fn soon_preview(c: &mut Canvas, b: Rect, t: f32, u: f32, hue: f32) {
     c.round_rect(b, 6.0 * u, Rgba::hsl(hue, 0.35, 0.09));
@@ -160,10 +142,46 @@ fn soon_preview(c: &mut Canvas, b: Rect, t: f32, u: f32, hue: f32) {
     );
 }
 
+/// Watch wyrm for its card: a watcher is never one of the people there.
+fn watch_wyrm(h: &mut Hub) {
+    let url = kit::room_url("wyrm", "watch=1");
+    h.watch.socket = kit::Socket::open(
+        &url,
+        || {
+            with(|h| {
+                h.watch.up = true;
+                h.watch.retries = 0;
+                // The server sends the part of the arena this screen would
+                // show a watcher; the card shows the middle of it.
+                let (w, ht) = h.screen.css;
+                let screen = wyrm::proto::Up::Screen {
+                    w: w as u16,
+                    h: ht as u16,
+                };
+                if let Some(s) = &h.watch.socket {
+                    s.send(&screen.encode());
+                }
+            });
+        },
+        |bytes| {
+            with(|h| h.watch.receive(kit::now(), &bytes));
+        },
+        || {
+            with(|h| h.watch.closed(kit::now()));
+        },
+    );
+}
+
 fn draw(h: &mut Hub, now: f64) {
     if h.socket.is_none() && now >= h.retry_at {
         connect(h);
     }
+    if h.watch.socket.is_none() && now >= h.watch.retry_at {
+        watch_wyrm(h);
+    }
+    let css = h.screen.css;
+    // A watcher's zoom in the game, pulled back a little: a card is small.
+    let k = 0.8 * wyrm::laws::view_scale(18.0, css.0 as f32, css.1 as f32) / h.screen.scale as f32;
     let u = h.screen.ui();
     let uf = u as f32;
     let t = (now / 1000.0) as f32;
@@ -212,7 +230,7 @@ fn draw(h: &mut Hub, now: f64) {
     h.hits.clear();
     let top = tag_y as f32 + 22.0 * uf;
     let gap = 12.0 * uf;
-    let preview_h = if narrow { 56.0 } else { 92.0 } * uf;
+    let preview_h = if narrow { 64.0 } else { 104.0 } * uf;
     let (cw, ch) = if narrow {
         ((w - 24.0 * uf).min(360.0 * uf), preview_h + 84.0 * uf)
     } else {
@@ -250,8 +268,8 @@ fn draw(h: &mut Hub, now: f64) {
 
         let pad = 7.0 * uf;
         let pv = Rect::new(b.x + pad, b.y + pad, b.w - 2.0 * pad, preview_h);
-        if card.id == "arena" {
-            arena_preview(c, pv, t, uf);
+        if card.id == "wyrm" {
+            h.watch.draw(c, pv, k, 6.0 * uf, u, now);
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }
@@ -361,6 +379,7 @@ pub fn start() -> Result<(), JsValue> {
             stats: None,
             pointer: None,
             hits: Vec::new(),
+            watch: watch::Watch::new(),
             scroll: 0.0,
             max_scroll: 0.0,
             press: None,

@@ -3,24 +3,9 @@
 
 use std::collections::VecDeque;
 
-use arena::mirror::{Mirror, Pellet};
-use arena::proto::{Board, Down};
-
-/// Food flying into the mouth that ate it.
-pub struct Gulp {
-    pub pellet: Pellet,
-    pub by: u16,
-    pub at: f64,
-}
-
-/// A snake bursting: a ring and sparks where its head was.
-pub struct Burst {
-    pub x: f32,
-    pub y: f32,
-    pub hue: u8,
-    pub r: f32,
-    pub at: f64,
-}
+use look::{Burst, Gulp};
+use wyrm::mirror::Mirror;
+use wyrm::proto::{Board, Down};
 
 /// "you ate noodle": shown big for a moment.
 pub struct Toast {
@@ -58,9 +43,9 @@ impl State {
     pub fn new(best: u32) -> State {
         State {
             mirror: Mirror::default(),
-            arena: arena::laws::ARENA,
+            arena: wyrm::laws::ARENA,
             frame_at: 0.0,
-            gap: 1000.0 / arena::laws::TICK_HZ as f64,
+            gap: 1000.0 / wyrm::laws::TICK_HZ as f64,
             board: Board::default(),
             feed: VecDeque::new(),
             gulps: Vec::new(),
@@ -100,8 +85,8 @@ impl State {
                 self.frame_at = now;
                 for &(x, y, hue, r) in &f.bursts {
                     self.bursts.push(Burst {
-                        x: arena::proto::unq(x),
-                        y: arena::proto::unq(y),
+                        x: wyrm::proto::unq(x),
+                        y: wyrm::proto::unq(y),
                         hue,
                         r: r as f32,
                         at: now,

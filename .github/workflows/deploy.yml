@@ -1,4 +1,4 @@
-# Every push to main or a claude/ branch: test, build, then ship the arena
+# Every push to main or a claude/ branch: test, build, then ship the game
 # server to Railway and the page to Vercel production.
 #
 # Railway (the server): repository secret RAILWAY_TOKEN (a project token)

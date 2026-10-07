@@ -13,6 +13,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 engine = { package = "secretspace-engine", path = "../engine" }
+wyrm = { package = "secretspace-wyrm", path = "../wyrm" }
+look = { package = "secretspace-wyrm-look", path = "../wyrm-look" }
 pixels = { package = "secretspace-pixels", path = "../pixels" }
 kit = { package = "secretspace-kit", path = "../kit" }
 wasm-bindgen = "=0.2.129"

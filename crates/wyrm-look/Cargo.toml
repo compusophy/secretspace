@@ -1,0 +1,15 @@
+[package]
+name = "secretspace-wyrm-look"
+description = "How wyrm looks: the ground, the food, the snakes, the bursts, drawn into pixels. Shared by its page and the hub's live preview."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "look"
+
+[dependencies]
+wyrm = { package = "secretspace-wyrm", path = "../wyrm" }
+pixels = { package = "secretspace-pixels", path = "../pixels" }

@@ -1,4 +1,4 @@
-//! The menu over the arena: the title, how you died, a name, PLAY.
+//! The menu over the game: the title, how you died, a name, PLAY.
 
 use pixels::{fit_scale, text_width, wrap, Canvas, Rect, Rgba};
 
@@ -56,7 +56,7 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
 
     // The title, a letter at a time in drifting colours.
     let ts = if narrow { 4 * u } else { 6 * u };
-    let title = "ARENA";
+    let title = "WYRM";
     let tw = text_width(title, ts);
     let mut tx = (w as i32 - tw) / 2;
     for (i, ch) in title.chars().enumerate() {

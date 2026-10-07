@@ -1,6 +1,6 @@
-//! The arena as a room the server hosts: one world, a view per browser.
+//! wyrm as a room the server hosts: one world, a view per browser.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use engine::room::{Outbox, Room};
 
@@ -12,39 +12,47 @@ use crate::world::World;
 /// Boards (leaderboard, minimap) go out this often, in ticks.
 const BOARD_EVERY: u32 = TICK_HZ / 2;
 
-pub struct Arena {
+pub struct Wyrm {
     world: World,
     viewers: HashMap<u32, Viewer>,
+    /// Connections that only look.
+    watchers: HashSet<u32>,
 }
 
-impl Arena {
-    pub fn new(seed: u64) -> Arena {
-        Arena {
+impl Wyrm {
+    pub fn new(seed: u64) -> Wyrm {
+        Wyrm {
             world: World::new(seed),
             viewers: HashMap::new(),
+            watchers: HashSet::new(),
         }
     }
 }
 
-impl Room for Arena {
+impl Room for Wyrm {
     fn id(&self) -> &'static str {
-        "arena"
+        "wyrm"
     }
 
     fn hz(&self) -> u32 {
         TICK_HZ
     }
 
-    fn open(&mut self, conn: u32, out: &mut Outbox) {
+    fn open(&mut self, conn: u32, watch: bool, out: &mut Outbox) {
         out.send(conn, proto::hello(ARENA as u16, TICK_HZ as u8));
         self.viewers.insert(conn, Viewer::default());
+        if watch {
+            self.watchers.insert(conn);
+        }
     }
 
     fn message(&mut self, conn: u32, bytes: &[u8], _out: &mut Outbox) {
         let (Some(v), Some(up)) = (self.viewers.get_mut(&conn), Up::decode(bytes)) else {
             return;
         };
+        let watching = self.watchers.contains(&conn);
         match up {
+            Up::Join { .. } | Up::Steer { .. } if watching => {}
             Up::Join { name } => {
                 if self.world.find(v.you).is_none() {
                     v.you = self.world.spawn(&name, None);
@@ -61,6 +69,7 @@ impl Room for Arena {
         if let Some(v) = self.viewers.remove(&conn) {
             self.world.remove(v.you);
         }
+        self.watchers.remove(&conn);
     }
 
     fn tick(&mut self, out: &mut Outbox) {
@@ -81,7 +90,7 @@ impl Room for Arena {
             }
         }
         let board = self.world.tick.is_multiple_of(BOARD_EVERY);
-        let people = self.viewers.len().min(u16::MAX as usize) as u16;
+        let people = self.people().min(u16::MAX as usize) as u16;
         for (&conn, v) in self.viewers.iter_mut() {
             out.send(conn, v.frame(&self.world));
             if board {
@@ -91,6 +100,6 @@ impl Room for Arena {
     }
 
     fn people(&self) -> usize {
-        self.viewers.len()
+        self.viewers.len() - self.watchers.len()
     }
 }

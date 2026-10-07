@@ -2,7 +2,7 @@
 # Build the pages into dist/: the hub at /, each game at /<game>/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cargo build -p secretspace-hub -p secretspace-arena-web --release --target wasm32-unknown-unknown
+cargo build -p secretspace-hub -p secretspace-wyrm-web --release --target wasm32-unknown-unknown
 rm -rf dist && mkdir -p dist
 page() { # page <wasm lib name> <out name> <dir under dist> <html>
   mkdir -p "dist/$3/pkg"
@@ -12,4 +12,4 @@ page() { # page <wasm lib name> <out name> <dir under dist> <html>
   echo "dist/$3: wasm $(gzip -9c "dist/$3/pkg/$2_bg.wasm" | wc -c) bytes gzipped"
 }
 page hub hub . web/index.html
-page arena_web arena arena web/arena/index.html
+page wyrm_web wyrm wyrm web/wyrm/index.html
