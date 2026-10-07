@@ -68,7 +68,7 @@ jobs:
           npx --yes @railway/cli@latest up --ci --service "${SERVICE:-game}"
           echo "### Server shipped to Railway (service ${SERVICE:-game})" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Point the page at the server
+      - name: Point the pages at the server
         id: page
         env:
           RELAY: ${{ vars.RELAY }}
@@ -78,12 +78,14 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          sed -i "s|<meta name=\"server\" content=\"[^\"]*\">|<meta name=\"server\" content=\"$RELAY\">|" dist/index.html
-          grep -q "name=\"server\" content=\"$RELAY\"" dist/index.html
+          for page in $(find dist -name index.html); do
+            sed -i "s|<meta name=\"server\" content=\"[^\"]*\">|<meta name=\"server\" content=\"$RELAY\">|" "$page"
+            grep -q "name=\"server\" content=\"$RELAY\"" "$page"
+          done
           cp web/vercel.json dist/
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy the page to Vercel production
+      - name: Deploy the pages to Vercel production
         if: steps.page.outputs.ready == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

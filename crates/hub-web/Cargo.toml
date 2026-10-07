@@ -1,0 +1,19 @@
+[package]
+name = "secretspace-hub"
+description = "The front page: every game as a card, who is playing what, and how many have come by. Drawn pixel by pixel in Rust."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "hub"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+engine = { package = "secretspace-engine", path = "../engine" }
+pixels = { package = "secretspace-pixels", path = "../pixels" }
+kit = { package = "secretspace-kit", path = "../kit" }
+wasm-bindgen = "=0.2.129"
+web-sys = { version = "0.3", features = ["PointerEvent", "MouseEvent", "KeyboardEvent", "WheelEvent"] }

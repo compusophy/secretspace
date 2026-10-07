@@ -1,0 +1,13 @@
+[package]
+name = "secretspace-engine"
+description = "What every game here shares: the wire, the dice, the room a server hosts, the hub's numbers. std only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "engine"
+
+[dependencies]

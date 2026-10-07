@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Build the page into dist/: index.html + the wasm client and its glue.
+# Build the pages into dist/: the hub at /, each game at /<game>/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-cargo build -p secretspace-client --release --target wasm32-unknown-unknown
-rm -rf dist && mkdir -p dist/pkg
-wasm-bindgen --target web --no-typescript --out-dir dist/pkg \
-  target/wasm32-unknown-unknown/release/secretspace_client.wasm
-cp web/index.html dist/
-echo "dist/: $(du -sh dist | cut -f1); wasm $(gzip -9c dist/pkg/secretspace_client_bg.wasm | wc -c) bytes gzipped"
+cargo build -p secretspace-hub -p secretspace-arena-web --release --target wasm32-unknown-unknown
+rm -rf dist && mkdir -p dist
+page() { # page <wasm lib name> <out name> <dir under dist> <html>
+  mkdir -p "dist/$3/pkg"
+  wasm-bindgen --target web --no-typescript --out-dir "dist/$3/pkg" --out-name "$2" \
+    "target/wasm32-unknown-unknown/release/$1.wasm"
+  cp "$4" "dist/$3/index.html"
+  echo "dist/$3: wasm $(gzip -9c "dist/$3/pkg/$2_bg.wasm" | wc -c) bytes gzipped"
+}
+page hub hub . web/index.html
+page arena_web arena arena web/arena/index.html

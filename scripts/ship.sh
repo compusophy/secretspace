@@ -12,6 +12,8 @@ FROM scratch
 COPY server /server
 COPY dist /dist
 ENV PORT=8787
+# Visits are kept here; mount a volume at /data to keep them across deploys.
+ENV DATA_DIR=/data
 EXPOSE 8787
 CMD ["/server", "--static", "/dist"]
 DOCKER

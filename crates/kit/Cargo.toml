@@ -1,6 +1,6 @@
 [package]
-name = "secretspace-client"
-description = "The page: the arena drawn on a canvas, steered with a mouse or a finger."
+name = "secretspace-kit"
+description = "The browser end every page shares: a pixel screen, input, sockets, storage. Rust only."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,10 +8,10 @@ repository.workspace = true
 publish = false
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+name = "kit"
 
 [dependencies]
-game = { package = "secretspace-game", path = "../game" }
+pixels = { package = "secretspace-pixels", path = "../pixels" }
 wasm-bindgen = "=0.2.129"
 js-sys = "0.3"
 
@@ -25,22 +25,20 @@ features = [
   "HtmlCanvasElement",
   "HtmlInputElement",
   "CanvasRenderingContext2d",
-  "TextMetrics",
+  "CssStyleDeclaration",
+  "ImageData",
   "Event",
   "EventTarget",
   "MessageEvent",
   "PointerEvent",
   "MouseEvent",
   "KeyboardEvent",
-  "TouchEvent",
-  "TouchList",
-  "Touch",
   "Storage",
   "Performance",
   "Location",
+  "Navigator",
+  "MediaQueryList",
   "WebSocket",
   "BinaryType",
   "CloseEvent",
-  "CanvasGradient",
-  "CanvasWindingRule",
 ]

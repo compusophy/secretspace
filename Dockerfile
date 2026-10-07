@@ -12,5 +12,6 @@ FROM scratch
 COPY --from=build /src/target/x86_64-unknown-linux-musl/release/server /server
 COPY --from=build /src/dist /dist
 ENV PORT=8787
+ENV DATA_DIR=/data
 EXPOSE 8787
 CMD ["/server", "--static", "/dist"]

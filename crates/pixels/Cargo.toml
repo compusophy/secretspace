@@ -1,6 +1,6 @@
 [package]
-name = "secretspace-game"
-description = "The arena: snakes, food, bots and the wire between server and browser. std only."
+name = "secretspace-pixels"
+description = "A software renderer: an RGBA buffer, shapes, blending, a pixel font. std only."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,6 @@ repository.workspace = true
 publish = false
 
 [lib]
-name = "game"
+name = "pixels"
 
 [dependencies]

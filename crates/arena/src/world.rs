@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use crate::bots::{self, Bot};
 use crate::grid::Grid;
 use crate::laws::*;
-use crate::rng::Rng;
+use engine::rng::Rng;
 
 pub struct Snake {
     pub id: u16,

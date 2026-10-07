@@ -1,9 +1,9 @@
-use game::laws::{body_len, CROWD, START_MASS, TICK_HZ};
-use game::mirror::Mirror;
-use game::proto::{self, unq, Down, Up};
-use game::rng::Rng;
-use game::view::Viewer;
-use game::world::World;
+use arena::laws::{body_len, CROWD, START_MASS, TICK_HZ};
+use arena::mirror::Mirror;
+use arena::proto::{self, unq, Down, Up};
+use arena::view::Viewer;
+use arena::world::World;
+use engine::rng::Rng;
 
 #[test]
 fn a_new_arena_is_busy_and_bots_live_a_while() {

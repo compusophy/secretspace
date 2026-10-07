@@ -3,8 +3,8 @@
 
 use std::collections::VecDeque;
 
-use game::mirror::{Mirror, Pellet};
-use game::proto::{Board, Down};
+use arena::mirror::{Mirror, Pellet};
+use arena::proto::{Board, Down};
 
 /// Food flying into the mouth that ate it.
 pub struct Gulp {
@@ -58,9 +58,9 @@ impl State {
     pub fn new(best: u32) -> State {
         State {
             mirror: Mirror::default(),
-            arena: game::laws::ARENA,
+            arena: arena::laws::ARENA,
             frame_at: 0.0,
-            gap: 1000.0 / game::laws::TICK_HZ as f64,
+            gap: 1000.0 / arena::laws::TICK_HZ as f64,
             board: Board::default(),
             feed: VecDeque::new(),
             gulps: Vec::new(),
@@ -100,8 +100,8 @@ impl State {
                 self.frame_at = now;
                 for &(x, y, hue, r) in &f.bursts {
                     self.bursts.push(Burst {
-                        x: game::proto::unq(x),
-                        y: game::proto::unq(y),
+                        x: arena::proto::unq(x),
+                        y: arena::proto::unq(y),
                         hue,
                         r: r as f32,
                         at: now,

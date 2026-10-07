@@ -86,46 +86,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
-name = "secretspace-client"
+name = "secretspace-arena"
 version = "0.1.0"
 dependencies = [
- "js-sys",
- "secretspace-game",
+ "secretspace-engine",
+]
+
+[[package]]
+name = "secretspace-arena-web"
+version = "0.1.0"
+dependencies = [
+ "secretspace-arena",
+ "secretspace-kit",
+ "secretspace-pixels",
  "wasm-bindgen",
  "web-sys",
 ]
 
 [[package]]
-name = "secretspace-game"
+name = "secretspace-engine"
 version = "0.1.0"
 
 [[package]]
-name = "secretspace-relay"
+name = "secretspace-hub"
 version = "0.1.0"
 dependencies = [
- "secretspace-space",
+ "secretspace-engine",
+ "secretspace-kit",
+ "secretspace-pixels",
+ "wasm-bindgen",
+ "web-sys",
 ]
+
+[[package]]
+name = "secretspace-kit"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "secretspace-pixels",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "secretspace-pixels"
+version = "0.1.0"
 
 [[package]]
 name = "secretspace-server"
 version = "0.1.0"
 dependencies = [
- "secretspace-game",
-]
-
-[[package]]
-name = "secretspace-space"
-version = "0.1.0"
-
-[[package]]
-name = "secretspace-web"
-version = "0.1.0"
-dependencies = [
- "js-sys",
- "secretspace-space",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
+ "secretspace-arena",
+ "secretspace-engine",
 ]
 
 [[package]]
@@ -146,15 +158,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio"
-version = "1.53.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
-dependencies = [
- "pin-project-lite",
-]
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -171,17 +174,6 @@ dependencies = [
  "rustversion",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
-]
-
-[[package]]
-name = "wasm-bindgen-futures"
-version = "0.4.79"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cbab34de2d982e9b48e18d216d04c4a6f641066ff19ffb699980f591ee3610e"
-dependencies = [
- "js-sys",
- "tokio",
- "wasm-bindgen",
 ]
 
 [[package]]

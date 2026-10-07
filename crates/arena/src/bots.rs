@@ -2,8 +2,8 @@
 //! if they are bold enough, cut across a smaller snake's path.
 
 use crate::laws::ARENA;
-use crate::rng::Rng;
 use crate::world::World;
+use engine::rng::Rng;
 
 pub struct Bot {
     /// 0..=255: how readily it hunts other snakes.

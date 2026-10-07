@@ -1,6 +1,6 @@
 [package]
 name = "secretspace-server"
-description = "Runs the arena: one world, every browser's view of it, over WebSockets. std only."
+description = "Hosts every game's room and the hub's live numbers, over WebSockets. std only."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,4 +12,5 @@ name = "server"
 path = "src/main.rs"
 
 [dependencies]
-game = { package = "secretspace-game", path = "../game" }
+engine = { package = "secretspace-engine", path = "../engine" }
+arena = { package = "secretspace-arena", path = "../arena" }

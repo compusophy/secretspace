@@ -4,60 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>secretspace</title>
-<meta name="description" content="One arena, everybody in it. Eat the glow, grow long, and make the others run into you.">
+<meta name="description" content="Tiny games, everyone in them. Pick one and play with whoever is here.">
 <meta name="theme-color" content="#070a12">
 <meta property="og:title" content="secretspace">
-<meta property="og:description" content="One arena, everybody in it. Eat the glow, grow long, and make the others run into you.">
+<meta property="og:description" content="Tiny games, everyone in them. Pick one and play with whoever is here.">
 <meta name="twitter:card" content="summary">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23070a12'/%3E%3Cpath d='M7 22c3-8 8 4 12-4s6-6 6-6' fill='none' stroke='%2357e389' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='12' r='3.5' fill='%2357e389'/%3E%3Ccircle cx='26' cy='11' r='1.2' fill='%23fff'/%3E%3C/svg%3E">
-<!-- The arena's server. Empty: this page's own origin (/ws). The deploy sets it. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' shape-rendering='crispEdges'%3E%3Crect width='32' height='32' fill='%23070a12'/%3E%3Crect x='6' y='6' width='8' height='8' fill='%2357e389'/%3E%3Crect x='18' y='6' width='8' height='8' fill='%2362a0ea'/%3E%3Crect x='6' y='18' width='8' height='8' fill='%23c061cb'/%3E%3Crect x='18' y='18' width='8' height='8' fill='%23ffbe6f'/%3E%3C/svg%3E">
+<!-- The game server. Empty: this page's own origin. The deploy sets it. -->
 <meta name="server" content="">
 <style>
-  :root { --bg: #070a12; --ink: #f4f1ff; --dim: rgba(244,241,255,.6); --line: rgba(255,255,255,.14); --go: #57e389; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
-               font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  canvas#arena { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; cursor: crosshair; }
-  #menu { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(ellipse at center, rgba(7,10,18,.35), rgba(7,10,18,.8)); z-index: 2; padding: 16px; }
-  #menu[hidden] { display: none; }
-  .card { width: min(380px, 100%); text-align: center; }
-  h1 { font-size: 46px; letter-spacing: -1px; margin: 0 0 4px; font-weight: 800;
-       background: linear-gradient(90deg, #57e389, #62a0ea, #c061cb); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .tag { margin: 0 0 22px; color: var(--dim); }
-  #result { margin: 0 0 18px; }
-  #result[hidden] { display: none; }
-  #verdict { font-size: 20px; font-weight: 700; margin: 0; }
-  #score { color: var(--dim); margin: 4px 0 0; }
-  input { user-select: text; -webkit-user-select: text; width: 100%; font: inherit; font-size: 18px; text-align: center; color: var(--ink); background: rgba(255,255,255,.07);
-          border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; outline: none; }
-  input:focus { border-color: var(--go); }
-  #play { width: 100%; margin-top: 10px; font: inherit; font-size: 20px; font-weight: 800; color: #062611; background: var(--go);
-          border: 0; border-radius: 12px; padding: 13px; cursor: pointer; }
-  #play:hover { filter: brightness(1.08); }
-  .how { color: var(--dim); font-size: 13px; margin: 16px 0 6px; }
-  #online { color: #8dffb1; font-size: 13px; margin: 0; }
-  #boost { position: fixed; left: 18px; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); z-index: 1; width: 84px; height: 84px;
-           border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(255,255,255,.08); color: var(--ink);
-           font: 700 14px ui-sans-serif, system-ui, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; display: none; }
-  #boost:active { background: rgba(87,227,137,.3); }
-  @media (pointer: coarse) { #boost { display: block; } .mouse { display: none; } }
-  @media (pointer: fine) { .touch { display: none; } }
+  html, body { margin: 0; height: 100%; background: #070a12; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; image-rendering: pixelated; touch-action: none; }
 </style>
 </head>
 <body>
-<canvas id="arena" aria-label="the arena"></canvas>
-<button id="boost" aria-label="boost">boost</button>
-<div id="menu">
-  <div class="card">
-    <h1>secretspace</h1>
-    <p class="tag">eat the glow · grow long · make them run into you</p>
-    <div id="result" hidden><p id="verdict"></p><p id="score"></p></div>
-    <input id="name" maxlength="16" placeholder="your name" autocomplete="off" spellcheck="false" enterkeyhint="go">
-    <button id="play">play</button>
-    <p class="how"><span class="mouse">steer with your mouse · hold the button or space to boost</span><span class="touch">drag to steer · hold boost to go fast</span></p>
-    <p id="online">connecting to the arena…</p>
-  </div>
-</div>
-<script type="module">import init from "./pkg/secretspace_client.js"; init();</script>
+<canvas id="screen" aria-label="secretspace: the games"></canvas>
+<noscript>secretspace is drawn by WebAssembly; it needs a browser that runs it.</noscript>
+<script type="module">import init from "./pkg/hub.js"; init();</script>
 </body>
 </html>

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>arena · secretspace</title>
+<meta name="description" content="One arena, everybody in it. Eat the glow, grow long, and make the others run into you.">
+<meta name="theme-color" content="#070a12">
+<meta property="og:title" content="arena · secretspace">
+<meta property="og:description" content="One arena, everybody in it. Eat the glow, grow long, and make the others run into you.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23070a12'/%3E%3Cpath d='M7 22c3-8 8 4 12-4s6-6 6-6' fill='none' stroke='%2357e389' stroke-width='5' stroke-linecap='round'/%3E%3Ccircle cx='25' cy='12' r='3.5' fill='%2357e389'/%3E%3Ccircle cx='26' cy='11' r='1.2' fill='%23fff'/%3E%3C/svg%3E">
+<!-- The game server. Empty: this page's own origin. The deploy sets it. -->
+<meta name="server" content="">
+<style>
+  html, body { margin: 0; height: 100%; background: #070a12; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; image-rendering: pixelated; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="screen" aria-label="the arena"></canvas>
+<noscript>the arena is drawn by WebAssembly; it needs a browser that runs it.</noscript>
+<script type="module">import init from "./pkg/arena.js"; init();</script>
+</body>
+</html>
