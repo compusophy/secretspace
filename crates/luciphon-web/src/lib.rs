@@ -491,9 +491,13 @@ fn draw(p: &mut Page, now: f64) {
         }
     }
     let c = &mut p.screen.px;
-    // The Luciphon, off screen: a marker toward it.
+    // The Luciphon, off screen: a marker toward it; and every Beacon.
     let (lx, ly) = view.to_screen(c, 0.5, 0.5);
     hud::marker(c, lx, ly, palette::GOLD);
+    for &(_, x, y) in &p.st.mirror.far {
+        let (bx, by) = view.to_screen(c, x as f32 + 0.5, y as f32 + 0.5);
+        hud::marker(c, bx, by, Rgba(255, 240, 190, 220));
+    }
     // The Underlight while you are gone.
     if p.st.descent > 0 {
         if !p.look.under.active {

@@ -227,6 +227,8 @@ pub struct Frame {
     pub gone: Vec<u16>,
     pub tiles: Vec<(u16, Tile)>,
     pub events: Vec<Ev>,
+    /// Lit things beyond sight (Beacons): id and tile.
+    pub far: Vec<(u16, i16, i16)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -647,6 +649,10 @@ fn encode_frame(w: &mut Writer, f: &Frame) {
     for e in f.events.iter().take(255) {
         w.u8(e.kind).u16(e.a).u16(e.b).u8(e.n);
     }
+    w.u8(f.far.len().min(255) as u8);
+    for &(id, x, y) in f.far.iter().take(255) {
+        w.u16(id).i16(x).i16(y);
+    }
 }
 
 fn decode_frame(r: &mut Reader) -> Option<Frame> {
@@ -705,6 +711,11 @@ fn decode_frame(r: &mut Reader) -> Option<Frame> {
             b: r.u16()?,
             n: r.u8()?,
         });
+    }
+    let n = r.u8()? as usize;
+    r.room(n, 6)?;
+    for _ in 0..n {
+        f.far.push((r.u16()?, r.i16()?, r.i16()?));
     }
     Some(f)
 }

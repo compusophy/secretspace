@@ -294,6 +294,22 @@ impl Viewer {
             .map(event)
             .filter(|e| self.known.contains_key(&e.a) || e.a == self.you)
             .collect();
+        // Beacons: Lumens carrying more than 150 glim, within 24 tiles.
+        let far = Fx::int(24);
+        f.far = w
+            .lumens
+            .iter()
+            .filter(|l| {
+                l.alive() && l.glim > w.laws.beacon && l.id != self.you && !seen.contains(&l.id)
+            })
+            .filter(|l| {
+                len(
+                    l.me.body.x.sub(self.centre.0),
+                    l.me.body.y.sub(self.centre.1),
+                ) <= far
+            })
+            .map(|l| (l.id, l.me.body.x.floor() as i16, l.me.body.y.floor() as i16))
+            .collect();
         out.push(Down::Frame(Box::new(f)).encode());
     }
 

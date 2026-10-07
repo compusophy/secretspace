@@ -19,6 +19,8 @@ pub struct Mirror {
     pub you: u16,
     /// What happened in the last frame.
     pub events: Vec<Ev>,
+    /// Beacons beyond sight.
+    pub far: Vec<(u16, i16, i16)>,
 }
 
 impl Mirror {
@@ -82,6 +84,7 @@ impl Mirror {
                 }
                 self.own = f.own;
                 self.events = f.events.clone();
+                self.far = f.far.clone();
                 true
             }
             _ => false,
