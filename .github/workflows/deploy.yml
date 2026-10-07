@@ -55,18 +55,37 @@ jobs:
       - name: Build the page and the server
         run: bash scripts/build-web.sh && bash scripts/ship.sh
 
+      # The server is shipped only when something it is built from changed:
+      # its build (a hash of its inputs) is what the live /health reports.
+      # A page-only push never restarts the world.
       - name: Ship the server to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           SERVICE: ${{ vars.RAILWAY_SERVICE }}
+          RELAY: ${{ vars.RELAY }}
         run: |
           if [ -z "$RAILWAY_TOKEN" ]; then
             echo "::warning::No RAILWAY_TOKEN secret: the server was not deployed."
             exit 0
           fi
+          want=$(cat ship/build.txt)
+          live=""
+          if [ -n "$RELAY" ]; then
+            health=$(echo "$RELAY" | sed -E 's|^ws(s?)://|http\1://|; s|/ws/?$||')/health
+            live=$(curl -fsS --max-time 10 "$health" | awk '{print $2}' || true)
+          fi
+          echo "server build $want, live $live"
+          if [ "$live" = "$want" ]; then
+            echo "### Server unchanged ($want): not shipped" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           cd ship
+          # Time between SIGTERM and SIGKILL, for the rooms to hold still and save.
+          npx --yes @railway/cli@latest variables --service "${SERVICE:-game}" --skip-deploys \
+            --set RAILWAY_DEPLOYMENT_DRAINING_SECONDS=15 >/dev/null \
+            || echo "::warning::Could not set RAILWAY_DEPLOYMENT_DRAINING_SECONDS."
           npx --yes @railway/cli@latest up --ci --service "${SERVICE:-game}"
-          echo "### Server shipped to Railway (service ${SERVICE:-game})" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Server shipped to Railway (service ${SERVICE:-game}, build $want)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Point the pages at the server
         id: page

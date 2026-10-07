@@ -34,11 +34,15 @@ pub const MIN_BOTS: usize = 4;
 /// Ticks a dead bot waits before a new one takes its place.
 pub const BOT_RESPAWN: u32 = 60;
 
-pub const MAX_NAME: usize = 16;
+pub const MAX_NAME: usize = engine::who::MAX_NAME;
 
 /// A person's new snake is a ghost this long: nothing can kill it and it
 /// kills nothing, while they find their bearings.
 pub const GHOST_TICKS: u32 = 3 * TICK_HZ;
+/// After a restart, a person's snake waits this long for them, frozen and
+/// harmless, then bursts; coming back, it is a ghost this long.
+pub const HOLD_TICKS: u32 = 30 * TICK_HZ;
+pub const RESUME_GHOST: u32 = 2 * TICK_HZ;
 
 /// Body length, in points, of a snake of this mass.
 pub fn body_len(mass: f32) -> usize {

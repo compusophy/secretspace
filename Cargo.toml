@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/engine", "crates/pixels", "crates/kit", "crates/hub-web", "crates/wyrm", "crates/wyrm-look", "crates/wyrm-web", "crates/server"]
+members = ["crates/engine", "crates/pixels", "crates/kit", "crates/hub-web", "crates/wyrm", "crates/wyrm-look", "crates/wyrm-web", "crates/luciphon", "crates/server"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,10 +10,16 @@ authors = ["compusophy"]
 repository = "https://github.com/compusophy/secretspace"
 
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# The server: release, but a panicking room unwinds, so the host can catch
+# it, rebuild that room from its snapshot and keep every other room up.
+[profile.server]
+inherits = "release"
+panic = "unwind"
 
 # The physics tests run thousands of ticks; keep them fast.
 [profile.test]

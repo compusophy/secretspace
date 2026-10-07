@@ -107,9 +107,17 @@ name = "secretspace-kit"
 version = "0.1.0"
 dependencies = [
  "js-sys",
+ "secretspace-engine",
  "secretspace-pixels",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "secretspace-luciphon"
+version = "0.1.0"
+dependencies = [
+ "secretspace-engine",
 ]
 
 [[package]]
@@ -143,6 +151,7 @@ dependencies = [
 name = "secretspace-wyrm-web"
 version = "0.1.0"
 dependencies = [
+ "secretspace-engine",
  "secretspace-kit",
  "secretspace-pixels",
  "secretspace-wyrm",

@@ -45,17 +45,21 @@ stage by stage, and do not start v0.2 before the owner passes the FUN GATE.
 ## Map
 
 ```
-crates/engine     wire (Reader/Writer) rng room (the Room trait) hub (Stats)
+crates/engine     wire rng room (the Room trait) hub (Stats) who (Hello, Seen,
+                  Still, names) words snap (save files) fixed (Q16.16) sha1
 crates/pixels     Canvas (RGBA buffer, AA shapes, glow, blend), font (5x7),
                   wrap, fit_scale; examples/sheet.rs draws a test sheet
 crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
-                  ui text scale), Socket, TextField, frames, storage, room_url
+                  ui text scale), Link (reconnects, Hello first), Session
+                  (the key), Pointer, Version, Socket, TextField, storage
 crates/hub-web    the front page (cards, live counts, scroll, footer) and
                   watch (wyrm's card: the live game, as a watcher)
 crates/wyrm       the game: laws world bots grid proto view mirror room
 crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
-crates/server     hosts every Room in its own thread, /ws/hub stats, visits
+crates/luciphon   game #2's core (a stub until Stage 1)
+crates/server     main (routes) host (a Room's thread; panics rebuild it)
+                  store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/wyrm/index.html wyrm's page
 scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
                   ship.sh (ship/: image for Railway), caps.sh
@@ -63,10 +67,13 @@ scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
 
 Server routes: `/ws/<room>` a game (`/ws` and `/ws/arena` are wyrm, for
 old pages; `?watch=1` only looks), `/ws/hub` the live Stats once a second,
-`/health`, `/stats` (JSON), and with `--static dist` the pages (`/arena`
+`/health` (`ok <build> ...`), `/stats` (JSON), and with `--static dist` the pages (`/arena`
 redirects to `/wyrm/`, as `web/vercel.json` does on Vercel). A page's first connection carries
 `?v=1` and counts a visit; visits persist in `$DATA_DIR/visits` (the image
-sets `/data`; a volume there keeps them across deploys).
+sets `/data`; a volume there keeps them across deploys), as are `souls`
+and `rooms/<id>/snap-*.bin`. A deploy is a Stillness: SIGTERM, each room
+`still()`s and saves, pages keep their picture and resume on reconnect.
+CI ships the server only when its build hash differs from live /health.
 
 Pixels: `kit::Screen` makes one buffer pixel `scale` CSS pixels (about 960
 across at most) and the canvas shows them sharp; `ui()` is the text scale

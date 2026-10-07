@@ -129,11 +129,11 @@ fn hostile_bytes_never_panic() {
 
 #[test]
 fn a_watcher_sees_the_game_but_cannot_play_and_is_not_counted() {
-    use engine::room::{Outbox, Room};
+    use engine::room::{Outbox, Room, Who};
     let mut room = wyrm::room::Wyrm::new(9);
     let mut out = Outbox::default();
-    room.open(1, true, &mut out);
-    room.open(2, false, &mut out);
+    room.open(1, &Who::guest(true), &mut out);
+    room.open(2, &Who::guest(false), &mut out);
     let join = Up::Join { name: "me".into() }.encode();
     room.message(1, &join, &mut out);
     room.message(2, &join, &mut out);
@@ -159,4 +159,57 @@ fn a_watcher_sees_the_game_but_cannot_play_and_is_not_counted() {
     room.close(1);
     room.close(2);
     assert_eq!(room.people(), 0);
+}
+
+#[test]
+fn a_restart_brings_a_soul_back_to_its_snake() {
+    use engine::room::{Outbox, Room, Who};
+    let who = Who {
+        soul: 42,
+        name: "zoë".into(),
+        watch: false,
+        build: 0,
+    };
+    let mut room = wyrm::room::Wyrm::new(9);
+    let mut out = Outbox::default();
+    room.open(1, &who, &mut out);
+    // A soul goes by its own name, whatever the page asks for.
+    room.message(1, &Up::Join { name: "x".into() }.encode(), &mut out);
+    for _ in 0..30 {
+        room.tick(&mut out);
+    }
+    let you = |out: &Outbox, conn: u32| {
+        out.0
+            .iter()
+            .rev()
+            .filter(|(c, _)| *c == conn)
+            .find_map(|(_, b)| match Down::decode(b) {
+                Some(Down::Frame(f)) => Some(f.you),
+                _ => None,
+            })
+    };
+    assert_ne!(you(&out, 1), Some(0));
+    let saved = room.save().expect("an arena is worth keeping");
+
+    let mut back = wyrm::room::Wyrm::new(10);
+    back.load(&saved).unwrap();
+    let mut out = Outbox::default();
+    back.open(7, &who, &mut out);
+    back.message(7, &Up::Join { name: "x".into() }.encode(), &mut out);
+    back.tick(&mut out);
+    let Some(id) = you(&out, 7).filter(|&id| id != 0) else {
+        panic!("it is playing again");
+    };
+    let names: Vec<String> = out
+        .0
+        .iter()
+        .filter_map(|(_, b)| match Down::decode(b) {
+            Some(Down::Frame(f)) => Some(f),
+            _ => None,
+        })
+        .flat_map(|f| f.snakes.into_iter())
+        .filter(|s| s.id == id)
+        .filter_map(|s| s.new.map(|n| n.0))
+        .collect();
+    assert_eq!(names.first().map(String::as_str), Some("zoë"));
 }

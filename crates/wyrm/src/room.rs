@@ -1,9 +1,10 @@
 //! wyrm as a room the server hosts: one world, a view per browser.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use engine::room::{Outbox, Room};
+use engine::room::{Outbox, Room, Who};
 
+use crate::bots::NAMES;
 use crate::laws::{ARENA, TICK_HZ};
 use crate::proto::{self, angle_from_u16, Up};
 use crate::view::{self, Viewer};
@@ -15,8 +16,8 @@ const BOARD_EVERY: u32 = TICK_HZ / 2;
 pub struct Wyrm {
     world: World,
     viewers: HashMap<u32, Viewer>,
-    /// Connections that only look.
-    watchers: HashSet<u32>,
+    /// Who each connection is.
+    whos: HashMap<u32, Who>,
 }
 
 impl Wyrm {
@@ -24,8 +25,12 @@ impl Wyrm {
         Wyrm {
             world: World::new(seed),
             viewers: HashMap::new(),
-            watchers: HashSet::new(),
+            whos: HashMap::new(),
         }
+    }
+
+    fn watchers(&self) -> usize {
+        self.whos.values().filter(|w| w.watch).count()
     }
 }
 
@@ -38,24 +43,49 @@ impl Room for Wyrm {
         TICK_HZ
     }
 
-    fn open(&mut self, conn: u32, watch: bool, out: &mut Outbox) {
+    fn open(&mut self, conn: u32, who: &Who, out: &mut Outbox) {
         out.send(conn, proto::hello(ARENA as u16, TICK_HZ as u8));
         self.viewers.insert(conn, Viewer::default());
-        if watch {
-            self.watchers.insert(conn);
+        self.whos.insert(conn, who.clone());
+    }
+
+    fn who(&mut self, conn: u32, who: &Who) {
+        if let Some(w) = self.whos.get_mut(&conn) {
+            *w = who.clone();
         }
     }
 
     fn message(&mut self, conn: u32, bytes: &[u8], _out: &mut Outbox) {
-        let (Some(v), Some(up)) = (self.viewers.get_mut(&conn), Up::decode(bytes)) else {
+        let (Some(who), Some(up)) = (self.whos.get(&conn), Up::decode(bytes)) else {
             return;
         };
-        let watching = self.watchers.contains(&conn);
+        let Some(v) = self.viewers.get_mut(&conn) else {
+            return;
+        };
         match up {
-            Up::Join { .. } | Up::Steer { .. } if watching => {}
+            Up::Join { .. } | Up::Steer { .. } if who.watch => {}
             Up::Join { name } => {
-                if self.world.find(v.you).is_none() {
-                    v.you = self.world.spawn(&name, None);
+                if self.world.find(v.you).is_some() {
+                    return;
+                }
+                // A soul's snake may be waiting for it (after a restart),
+                // or playing in another tab: it is theirs.
+                if let Some(id) = self.world.claim(who.soul) {
+                    v.you = id;
+                    for (&c, other) in self.viewers.iter_mut() {
+                        if c != conn && other.you == id {
+                            other.you = 0;
+                        }
+                    }
+                    return;
+                }
+                // A soul goes by the name the server gave it; only a page
+                // from before souls names itself.
+                let name = if who.soul != 0 { &who.name } else { &name };
+                v.you = self.world.spawn(name, None);
+                let soul = who.soul;
+                if let Some(s) = self.world.snakes.iter_mut().find(|s| s.id == v.you) {
+                    s.soul = soul;
                 }
             }
             Up::Steer { angle, boost } => {
@@ -69,7 +99,7 @@ impl Room for Wyrm {
         if let Some(v) = self.viewers.remove(&conn) {
             self.world.remove(v.you);
         }
-        self.watchers.remove(&conn);
+        self.whos.remove(&conn);
     }
 
     fn tick(&mut self, out: &mut Outbox) {
@@ -100,10 +130,41 @@ impl Room for Wyrm {
     }
 
     fn people(&self) -> usize {
-        self.viewers.len() - self.watchers.len()
+        self.viewers.len() - self.watchers()
     }
 
     fn playing(&self) -> usize {
         self.world.snakes.len()
+    }
+
+    fn save(&self) -> Option<Vec<u8>> {
+        Some(self.world.save())
+    }
+
+    fn load(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
+        // An arena can always start over; a save it cannot read is let be.
+        self.world.load(bytes);
+        Ok(())
+    }
+
+    fn schema(&self) -> u16 {
+        1
+    }
+
+    fn reserved(&self) -> &'static [&'static str] {
+        NAMES
+    }
+
+    fn stats(&self) -> Vec<(&'static str, i64)> {
+        let w = &self.world;
+        let humans = w.humans() as i64;
+        let held = w.snakes.iter().filter(|s| s.held_until != 0).count() as i64;
+        vec![
+            ("people", self.people() as i64),
+            ("watchers", self.watchers() as i64),
+            ("snakes", humans - held),
+            ("waiting", held),
+            ("bots", w.snakes.len() as i64 - humans),
+        ]
     }
 }

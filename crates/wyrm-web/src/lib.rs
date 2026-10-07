@@ -1,6 +1,9 @@
 //! wyrm's page: the game drawn pixel by pixel into one buffer, a menu
 //! drawn the same way, and the wiring between the browser (pointer, keys,
-//! the socket to its room) and the game.
+//! the link to its room) and the game. The link says Hello first, so the
+//! server knows this soul and the name it goes by; when the server holds
+//! still (a deploy) the last picture stays, dimmed, and the snake carries
+//! on where it was once the link is back.
 
 mod menu;
 mod render;
@@ -8,6 +11,8 @@ mod state;
 
 use std::cell::RefCell;
 
+use engine::who::{clean_name, Seen, Status};
+use kit::Net;
 use pixels::Rect;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -16,8 +21,11 @@ use wyrm::proto::{angle_to_u16, Down, Up};
 
 use state::State;
 
-const NAME: &str = "secretspace/name";
-const BEST: &str = "secretspace/best";
+const BEST: &str = "secretspace/wyrm/best";
+/// Where the best length was kept before every game had its own keys.
+const OLD_BEST: &str = "secretspace/best";
+/// A newer page is looked for this often (ms), and after every death.
+const VERSION_EVERY: f64 = 5.0 * 60_000.0;
 /// Steering goes out at most this often (ms), and only when it changed.
 const STEER_EVERY: f64 = 45.0;
 /// A heartbeat (the screen size) keeps a watching page connected.
@@ -28,11 +36,15 @@ const MENU_AFTER: f64 = 1200.0;
 struct Page {
     screen: kit::Screen,
     st: State,
-    socket: Option<kit::Socket>,
-    /// The first connection counts this visit.
-    counted: bool,
-    retry_at: f64,
-    retries: u32,
+    link: kit::Link,
+    session: kit::Session,
+    version: kit::Version,
+    /// The name the server says this soul goes by.
+    seen: Option<String>,
+    /// The name asked for belongs to someone else.
+    taken: bool,
+    /// A new name was asked for; join once the server says it is ours.
+    renaming: bool,
     field: kit::TextField,
     touch: bool,
     pointer: Option<(f32, f32)>,
@@ -60,9 +72,7 @@ fn with<R>(f: impl FnOnce(&mut Page) -> R) -> Option<R> {
 }
 
 fn send(p: &Page, up: &Up) {
-    if let Some(s) = &p.socket {
-        s.send(&up.encode());
-    }
+    p.link.send(&up.encode());
 }
 
 fn screen_msg(p: &Page) -> Up {
@@ -72,60 +82,88 @@ fn screen_msg(p: &Page) -> Up {
     }
 }
 
-fn connect(p: &mut Page) {
-    let url = kit::room_url("wyrm", if p.counted { "" } else { "v=1" });
-    p.counted = true;
-    p.socket = kit::Socket::open(
-        &url,
-        || {
-            with(|p| {
+/// What the link brought since the last frame.
+fn net(p: &mut Page, now: f64) {
+    for ev in p.link.poll(now) {
+        match ev {
+            Net::Up => {
                 p.st.connected = true;
-                p.retries = 0;
                 send(p, &screen_msg(p));
-                if p.joining {
+                // Back after a hold: the snake is waiting for its soul.
+                if p.st.playing() {
+                    p.joining = true;
+                }
+                if p.joining && !p.renaming {
                     send(p, &join_msg(p));
                 }
-            });
-        },
-        |bytes| {
-            let Some(msg) = Down::decode(&bytes) else {
-                return;
-            };
-            with(|p| {
-                let died = matches!(msg, Down::Died { .. });
-                p.st.receive(kit::now(), msg);
-                if died {
-                    p.joining = false;
-                    kit::save(BEST, &p.st.best.to_string());
-                }
-                if p.st.playing() {
-                    p.joining = false;
-                }
-            });
-        },
-        || {
-            with(|p| {
-                p.st.connected = false;
-                p.socket = None;
-                p.retries += 1;
-                p.retry_at = kit::now() + 500.0 * 2f64.powi(p.retries.min(4) as i32);
-                p.st.mirror = Default::default();
-            });
-        },
-    );
+            }
+            // Keep the picture; it is coming back.
+            Net::Holding => p.st.connected = false,
+            Net::Message(bytes) => receive(p, now, &bytes),
+        }
+    }
+}
+
+fn receive(p: &mut Page, now: f64, bytes: &[u8]) {
+    if let Some(seen) = Seen::decode(bytes) {
+        if seen.status == Status::Taken {
+            p.taken = true;
+            p.joining = false;
+            p.renaming = false;
+            return;
+        }
+        // The stored name wins over what this browser last typed.
+        if !seen.name.is_empty() && p.field.value() == p.session.name() {
+            p.field.set_value(&seen.name);
+        }
+        p.session.set_name(&seen.name);
+        p.link.set_hello(p.session.hello(&seen.name, false));
+        p.seen = Some(seen.name);
+        if p.renaming {
+            p.renaming = false;
+            p.taken = false;
+            if p.joining {
+                send(p, &join_msg(p));
+            }
+        }
+        return;
+    }
+    let Some(msg) = Down::decode(bytes) else {
+        return;
+    };
+    let died = matches!(msg, Down::Died { .. });
+    p.st.receive(now, msg);
+    if died {
+        p.joining = false;
+        kit::save(BEST, &p.st.best.to_string());
+        p.version.poll(now, true);
+    }
+    if p.st.playing() {
+        p.joining = false;
+    }
 }
 
 fn join_msg(p: &Page) -> Up {
-    let name = p.field.value().trim().to_string();
-    kit::save(NAME, &name);
-    Up::Join { name }
+    Up::Join {
+        name: clean_name(&p.field.value()),
+    }
 }
 
 fn play(p: &mut Page) {
     p.joining = true;
     p.st.death = None;
     p.field.blur();
-    send(p, &join_msg(p));
+    let name = clean_name(&p.field.value());
+    p.field.set_value(&name);
+    if !name.is_empty() && p.seen.as_deref() != Some(name.as_str()) {
+        // A new name: the server says whether it is free first.
+        p.renaming = true;
+        let hello = p.session.hello(&name, true);
+        p.link.send(&hello);
+        p.link.set_hello(hello);
+    } else {
+        send(p, &join_msg(p));
+    }
 }
 
 /// The phone's boost button.
@@ -145,9 +183,8 @@ fn boost_button(p: &Page) -> Option<Rect> {
 
 /// Every animation frame: draw, steer, keep the connection and the menu.
 fn tick(p: &mut Page, now: f64) {
-    if p.socket.is_none() && now >= p.retry_at {
-        connect(p);
-    }
+    net(p, now);
+    p.version.poll(now, false);
     p.st.age(now);
     let hud = render::Hud {
         u: p.screen.ui(),
@@ -161,6 +198,10 @@ fn tick(p: &mut Page, now: f64) {
     let menu = !p.st.playing()
         && !p.joining
         && p.st.death.as_ref().is_none_or(|d| now - d.at > MENU_AFTER);
+    // A newer page is out: take it now, while it costs nothing.
+    if menu && p.st.death.is_some() && p.version.newer() {
+        kit::version::reload();
+    }
     if menu {
         let name = p.field.value();
         let look = menu::Look {
@@ -169,6 +210,7 @@ fn tick(p: &mut Page, now: f64) {
             editing: p.field.focused(),
             pointer: p.pointer,
             touch: p.touch,
+            taken: p.taken,
         };
         p.spots = menu::draw(&mut p.screen.px, &p.st, &look, now);
         let n = p.spots.name;
@@ -244,18 +286,23 @@ pub fn start() -> Result<(), JsValue> {
         .get_element_by_id("screen")
         .ok_or("no #screen")?;
     let field = kit::TextField::new(wyrm::laws::MAX_NAME as u32, "your name");
-    if let Some(n) = kit::load(NAME) {
-        field.set_value(&n);
-    }
-    let best = kit::load(BEST).and_then(|b| b.parse().ok()).unwrap_or(0);
+    let session = kit::Session::load();
+    let name = session.name();
+    field.set_value(&name);
+    let best = kit::load_moved(BEST, OLD_BEST)
+        .and_then(|b| b.parse().ok())
+        .unwrap_or(0);
+    let link = kit::Link::open("wyrm", session.hello(&name, false), false);
     PAGE.with(|p| {
         *p.borrow_mut() = Some(Page {
             screen,
             st: State::new(best),
-            socket: None,
-            counted: false,
-            retry_at: 0.0,
-            retries: 0,
+            link,
+            session,
+            version: kit::Version::watch(VERSION_EVERY),
+            seen: None,
+            taken: false,
+            renaming: false,
             field,
             touch: kit::touch(),
             pointer: None,

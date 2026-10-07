@@ -10,7 +10,7 @@ pub struct Bot {
     pub nerve: u8,
 }
 
-const NAMES: &[&str] = &[
+pub const NAMES: &[&str] = &[
     "noodle",
     "zigzag",
     "sir slithers",

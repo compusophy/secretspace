@@ -21,6 +21,10 @@ impl Writer {
         self.0.extend_from_slice(&v.to_le_bytes());
         self
     }
+    pub fn i32(&mut self, v: i32) -> &mut Self {
+        self.0.extend_from_slice(&v.to_le_bytes());
+        self
+    }
     pub fn u64(&mut self, v: u64) -> &mut Self {
         self.0.extend_from_slice(&v.to_le_bytes());
         self
@@ -66,6 +70,17 @@ impl<'a> Reader<'a> {
     }
     pub fn u64(&mut self) -> Option<u64> {
         Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+    }
+    /// The next `n` bytes as they are.
+    pub fn bytes(&mut self, n: usize) -> Option<&'a [u8]> {
+        self.take(n)
+    }
+    /// Whether every byte has been read.
+    pub fn done(&self) -> bool {
+        self.at >= self.b.len()
+    }
+    pub fn i32(&mut self) -> Option<i32> {
+        Some(i32::from_le_bytes(self.take(4)?.try_into().ok()?))
     }
     pub fn str(&mut self) -> Option<String> {
         let n = self.u8()? as usize;

@@ -1,63 +1,72 @@
 //! secretspace server: hosts every game, and the hub's live numbers.
 //!
 //! Each game is a `Room` running in a thread of its own at its own tick
-//! rate. A browser opens a WebSocket to `/ws/<game>` (plain `/ws` and
-//! `/ws/arena` are wyrm, for pages from before) and the room takes it
-//! from there; each connection has a reader thread and a writer thread,
-//! and a browser that cannot keep up is let go rather than allowed to hold
-//! its room back. `/ws/hub` is told once a second who is online where and
-//! how many visits there have been. A page counts as a visit when its first
-//! connection asks with `?v=1`; visits are kept in `$DATA_DIR/visits` when
-//! DATA_DIR is set, so they outlive a redeploy.
+//! rate (`host`), kept on disk (`store`). A browser opens a WebSocket to
+//! `/ws/<game>` (plain `/ws` and `/ws/arena` are wyrm, for pages from
+//! before) and says the platform Hello: the server knows its soul and name
+//! (`souls`) and the room takes it from there. Each connection has a reader
+//! thread and a writer thread, and a browser that cannot keep up is let go
+//! rather than allowed to hold its room back. `/ws/hub` is told once a
+//! second who is online where and how many visits there have been. A page
+//! counts as a visit when its first connection asks with `?v=1`.
+//!
+//! What is kept, under `$DATA_DIR`: `visits`, `souls`, `rooms/<id>/`. A
+//! SIGTERM (a deploy) holds every room still and saves it first (`signal`).
 //!
 //! Optionally serves the pages too (`--static dist`). std only.
 //!
 //! `server [--port 8787] [--static dist]`; PORT in the environment wins.
 
+mod host;
+mod signal;
+mod souls;
+mod store;
 mod ws;
 
-use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender, TrySendError};
-use std::sync::Arc;
+use std::sync::mpsc::sync_channel;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use engine::hub::Stats;
-use engine::room::{Outbox, Room};
+use engine::room::{Room, Who};
+use engine::who::{Hello, PLATFORM};
 
-/// Messages a browser may fall behind by before it is let go.
-const BACKLOG: usize = 60;
+use host::{unix, Event, Game};
+use souls::Souls;
+use store::{Factory, Store};
+
+/// Every game there is.
+const ROOMS: &[Factory] = &[wyrm_room];
+
+fn wyrm_room(seed: u64) -> Box<dyn Room> {
+    Box::new(wyrm::room::Wyrm::new(seed))
+}
+
+/// The server's build: a hash of everything it is made from (`ship.sh`).
+const BUILD: &str = match option_env!("SECRETSPACE_BUILD") {
+    Some(b) => b,
+    None => "dev",
+};
 /// Messages a browser may send a second.
 const RATE: u32 = 90;
 /// A browser that says nothing for this long is gone (pages send a
 /// heartbeat every ten seconds).
 const IDLE: Duration = Duration::from_secs(45);
-
-enum Event {
-    /// A browser connected: its sender, and whether it only watches.
-    Open(u32, SyncSender<Vec<u8>>, bool),
-    Say(u32, Vec<u8>),
-    Close(u32),
-}
-
-struct Game {
-    id: &'static str,
-    /// People connected (watchers aside), and everyone in the game, bots too.
-    people: AtomicUsize,
-    playing: AtomicUsize,
-    events: Sender<Event>,
-}
+/// A page that has not said Hello by now is a guest.
+const HELLO_WAIT: Duration = Duration::from_secs(1);
 
 /// What every connection thread can see.
 struct Shared {
     games: Vec<Arc<Game>>,
     hub: AtomicUsize,
     visits: AtomicU64,
+    souls: Mutex<Souls>,
 }
 
 impl Shared {
@@ -76,9 +85,14 @@ impl Shared {
                 .collect(),
         }
     }
+
+    fn souls(&self) -> MutexGuard<'_, Souls> {
+        self.souls.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 fn main() {
+    signal::install();
     let args: Vec<String> = std::env::args().collect();
     let arg = |name: &str| {
         args.iter()
@@ -93,50 +107,47 @@ fn main() {
         .unwrap_or(8787);
     let root = arg("--static").map(PathBuf::from);
     let data = std::env::var("DATA_DIR").ok().map(PathBuf::from);
+    if let Some(d) = &data {
+        let _ = fs::create_dir_all(d);
+    }
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(1);
-
-    // Every game there is.
-    let rooms: Vec<Box<dyn Room>> = vec![Box::new(wyrm::room::Wyrm::new(seed))];
 
     let visits = data
         .as_ref()
         .and_then(|d| fs::read_to_string(d.join("visits")).ok())
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
-    let mut games = Vec::new();
-    for room in rooms {
-        let (events, inbox) = channel::<Event>();
-        let game = Arc::new(Game {
-            id: room.id(),
-            people: AtomicUsize::new(0),
-            playing: AtomicUsize::new(0),
-            events,
-        });
-        let g = game.clone();
-        thread::spawn(move || host(room, inbox, &g));
-        games.push(game);
+    let store = Store::new(data.as_deref());
+    let games: Vec<Arc<Game>> = ROOMS
+        .iter()
+        .map(|&f| host::start(f, seed, store.clone(), signal::stopping))
+        .collect();
+    let mut souls = Souls::open(data.as_ref().map(|d| d.join("souls")), unix());
+    for g in &games {
+        souls.reserve(g.reserved);
     }
     let shared = Arc::new(Shared {
         games,
         hub: AtomicUsize::new(0),
         visits: AtomicU64::new(visits),
+        souls: Mutex::new(souls),
     });
-    if let Some(dir) = data.clone() {
-        let s = shared.clone();
-        thread::spawn(move || keep_visits(&dir, &s));
+    {
+        let (s, d) = (shared.clone(), data.clone());
+        thread::spawn(move || keep(d.as_deref(), &s));
     }
 
     let listener = TcpListener::bind(("0.0.0.0", port)).expect("bind");
     eprintln!(
-        "secretspace on :{port}{}{}",
+        "secretspace {BUILD} on :{port}{}{}",
         root.as_ref()
             .map(|r| format!(", serving {}", r.display()))
             .unwrap_or_default(),
         data.as_ref()
-            .map(|d| format!(", visits kept in {}", d.display()))
+            .map(|d| format!(", keeping {}", d.display()))
             .unwrap_or_default()
     );
     let mut next_conn = 0u32;
@@ -149,69 +160,47 @@ fn main() {
     }
 }
 
-/// Write the visit count down every few seconds when it changed.
-fn keep_visits(dir: &Path, shared: &Shared) {
-    let _ = fs::create_dir_all(dir);
+/// Every five seconds: play time for souls, and the souls and the visit
+/// count written down when they changed. On a stop: wait for every room to
+/// hold still and save, write everything down, and leave.
+fn keep(dir: Option<&Path>, shared: &Shared) {
     let mut saved = shared.visits.load(Ordering::Relaxed);
-    loop {
-        thread::sleep(Duration::from_secs(5));
+    let write_visits = |saved: &mut u64| {
         let now = shared.visits.load(Ordering::Relaxed);
-        if now != saved {
-            let tmp = dir.join("visits.tmp");
-            if fs::write(&tmp, now.to_string()).is_ok()
-                && fs::rename(&tmp, dir.join("visits")).is_ok()
-            {
-                saved = now;
-            }
+        let Some(dir) = dir.filter(|_| now != *saved) else {
+            return;
+        };
+        let tmp = dir.join("visits.tmp");
+        if fs::write(&tmp, now.to_string()).is_ok() && fs::rename(&tmp, dir.join("visits")).is_ok()
+        {
+            *saved = now;
         }
-    }
-}
-
-/// One room's own thread: events in, a tick, messages out, forever.
-fn host(mut room: Box<dyn Room>, inbox: Receiver<Event>, game: &Game) {
-    let mut clients: HashMap<u32, SyncSender<Vec<u8>>> = HashMap::new();
-    let tick = Duration::from_micros(1_000_000 / room.hz().max(1) as u64);
-    let mut next = Instant::now();
+    };
+    let mut last = Instant::now();
     loop {
-        let mut out = Outbox::default();
-        while let Ok(ev) = inbox.try_recv() {
-            match ev {
-                Event::Open(conn, tx, watch) => {
-                    clients.insert(conn, tx);
-                    room.open(conn, watch, &mut out);
-                }
-                Event::Say(conn, bytes) => room.message(conn, &bytes, &mut out),
-                Event::Close(conn) => {
-                    if clients.remove(&conn).is_some() {
-                        room.close(conn);
-                    }
-                }
+        thread::sleep(Duration::from_millis(50));
+        if signal::stopping() {
+            eprintln!("stopping: every room holds still");
+            let t = Instant::now();
+            while shared.games.iter().any(|g| !g.done.load(Ordering::Relaxed))
+                && t.elapsed() < Duration::from_secs(5)
+            {
+                thread::sleep(Duration::from_millis(20));
             }
+            // Let the Stills reach the pages.
+            thread::sleep(Duration::from_millis(300));
+            shared.souls().save(unix());
+            write_visits(&mut saved);
+            eprintln!("stopped after {} ms", t.elapsed().as_millis());
+            std::process::exit(0);
         }
-        room.tick(&mut out);
-        let mut gone = Vec::new();
-        for (conn, msg) in out.0 {
-            if let Some(tx) = clients.get(&conn) {
-                if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) = tx.try_send(msg)
-                {
-                    gone.push(conn);
-                }
-            }
-        }
-        for conn in gone {
-            if clients.remove(&conn).is_some() {
-                room.close(conn);
-            }
-        }
-        game.people.store(room.people(), Ordering::Relaxed);
-        game.playing.store(room.playing(), Ordering::Relaxed);
-
-        next += tick;
-        let now = Instant::now();
-        if next > now {
-            thread::sleep(next - now);
-        } else if now - next > Duration::from_secs(1) {
-            next = now;
+        if last.elapsed() >= Duration::from_secs(5) {
+            last = Instant::now();
+            let mut souls = shared.souls();
+            souls.tick(5, unix());
+            souls.save(unix());
+            drop(souls);
+            write_visits(&mut saved);
         }
     }
 }
@@ -224,6 +213,10 @@ fn serve(
 ) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_nodelay(true)?;
+    let peer = stream
+        .peer_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_default();
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut head = Vec::new();
     loop {
@@ -273,34 +266,63 @@ fn serve(
             shared.visits.fetch_add(1, Ordering::Relaxed);
         }
         let watch = query.split('&').any(|kv| kv == "watch=1");
+        // Railway's edge says who is really asking.
+        let addr = header("X-Forwarded-For")
+            .and_then(|f| f.split(',').next().map(|a| a.trim().to_string()))
+            .unwrap_or(peer);
         return match game {
-            Some(game) => play(reader, out, conn, watch, &game),
+            Some(game) => play(reader, out, conn, watch, &addr, &game, shared),
             None => hub(reader, out, shared),
         };
     }
-    if path == "/health" || path == "/stats" {
+    if path == "/health" {
         let s = shared.stats();
-        if path == "/health" {
-            let body = format!("secretspace · {} online · {} visits\n", s.online, s.visits);
-            return respond(&mut out, "200 OK", "text/plain", body.as_bytes());
+        let mut body = format!("ok {BUILD} · {} online · {} visits", s.online, s.visits);
+        for g in shared.games.iter().filter(|g| g.state() != "running") {
+            body += &format!(" · {} {}", g.id, g.state());
         }
-        let games: Vec<String> = s
-            .games
-            .iter()
-            .map(|(id, n)| format!("\"{id}\":{n}"))
-            .collect();
-        let body = format!(
-            "{{\"online\":{},\"visits\":{},\"games\":{{{}}}}}\n",
-            s.online,
-            s.visits,
-            games.join(",")
-        );
+        body.push('\n');
+        return respond(&mut out, "200 OK", "text/plain", body.as_bytes());
+    }
+    if path == "/stats" {
+        let body = stats_json(shared);
         return respond(&mut out, "200 OK", "application/json", body.as_bytes());
     }
     match root {
         Some(root) => file(&mut out, root, path),
         None => respond(&mut out, "200 OK", "text/plain", b"secretspace\n"),
     }
+}
+
+fn stats_json(shared: &Shared) -> String {
+    let s = shared.stats();
+    let games: Vec<String> = s
+        .games
+        .iter()
+        .map(|(id, n)| format!("\"{id}\":{n}"))
+        .collect();
+    let rooms: Vec<String> = shared
+        .games
+        .iter()
+        .map(|g| {
+            let mut fields = vec![
+                format!("\"state\":\"{}\"", g.state()),
+                format!("\"playing\":{}", g.playing.load(Ordering::Relaxed)),
+                format!("\"panics\":{}", g.panics.load(Ordering::Relaxed)),
+            ];
+            let stats = g.stats.lock().unwrap_or_else(|e| e.into_inner());
+            fields.extend(stats.iter().map(|(k, v)| format!("\"{k}\":{v}")));
+            format!("\"{}\":{{{}}}", g.id, fields.join(","))
+        })
+        .collect();
+    format!(
+        "{{\"build\":\"{BUILD}\",\"online\":{},\"visits\":{},\"souls\":{},\"games\":{{{}}},\"rooms\":{{{}}}}}\n",
+        s.online,
+        s.visits,
+        shared.souls().len(),
+        games.join(","),
+        rooms.join(",")
+    )
 }
 
 fn respond(out: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> std::io::Result<()> {
@@ -369,16 +391,22 @@ fn listen(mut reader: impl Read, mut said: impl FnMut(Vec<u8>)) -> std::io::Resu
 }
 
 /// A browser in a game: a writer thread drains what its room sends it;
-/// this thread reads what it says.
+/// this thread reads what it says. Its first message is the platform Hello
+/// (anything else, or a second of silence, and it is a guest); platform
+/// messages go no further than here.
 fn play(
-    reader: impl Read,
+    mut reader: impl Read,
     writer: TcpStream,
     conn: u32,
     watch: bool,
+    addr: &str,
     game: &Game,
+    shared: &Shared,
 ) -> std::io::Result<()> {
-    writer.set_read_timeout(Some(IDLE))?;
-    let (tx, rx) = sync_channel::<Vec<u8>>(BACKLOG);
+    if game.state() != "running" {
+        return Ok(());
+    }
+    let (tx, rx) = sync_channel::<Vec<u8>>(game.backlog);
     let mut w = writer.try_clone()?;
     let pump = thread::spawn(move || {
         for msg in rx {
@@ -389,12 +417,50 @@ fn play(
         let _ = ws::write(&mut w, 8, &[]);
         let _ = w.shutdown(std::net::Shutdown::Both);
     });
-    if game.events.send(Event::Open(conn, tx, watch)).is_err() {
-        return Ok(());
+    let mut who = Who::guest(watch);
+    let mut first = None;
+    if !watch {
+        writer.set_read_timeout(Some(HELLO_WAIT))?;
+        match ws::read(&mut reader) {
+            Ok(ws::Frame::Binary(b)) => match Hello::decode(&b) {
+                Some(h) => {
+                    let (w, seen) = shared.souls().hello(&h, addr, unix(), watch);
+                    who = w;
+                    let _ = tx.try_send(seen.encode());
+                }
+                None => first = Some(b),
+            },
+            Ok(ws::Frame::Close) => return Ok(()),
+            Ok(_) => {}
+            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+            Err(e) => return Err(e),
+        }
     }
-    let result = listen(reader, |b| {
+    writer.set_read_timeout(Some(IDLE))?;
+    let soul = |w: &Who| if w.watch { 0 } else { w.soul };
+    let me = soul(&who);
+    let started = game.events.send(Event::Open(conn, tx, who)).is_ok();
+    if let (true, Some(b)) = (started, first) {
         let _ = game.events.send(Event::Say(conn, b));
-    });
+    }
+    let result = if started {
+        shared.souls().enter(conn, me);
+        listen(reader, |b| {
+            if b.first() != Some(&PLATFORM) {
+                let _ = game.events.send(Event::Say(conn, b));
+            } else if let Some(h) = Hello::decode(&b) {
+                // Hello again: a new name, most likely.
+                let mut souls = shared.souls();
+                let (w, seen) = souls.hello(&h, addr, unix(), watch);
+                souls.enter(conn, soul(&w));
+                drop(souls);
+                let _ = game.events.send(Event::Who(conn, w, seen.encode()));
+            }
+        })
+    } else {
+        Ok(())
+    };
+    shared.souls().leave(conn);
     let _ = game.events.send(Event::Close(conn));
     let _ = writer.shutdown(std::net::Shutdown::Both);
     let _ = pump.join();

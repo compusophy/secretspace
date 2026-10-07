@@ -1,6 +1,8 @@
 //! The arena: snakes that steer, eat, grow and burst, and the food on the
 //! ground. The server runs one `World` and calls `step` every tick.
 
+mod save;
+
 use std::collections::{HashMap, VecDeque};
 
 use crate::bots::{self, Bot};
@@ -10,6 +12,8 @@ use engine::rng::Rng;
 
 pub struct Snake {
     pub id: u16,
+    /// Whose it is (0 for a bot or a guest).
+    pub soul: u64,
     pub name: String,
     pub hue: u8,
     /// Body points, the head first, `STEP` apart.
@@ -28,6 +32,10 @@ pub struct Snake {
     pub born: u32,
     /// Until this tick it passes through everyone, and they through it.
     pub ghost_until: u32,
+    /// Loaded from a save and waiting for its person: frozen and harmless
+    /// until they come back, bursting at this tick if they do not. 0 when
+    /// it is not waiting.
+    pub held_until: u32,
     /// Food owed to the ground from boosting, not yet dropped.
     owed: f32,
     /// The box around its body: (x0, y0, x1, y1).
@@ -44,7 +52,7 @@ impl Snake {
     }
 
     pub fn ghost(&self, tick: u32) -> bool {
-        tick < self.ghost_until
+        tick < self.ghost_until || self.held_until != 0
     }
 
     /// Length as people see it: mass, rounded.
@@ -155,17 +163,14 @@ impl World {
         } else {
             0
         };
-        let name: String = name
-            .chars()
-            .filter(|c| !c.is_control())
-            .take(MAX_NAME)
-            .collect();
+        let name = engine::who::clean_name(name);
         self.snakes.push(Snake {
             id,
-            name: if name.trim().is_empty() {
+            soul: 0,
+            name: if name.is_empty() {
                 "anonymous".into()
             } else {
-                name.trim().to_string()
+                name
             },
             hue,
             body,
@@ -179,6 +184,7 @@ impl World {
             kills: 0,
             born: self.tick,
             ghost_until,
+            held_until: 0,
             owed: 0.0,
             bbox: (x, y, x, y),
         });
@@ -219,6 +225,21 @@ impl World {
             }
             s.boost = boost;
         }
+    }
+
+    /// A person's snake waiting for them (after a restart), or theirs in
+    /// another tab: it is theirs again, a ghost for a moment. Its id.
+    pub fn claim(&mut self, soul: u64) -> Option<u16> {
+        let tick = self.tick;
+        let s = self
+            .snakes
+            .iter_mut()
+            .find(|s| soul != 0 && s.soul == soul && s.bot.is_none())?;
+        if s.held_until != 0 {
+            s.held_until = 0;
+            s.ghost_until = tick + RESUME_GHOST;
+        }
+        Some(s.id)
     }
 
     /// A person left: their snake bursts like any other.
@@ -317,6 +338,11 @@ impl World {
         // Everyone moves.
         let mut dropped = Vec::new();
         for s in &mut self.snakes {
+            if s.held_until != 0 {
+                s.moved = 0;
+                s.boosting = false;
+                continue;
+            }
             s.boosting = s.boost && s.mass >= MIN_BOOST_MASS;
             let steps = if s.boosting { BOOST_STEPS } else { STEPS };
             let r = radius(s.mass);
@@ -354,6 +380,9 @@ impl World {
 
         // Everyone eats what is under their mouth.
         for i in 0..self.snakes.len() {
+            if self.snakes[i].held_until != 0 {
+                continue;
+            }
             let (hx, hy) = self.snakes[i].head();
             let r = self.snakes[i].radius();
             let reach = r + 14.0;
@@ -378,6 +407,13 @@ impl World {
         self.rebuild_bodies();
         let mut dead: Vec<(usize, Option<usize>)> = Vec::new();
         for (i, s) in self.snakes.iter().enumerate() {
+            if s.held_until != 0 {
+                // Nobody came back for it.
+                if s.held_until <= self.tick {
+                    dead.push((i, None));
+                }
+                continue;
+            }
             let (hx, hy) = s.head();
             let r = s.radius();
             if hx * hx + hy * hy > (ARENA - r).powi(2) {
@@ -445,6 +481,11 @@ impl World {
 
         self.populate();
         self.rebuild_bodies();
+        self.fit_boxes();
+        deaths
+    }
+
+    fn fit_boxes(&mut self) {
         for s in &mut self.snakes {
             let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
             for &(x, y) in &s.body {
@@ -455,7 +496,6 @@ impl World {
             }
             s.bbox = (x0, y0, x1, y1);
         }
-        deaths
     }
 
     fn burst(&mut self, i: usize, killer: Option<(u16, String)>) -> Death {

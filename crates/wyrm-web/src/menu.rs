@@ -19,6 +19,8 @@ pub struct Look<'a> {
     pub editing: bool,
     pub pointer: Option<(f32, f32)>,
     pub touch: bool,
+    /// The name asked for is someone else's.
+    pub taken: bool,
 }
 
 pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
@@ -144,6 +146,17 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
         c.fill_rect(cx, ny - s / 2, s.max(1), 8 * s, GO);
     }
     y += name.h + 8.0 * uf;
+    if look.taken {
+        y = lines(
+            c,
+            w,
+            y,
+            "that name is taken - pick another",
+            u,
+            Rgba::rgb(255, 140, 120),
+        );
+        y += 4.0 * uf;
+    }
 
     // PLAY.
     let play = Rect::new(x, y, panel_w, 28.0 * uf);

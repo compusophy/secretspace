@@ -62,6 +62,15 @@ pub fn frame(c: &mut Canvas, st: &mut State, css: (f64, f64), scale: f64, now: f
     };
     look::world(c, &v, &scene, now);
     board(c, st, hud, now);
+    // The server is holding still (a deploy): the last picture, dimmed.
+    if !st.connected && !st.mirror.snakes.is_empty() {
+        c.fill_rect(0, 0, c.w, c.h, Rgba(7, 10, 18, 120));
+        let u = hud.u;
+        let line = "holding still - back in a moment";
+        let s = pixels::fit_scale(line, c.w - 16 * u, 2 * u);
+        let pulse = 170 + ((now / 300.0).sin() * 60.0) as i32;
+        c.text_centred(c.w / 2, c.h / 3, line, s, Rgba(255, 226, 150, pulse as u8));
+    }
 }
 
 fn board(c: &mut Canvas, st: &State, hud: &Hud, now: f64) {

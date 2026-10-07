@@ -1,8 +1,20 @@
 //! The browser end every page here shares, so a game's page is only its
 //! own drawing and rules: a pixel `Screen` the game draws into and shows
-//! once a frame, a `Socket` to its room, an invisible `TextField` (so a
-//! phone still offers its keyboard), storage, and a frame loop. Rust only:
-//! the page's one line of script just starts the wasm.
+//! once a frame, a `Link` to its room (or a plain `Socket`), the `Session`
+//! that says who this is, one `Pointer` at a time, the page's `version`,
+//! an invisible `TextField` (so a phone still offers its keyboard),
+//! storage, and a frame loop. Rust only: the page's one line of script
+//! just starts the wasm.
+
+pub mod link;
+pub mod pointer;
+pub mod session;
+pub mod version;
+
+pub use link::{Link, Net};
+pub use pointer::{Latch, Pointer, Press};
+pub use session::Session;
+pub use version::Version;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -61,6 +73,47 @@ pub fn save(key: &str, v: &str) {
     if let Ok(Some(s)) = window().local_storage() {
         let _ = s.set_item(key, v);
     }
+}
+
+/// A value kept under `key`, or under `old` from before it moved (moved
+/// over the first time it is read).
+pub fn load_moved(key: &str, old: &str) -> Option<String> {
+    load(key).or_else(|| {
+        let v = load(old)?;
+        save(key, &v);
+        if let Ok(Some(s)) = window().local_storage() {
+            let _ = s.remove_item(old);
+        }
+        Some(v)
+    })
+}
+
+/// A buzz, where the device has one (Android; iOS has none).
+pub fn vibrate(ms: u32) {
+    let _ = window().navigator().vibrate_with_duration(ms);
+}
+
+/// Hand the person a file to keep.
+pub fn download(name: &str, bytes: &[u8]) {
+    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type("application/octet-stream");
+    let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts) else {
+        return;
+    };
+    let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
+        return;
+    };
+    if let Some(a) = document()
+        .create_element("a")
+        .ok()
+        .and_then(|e| e.dyn_into::<web_sys::HtmlAnchorElement>().ok())
+    {
+        a.set_href(&url);
+        a.set_download(name);
+        a.click();
+    }
+    let _ = web_sys::Url::revoke_object_url(&url);
 }
 
 /// Go to another page.
@@ -147,6 +200,33 @@ impl Screen {
 
     /// Match the window: pick the pixel size, size the buffer.
     pub fn fit(&mut self) {
+        let (w, h) = Self::window_css();
+        // About 960 buffer pixels across, at most: big screens get bigger
+        // pixels, a phone gets one per CSS pixel.
+        self.size((w / 960.0).ceil().clamp(1.0, 4.0), w, h);
+    }
+
+    /// Match the window with the biggest pixels that still leave at least
+    /// `min_short` buffer pixels on the short side: a game that wants to be
+    /// seen the same on every screen.
+    pub fn fit_view(&mut self, min_short: f64) {
+        let (w, h) = Self::window_css();
+        self.size((w.min(h) / min_short).floor().clamp(1.0, 8.0), w, h);
+    }
+
+    fn size(&mut self, scale: f64, w: f64, h: f64) {
+        self.scale = scale;
+        self.css = (w, h);
+        let (bw, bh) = (
+            (w / self.scale).ceil() as i32,
+            (h / self.scale).ceil() as i32,
+        );
+        self.px.resize(bw, bh);
+        self.canvas.set_width(bw as u32);
+        self.canvas.set_height(bh as u32);
+    }
+
+    fn window_css() -> (f64, f64) {
         let w = window()
             .inner_width()
             .ok()
@@ -157,17 +237,7 @@ impl Screen {
             .ok()
             .and_then(|v| v.as_f64())
             .unwrap_or(600.0);
-        // About 960 buffer pixels across, at most: big screens get bigger
-        // pixels, a phone gets one per CSS pixel.
-        self.scale = (w / 960.0).ceil().clamp(1.0, 4.0);
-        self.css = (w, h);
-        let (bw, bh) = (
-            (w / self.scale).ceil() as i32,
-            (h / self.scale).ceil() as i32,
-        );
-        self.px.resize(bw, bh);
-        self.canvas.set_width(bw as u32);
-        self.canvas.set_height(bh as u32);
+        (w, h)
     }
 
     /// The text scale that reads the same size on any screen.

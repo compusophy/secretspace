@@ -1,0 +1,5 @@
+//! Luciphon: carry your light out, knock them off the edge. A persistent
+//! one-thumb brawler-builder on a floating island of light; the spec is
+//! `docs/luciphon.md`. The core is std and `engine` only, shared by the
+//! server and the page, and deterministic (Q16.16, `engine::fixed`) so the
+//! page can predict exactly what the server will do.

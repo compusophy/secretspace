@@ -859,7 +859,7 @@ These are the purest skill fights and the first thing worth streaming.
      - Souls with under 10 minutes of play expire after 14 days away, and their name is freed.
      - At most 10 new souls an hour per address, as Railway's edge reports it in `X-Forwarded-For`.
    - **Recovery.**
-     - Luciphon's first-run screen shows the key as 12 words from a committed 2,048-word list ("write these down"), and offers a restore field (`kit::TextField`).
+     - Luciphon's first-run screen shows the key as 11 words ("write these down"), and offers a restore field (`kit::TextField`). **Built (Stage 0):** `engine::words` makes each word four letters, consonant-vowel-consonant-vowel ("bako", "rimu"), 12 bits apiece: 128 bits of key and a 4-bit check, so most slips in copying are caught. No word list to commit or fetch.
      - Device pairing (6 digits) and then passkeys follow in v0.5.
    - From v0.5 the name is chosen on the hub.
 2. **Storage namespacing.** Platform keys are `secretspace/key` and `secretspace/name`; game keys are `secretspace/<game>/...`. wyrm's `secretspace/best` moves to `secretspace/wyrm/best`, with a one-time read of the old key.
@@ -945,13 +945,17 @@ pub trait Room: Send {
     fn backlog(&self) -> usize { 60 }
     /// Extra numbers for /stats.
     fn stats(&self) -> Vec<(&'static str, i64)> { Vec::new() }
+    // Built in Stage 0 beside the above: who(conn, &Who) when a connection
+    // says Hello again (a rename); schema() for the snapshot container;
+    // reserved() for its bots' names, which no soul may take.
 }
 ```
 
-**The platform `Hello`** is the first message on any game socket: `0xFE`, platform protocol `u8`, `key [16]`, `name str`, `rename u8`, `build u32`.
+**The platform `Hello`** is the first message on any game socket: `0xFE`, kind `1`, platform protocol `u8`, `key [16]`, `name str`, `rename u8`, `build u32`. A page may say it again later (a rename); the server answers each one, and rooms never see a message that starts with `0xFE`.
 
 - A page that sends anything else first opens as a guest, and its message is delivered to the room. This keeps cached wyrm pages working.
-- The server answers a Hello with `Seen`: `0xFE`, status `u8` (ok, new or taken), `name str`.
+- The server answers a Hello with `Seen`: `0xFE`, kind `1`, status `u8` (ok, new or taken), `name str`. `Still` is `0xFE`, kind `2`: hold the picture and reconnect.
+- Watchers (`?watch=1`) say no Hello and are opened at once, as guests.
 
 **`server`** (std only; `main.rs` is split to stay under the cap):
 
@@ -1136,11 +1140,11 @@ Browser checks are Playwright scripts kept in the scratchpad and **never committ
 
 ### Stage 0: platform plumbing, proven on wyrm
 
-- [ ] **0.1** `Cargo.toml` profiles (opt-level 3, `[profile.server]` with unwind); `ship.sh` builds that profile; `build-web.sh` prints raw and gzipped sizes.
-- [ ] **0.2** `engine`: `who.rs`, `sha1.rs` (moved), `crc32.rs`, `snap.rs`, `fixed.rs`.
+- [x] **0.1** `Cargo.toml` profiles (opt-level 3, `[profile.server]` with unwind); `ship.sh` builds that profile; `build-web.sh` prints raw and gzipped sizes.
+- [x] **0.2** `engine`: `who.rs`, `sha1.rs` (moved), `crc32.rs`, `snap.rs`, `fixed.rs`.
   - Tests: SHA-1 and CRC32 vectors; snapshot round trip and hostile bytes; `fixed` agrees with `f64` within 1/4096 over 100k samples (test only), with golden values pinned.
-- [ ] **0.3** The new `Room` trait; wyrm updated to take `&Who`.
-- [ ] **0.4** `server`:
+- [x] **0.3** The new `Room` trait; wyrm updated to take `&Who`.
+- [x] **0.4** `server`:
   - split into `main`, `host`, `store`, `souls` and `signal`;
   - the factory list; Hello to `Who` and `Seen`, with the guest fallback;
   - the soul store with unique names and its abuse bounds;
@@ -1150,19 +1154,19 @@ Browser checks are Playwright scripts kept in the scratchpad and **never committ
   - the signal watcher;
   - `/health` and `/stats`.
   - Tests: `host_survives_a_panicking_room` (a test-only room that panics on tick 5 leaves a second room ticking) and `a_room_that_keeps_panicking_is_stopped`.
-- [ ] **0.5** `kit`: `Session` (with words and restore), `Link`, `pointer` (with the latched stick), `version`, `Screen::fit_view`, `vibrate`, `download`, and the `secretspace/wyrm/best` migration.
-- [ ] **0.6** wyrm proves it:
+- [x] **0.5** `kit`: `Session` (with words and restore), `Link`, `pointer` (with the latched stick), `version`, `Screen::fit_view`, `vibrate`, `download`, and the `secretspace/wyrm/best` migration.
+- [x] **0.6** wyrm proves it:
   - `wyrm-web` uses `Link`, sends Hello, and takes its name from `Seen` (a taken name returns to the menu's name field).
   - On `Still` or a close, it keeps its last frame dimmed while it reconnects. `Join` resumes.
   - It polls `version.txt` and reloads at the menu after a death.
   - wyrm's `save` and `load` keep human snakes by soul, plus bots. After a load, a human snake waits frozen and harmless for 30 s for its soul, then bursts.
   - An unknown soul spawns normally.
-- [ ] **0.7** CI:
+- [x] **0.7** CI:
   - `SERVER_HASH` = sha256 over `git ls-files -s` (blob hashes, so it covers contents) of `crates/engine crates/server crates/wyrm crates/luciphon Cargo.toml Cargo.lock scripts/ship.sh`, plus `rustc -V`;
   - `curl` the deployed `/health` (RELAY's `wss://x/ws` becomes `https://x/health`) and skip `railway up` when the hashes match;
   - write `version.txt` into `dist`;
   - set `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=15` on the service.
-- [ ] **0.8** The `caps.sh` line for `crates/luciphon`, with a stub crate so the line runs.
+- [x] **0.8** The `caps.sh` line for `crates/luciphon`, with a stub crate so the line runs.
 - **Done when:** with a wyrm player mid-game, a page-only push leaves the server running and the open page reloads at its next death, and a server push brings the snake back at the same length. Measure and record how long the Stillness lasts (it depends on Railway's volume handoff).
 
 ### Stage 1: the feel, then the FUN GATE
