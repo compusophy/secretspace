@@ -17,8 +17,9 @@ is the real game, live: the hub watches the room (`?watch=1`, never one of
 the people counted) and draws it with the game's own look.
 
 Game #2, **Luciphon** (a persistent one-thumb brawler-builder on a floating
-island of light), is specced in `docs/luciphon.md`; build it from its §15,
-stage by stage, and do not start v0.2 before the owner passes the FUN GATE.
+island of light), is specced in `docs/luciphon.md` and built from its §15
+through Stage 2; its hub card stays hidden (`/?all=1` shows it) until the
+owner passes the FUN GATE.
 
 ## Rules
 
@@ -58,10 +59,14 @@ crates/hub-web    the front page (cards, live counts, scroll, footer) and
 crates/wyrm       the game: laws world bots grid proto view mirror room
 crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
-crates/luciphon   game #2's core (a stub until Stage 1)
+crates/luciphon   game #2's core: laws island tiles motion combat hits thumb
+                  bots world gather land build life persist proto view
+                  mirror predict room (its spec: docs/luciphon.md)
+crates/luciphon-look  how it looks (page + hub)
+crates/luciphon-web   its page: gesture input state play first
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
-web/index.html    the hub page; web/wyrm/index.html wyrm's page
+web/index.html    the hub page; web/<game>/index.html each game's page
 scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
                   ship.sh (ship/: image for Railway), caps.sh
 ```
