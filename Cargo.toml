@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/engine", "crates/pixels", "crates/kit", "crates/gpu", "crates/showcase-web", "crates/hub-web", "crates/wyrm", "crates/wyrm-look", "crates/wyrm-web", "crates/luciphon", "crates/luciphon-look", "crates/luciphon-web", "crates/server"]
+members = ["crates/engine", "crates/pixels", "crates/kit", "crates/gpu", "crates/render", "crates/showcase-web", "crates/hub-web", "crates/wyrm", "crates/wyrm-look", "crates/wyrm-web", "crates/luciphon", "crates/luciphon-look", "crates/luciphon-web", "crates/server"]
 
 [workspace.package]
 version = "0.1.0"

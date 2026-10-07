@@ -1,7 +1,7 @@
 //! The page: pick the backend, then draw every animation frame.
 
+use crate::scene::{self, Scene};
 use crate::{shaders, Hooks, SHOT_AFTER};
-use gpu::wgpu;
 use pixels::Rgba;
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
@@ -17,9 +17,8 @@ const DIM: Rgba = Rgba::rgb(150, 156, 190);
 
 struct OnGpu {
     g: gpu::Gpu,
-    pipeline: wgpu::RenderPipeline,
-    uniform: wgpu::Buffer,
-    group: wgpu::BindGroup,
+    r: render::Renderer,
+    scene: Scene,
 }
 
 struct OnGl {
@@ -49,89 +48,53 @@ thread_local! {
 
 impl OnGpu {
     fn new(g: gpu::Gpu) -> OnGpu {
-        let d = &g.device;
-        let module = d.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("triangle"),
-            source: wgpu::ShaderSource::Wgsl(shaders::TRIANGLE_WGSL.into()),
-        });
-        let pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("triangle"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(g.format().into())],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        let uniform = d.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("triangle"),
-            size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let group = d.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("triangle"),
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform.as_entire_binding(),
-            }],
-        });
-        OnGpu {
-            g,
-            pipeline,
-            uniform,
-            group,
-        }
+        let mut r = render::Renderer::new(&g.device, &g.queue, g.format());
+        let scene = Scene::new(&mut r);
+        OnGpu { g, r, scene }
     }
 
-    fn draw(&mut self, u: [f32; 4]) -> bool {
+    fn draw(&mut self, t: f32, cam: Option<[f32; 5]>) -> bool {
         let Some(mut f) = self.g.frame() else {
             return false;
         };
-        self.g
-            .queue
-            .write_buffer(&self.uniform, 0, &gpu::layer::bytes(u));
-        {
-            let mut pass = f.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("triangle"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &f.view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: SKY[0] as f64,
-                            g: SKY[1] as f64,
-                            b: SKY[2] as f64,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.group, &[]);
-            pass.draw(0..3, 0..1);
-        }
+        let (w, h) = self.g.css;
+        let cam = camera(t, cam, (w / h.max(1.0)) as f32);
+        let (items, lights, sparks) = self.scene.frame(t, &cam);
+        let frame = render::Frame {
+            cam,
+            look: Scene::look(),
+            time: t,
+            items: &items,
+            lights: &lights,
+            sparks: &sparks,
+            view_fov: 0.9,
+        };
+        self.r.draw(&mut f.encoder, &f.view, self.g.size, &frame);
         self.g.present(f);
         true
+    }
+}
+
+/// The camera: `?cam=x,z,h,yaw,pitch` (metres, degrees) holds it there;
+/// otherwise it circles the shrine.
+fn camera(t: f32, at: Option<[f32; 5]>, aspect: f32) -> render::Camera {
+    let (eye, yaw, pitch) = match at {
+        Some([x, z, h, yaw, pitch]) => ([x, h, z], yaw.to_radians(), pitch.to_radians()),
+        None => {
+            let a = t * 0.06 + 0.8;
+            let (x, z) = (a.cos() * 30.0, a.sin() * 30.0);
+            let eye = [x, scene::height(x, z) + 3.2, z];
+            let to = [-x, 4.0 - eye[1], -z];
+            let flat = (to[0] * to[0] + to[2] * to[2]).sqrt();
+            (eye, to[2].atan2(to[0]), to[1].atan2(flat) * 0.6)
+        }
+    };
+    render::Camera {
+        eye,
+        yaw,
+        pitch,
+        fov: 1.15,
+        aspect,
     }
 }
 
@@ -178,6 +141,23 @@ impl Back {
         }
     }
 
+    /// What the engine drew last frame.
+    fn stats(&self) -> String {
+        match self {
+            Back::Gpu(b) => {
+                let s = b.r.stats;
+                format!(
+                    "draws {} inst {} tris {}k lights {}",
+                    s.draws,
+                    s.instances,
+                    s.triangles / 1000,
+                    s.lights
+                )
+            }
+            Back::Gl(_) => String::new(),
+        }
+    }
+
     fn name(&self) -> String {
         match self {
             Back::Gpu(b) => {
@@ -201,6 +181,7 @@ fn frame(p: &mut Page, now: f64) {
     let (w, h) = p.back.size();
     let u = [(t * TURN) as f32, (w / h.max(1.0)) as f32, 0.0, 0.0];
     let name = p.back.name();
+    let stats = p.back.stats();
     let first = p.first;
     let (fps, perf, show) = (p.fps, p.hooks.perf, p.hooks.hud);
     let (hud, ui) = p.back.hud();
@@ -222,11 +203,11 @@ fn frame(p: &mut Page, now: f64) {
             y += 10 * ui;
         }
         if perf {
-            hud.text_shadowed(x, y, &format!("{fps:.0} fps"), ui, DIM);
+            hud.text_shadowed(x, y, &format!("{fps:.0} fps {stats}"), ui, DIM);
         }
     }
     let drawn = match &mut p.back {
-        Back::Gpu(b) => b.draw(u),
+        Back::Gpu(b) => b.draw(t as f32, p.hooks.cam),
         Back::Gl(b) => b.draw(u),
     };
     if !drawn {
@@ -246,9 +227,10 @@ fn frame(p: &mut Page, now: f64) {
             "webgl2"
         };
         doc.set_title(&format!(
-            "showcase {back} {:.0}fps first {:.0}ms",
+            "showcase {back} {:.0}fps first {:.0}ms {}",
             p.fps,
-            p.first.unwrap_or(0.0)
+            p.first.unwrap_or(0.0),
+            p.back.stats()
         ));
     }
 }

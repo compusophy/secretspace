@@ -16,13 +16,11 @@ a page that draws every pixel itself into one buffer. Its card on the hub
 is the real game, live: the hub watches the room (`?watch=1`, never one of
 the people counted) and draws it with the game's own look.
 
-Game #2, **Luciphon** (a persistent brawler-builder on a floating island of
-light, in first person and 3D), is specced in `docs/luciphon.md` and built
-from its §15 through Stage 2 and the first-person revision; its hub card
-stays hidden (`/?all=1` shows it) until the owner passes the FUN GATE.
-**Next: the engine** (`docs/engine.md`): UE5-class rendering on WebGPU and
-fast netcode, generic for every game (the MMO is shelved). It is meant to
-carry a wand battle royale (`docs/plunder.md`, not yet to build).
+Game #2, **Luciphon** (`docs/luciphon.md`), is **legacy, frozen**: it stays
+as it is (live, its card hidden). **Now: the engine** (`docs/engine.md`,
+UE5-class rendering on WebGPU, generic for every game) and game #3, a
+wand battle royale in the spirit of Plunderstorm (`docs/plunder.md`), the
+engine's first consumer.
 
 ## Rules
 
@@ -62,8 +60,9 @@ crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   fingers, mouse, pointer lock), Link (reconnects, Hello
                   first), Session (the key), Pointer, Version, Socket,
                   TextField, storage
-crates/gpu        the engine: WebGPU device (wgpu), Caps,
-                  the pixel layer; crates/showcase-web is its test page
+crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
+crates/render     the engine: retained scene, geo, light grid, passes;
+                  crates/showcase-web is its test page (/showcase/)
 crates/hub-web    the front page (cards, live counts, scroll, footer) and
                   watch (wyrm's card: the live game, as a watcher)
 crates/wyrm       the game: laws world bots grid proto view mirror room

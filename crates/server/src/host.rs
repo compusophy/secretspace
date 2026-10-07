@@ -354,17 +354,31 @@ mod tests {
         false
     }
 
+    /// Wait until `ok` holds (at most five seconds, so a busy machine
+    /// does not fail the test); whether it did.
+    fn soon(ok: impl Fn() -> bool) -> bool {
+        let end = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < end {
+            if ok() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        ok()
+    }
+
     #[test]
     fn host_survives_a_panicking_room() {
         let a = start(boom, 1, Store::new(None), never);
         let b = start(calm, 1, Store::new(None), never);
-        thread::sleep(Duration::from_millis(300));
-        assert!(a.panics.load(Ordering::Relaxed) >= 1);
-        let before = b.playing.load(Ordering::Relaxed);
-        assert!(before > 20, "the calm room ticks: {before}");
-        thread::sleep(Duration::from_millis(100));
+        assert!(soon(|| a.panics.load(Ordering::Relaxed) >= 1));
         assert!(
-            b.playing.load(Ordering::Relaxed) > before,
+            soon(|| b.playing.load(Ordering::Relaxed) > 20),
+            "the calm room ticks"
+        );
+        let before = b.playing.load(Ordering::Relaxed);
+        assert!(
+            soon(|| b.playing.load(Ordering::Relaxed) > before),
             "and keeps ticking"
         );
         assert_eq!(b.state(), "running");
@@ -373,8 +387,7 @@ mod tests {
     #[test]
     fn a_room_that_keeps_panicking_is_stopped() {
         let a = start(boom, 1, Store::new(None), never);
-        thread::sleep(Duration::from_millis(400));
-        assert_eq!(a.state(), "stopped");
+        assert!(soon(|| a.state() == "stopped"));
         assert_eq!(a.panics.load(Ordering::Relaxed), 4);
         // Anyone who comes now is let go.
         let (tx, rx) = std::sync::mpsc::sync_channel(4);

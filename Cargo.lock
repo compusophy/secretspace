@@ -457,6 +457,15 @@ name = "secretspace-pixels"
 version = "0.1.0"
 
 [[package]]
+name = "secretspace-render"
+version = "0.1.0"
+dependencies = [
+ "naga",
+ "secretspace-gpu",
+ "secretspace-kit",
+]
+
+[[package]]
 name = "secretspace-server"
 version = "0.1.0"
 dependencies = [
@@ -473,6 +482,7 @@ dependencies = [
  "secretspace-gpu",
  "secretspace-kit",
  "secretspace-pixels",
+ "secretspace-render",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

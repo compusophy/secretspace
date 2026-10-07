@@ -1,10 +1,12 @@
 //! The engine's showcase: one page that shows what the GPU layer draws.
-//! Phase 0: a turning triangle and the pixel layer over it, on WebGPU, or
-//! on WebGL2 where WebGPU is missing (or `?gpu=0`). Hooks for tests and
-//! captures: `?t=<ms>` stops time there, `?hud=0` hides the layer,
+//! On WebGPU, the engine's scene (`scene.rs`, drawn by `render`); on
+//! WebGL2, where WebGPU is missing (or `?gpu=0`), a turning triangle.
+//! Hooks for tests and captures: `?t=<ms>` stops time there, `?hud=0` hides the layer,
 //! `?shot=1` titles the page "shot ready" once the picture is settled,
-//! `?perf=1` puts the frame rate and the first frame's time in the title.
+//! `?perf=1` puts the frame rate and the first frame's time in the title,
+//! `?cam=x,z,h,yaw,pitch` holds the camera (metres, degrees).
 
+pub mod scene;
 pub mod shaders;
 
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +33,8 @@ pub struct Hooks {
     pub shot: bool,
     pub perf: bool,
     pub gpu: bool,
+    /// A held camera: x, z, height (metres), yaw, pitch (degrees).
+    pub cam: Option<[f32; 5]>,
 }
 
 impl Hooks {
@@ -42,6 +46,10 @@ impl Hooks {
             shot: on("shot", false),
             perf: on("perf", false),
             gpu: on("gpu", true),
+            cam: param(query, "cam").and_then(|v| {
+                let n: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                <[f32; 5]>::try_from(n).ok()
+            }),
         }
     }
 }
@@ -61,5 +69,10 @@ mod tests {
         let d = Hooks::read("");
         assert!(d.t.is_none() && d.hud && !d.shot && d.gpu);
         assert!(Hooks::read("?perf").perf);
+        assert_eq!(
+            Hooks::read("?cam=1,2,3,90,-10").cam,
+            Some([1.0, 2.0, 3.0, 90.0, -10.0])
+        );
+        assert_eq!(Hooks::read("?cam=1,2").cam, None);
     }
 }
