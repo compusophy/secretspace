@@ -248,7 +248,9 @@ Every phase:
       (`--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader`), first
       frame 52-130 ms from page open (device creation included), 36-48 fps
       in software; without an adapter it falls back to WebGL2 (first frame
-      63-113 ms). *Left: real GPUs, Safari and Firefox.*
+      63-113 ms). Live at `/showcase/` (Vercel): first frame 776 ms on
+      WebGPU, 826 ms on WebGL2, download included (through a proxy).
+      *Left: real GPUs, Safari and Firefox.*
 - [ ] Native tests: an empty frame offscreen (skip if no adapter) *(with
       the native device)*, and Naga validation of every WGSL string *(done:
       `crates/gpu/tests/wgsl.rs`, `crates/showcase-web/tests/wgsl.rs`; every
