@@ -5,7 +5,7 @@
 # reports, so CI can skip shipping a server that would not change.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-build=$(bash scripts/hash.sh crates/engine crates/server crates/wyrm crates/luciphon Cargo.toml Cargo.lock scripts/ship.sh)
+build=$(bash scripts/hash.sh crates/engine crates/server crates/wyrm crates/luciphon crates/wandfall Cargo.toml Cargo.lock scripts/ship.sh)
 SECRETSPACE_BUILD=$build cargo build -p secretspace-server --profile server --target x86_64-unknown-linux-musl
 rm -rf ship && mkdir -p ship
 cp target/x86_64-unknown-linux-musl/server/server ship/server

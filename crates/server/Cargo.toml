@@ -15,3 +15,4 @@ path = "src/main.rs"
 engine = { package = "secretspace-engine", path = "../engine" }
 wyrm = { package = "secretspace-wyrm", path = "../wyrm" }
 luciphon = { package = "secretspace-luciphon", path = "../luciphon" }
+wandfall = { package = "secretspace-wandfall", path = "../wandfall" }

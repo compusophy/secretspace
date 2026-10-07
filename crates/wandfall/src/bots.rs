@@ -1,0 +1,154 @@
+//! Bots: wizards that fill each match. They land where they aimed in the
+//! drop, keep inside the storm's next circle, pick the nearest wizard
+//! they can see, and duel: strafing, keeping their distance, leading
+//! their shots, a little off. They see as people do (not through hills,
+//! trees or pillars) and take a moment to notice.
+
+use engine::rng::splitmix;
+
+use crate::laws::*;
+use crate::motion::{keys, Input};
+use crate::storm::Now;
+use crate::trig;
+use crate::world::World;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Mind {
+    pub seed: u64,
+    pub target: u16,
+    /// When it may start shooting at its target.
+    pub ready_at: u32,
+    /// Strafing: which way (−1, 1), until when.
+    pub strafe: i8,
+    pub strafe_until: u32,
+    /// Where it walks when no one is about, and since when.
+    pub goal: [f32; 2],
+    pub goal_at: u32,
+    /// Where it stood a second ago (to know when it is stuck).
+    pub was: [f32; 3],
+}
+
+impl Mind {
+    pub fn new(seed: u64) -> Mind {
+        Mind {
+            seed,
+            strafe: 1,
+            ..Mind::default()
+        }
+    }
+}
+
+fn unit(seed: u64, tick: u32, k: u64) -> f32 {
+    (splitmix(seed ^ (tick as u64) << 8 ^ k) >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// What a bot does this tick, and what it now has in mind.
+pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
+    let me = &w.players[k];
+    let mut m = me.mind;
+    let eye = me.eye();
+    let chest = |p: &crate::world::Player| [p.body.p[0], p.body.p[1] + 1.1, p.body.p[2]];
+    // Who it can see.
+    let seen = w
+        .players
+        .iter()
+        .filter(|p| p.id != me.id && p.alive && p.entrant)
+        .map(|p| {
+            let c = chest(p);
+            let d = ((c[0] - eye[0]).powi(2) + (c[1] - eye[1]).powi(2) + (c[2] - eye[2]).powi(2))
+                .sqrt();
+            (p, d)
+        })
+        .filter(|&(p, d)| d < BOT_SIGHT && !me.body.glide && w.map.strikes(eye, chest(p)).is_none())
+        .min_by(|a, b| a.1.total_cmp(&b.1));
+    match seen {
+        Some((p, _)) if p.id != m.target => {
+            m.target = p.id;
+            m.ready_at = tick + BOT_NOTICE + (unit(m.seed, tick, 1) * 10.0) as u32;
+        }
+        None => m.target = 0,
+        _ => {}
+    }
+    // Where it wants to be.
+    let next = storm.next;
+    let from_next =
+        ((me.body.p[0] - next.0[0]).powi(2) + (me.body.p[2] - next.0[1]).powi(2)).sqrt();
+    let flee = from_next > next.1 * 0.85
+        && (storm.shrinking || storm.secs < 15 || storm.outside(me.body.p[0], me.body.p[2]));
+    if tick >= m.goal_at
+        || ((me.body.p[0] - m.goal[0]).powi(2) + (me.body.p[2] - m.goal[1]).powi(2)) < 9.0
+    {
+        let a = unit(m.seed, tick, 2) * std::f32::consts::TAU;
+        let r = next.1 * 0.7 * unit(m.seed, tick, 3).sqrt();
+        m.goal = [next.0[0] + a.cos() * r, next.0[1] + a.sin() * r];
+        m.goal_at = tick + 20 * TICK_HZ;
+    }
+    let mut keys = 0;
+    let mut yaw = me.yaw;
+    let mut pitch: i16 = 0;
+    // Walking: toward a point, as keys relative to where it faces.
+    let walk_to = |to: [f32; 2]| (to[1] - me.body.p[2]).atan2(to[0] - me.body.p[0]);
+    let mut walk: Option<f32> = None;
+    if let Some((p, d)) = seen.filter(|_| !flee) {
+        let c = chest(p);
+        // Lead the shot, and miss a little.
+        let lead = d / BOLT_SPEED;
+        let aim = [
+            c[0] + p.body.v[0] * lead,
+            c[1] + p.body.v[1] * lead * 0.5,
+            c[2] + p.body.v[2] * lead,
+        ];
+        let (dx, dy, dz) = (aim[0] - eye[0], aim[1] - eye[1], aim[2] - eye[2]);
+        let off = BOT_AIM_ERROR * (1.0 + d / 30.0);
+        let jy = (unit(m.seed, tick / 4, 4) - 0.5) * 2.0 * off;
+        let jp = (unit(m.seed, tick / 4, 5) - 0.5) * 2.0 * off;
+        yaw = trig::heading(dz.atan2(dx) + jy);
+        pitch = trig::pitch(dy.atan2((dx * dx + dz * dz).sqrt()) + jp);
+        if tick >= m.ready_at {
+            keys |= keys::FIRE;
+        }
+        if tick >= m.strafe_until {
+            m.strafe = if unit(m.seed, tick, 6) < 0.5 { -1 } else { 1 };
+            m.strafe_until = tick + 15 + (unit(m.seed, tick, 7) * 40.0) as u32;
+        }
+        keys |= if m.strafe > 0 {
+            keys::RIGHT
+        } else {
+            keys::LEFT
+        };
+        if d > BOT_RANGE * 1.4 {
+            keys |= keys::FWD;
+        } else if d < BOT_RANGE * 0.6 {
+            keys |= keys::BACK;
+        }
+        if unit(m.seed, tick, 8) < 0.02 {
+            keys |= keys::JUMP;
+        }
+    } else {
+        let to = if flee { next.0 } else { m.goal };
+        walk = Some(walk_to(to));
+    }
+    if let Some(a) = walk {
+        // Turn toward where it walks, a little at a time.
+        let want = trig::heading(a);
+        let diff = want.wrapping_sub(yaw) as i16;
+        yaw = yaw.wrapping_add((diff as i32).clamp(-1800, 1800) as i16 as u16);
+        keys |= keys::FWD;
+    }
+    // Stuck against something: jump, and walk elsewhere.
+    if tick.is_multiple_of(TICK_HZ) {
+        let moved = (me.body.p[0] - m.was[0]).powi(2) + (me.body.p[2] - m.was[2]).powi(2);
+        if moved < 0.5 && keys & (keys::FWD | keys::BACK) != 0 && me.body.ground {
+            keys |= keys::JUMP;
+            m.goal_at = tick;
+        }
+        m.was = me.body.p;
+    }
+    let input = Input {
+        seq: 0,
+        yaw,
+        pitch,
+        keys,
+    };
+    (input, m)
+}

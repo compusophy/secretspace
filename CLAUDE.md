@@ -45,8 +45,9 @@ engine's first consumer.
    8,000 characters. At a cap: split, shrink, or delete. Never raise one.
 7. **wasm32 always green:** `cargo clippy -p secretspace-hub -p
    secretspace-wyrm-web -p secretspace-luciphon-web -p
-   secretspace-showcase-web --target wasm32-unknown-unknown -- -D
-   warnings`. Every WGSL string has a naga test.
+   secretspace-showcase-web -p secretspace-wandfall-web --target
+   wasm32-unknown-unknown -- -D warnings`. Every WGSL string has a naga
+   test.
 
 ## Map
 
@@ -68,11 +69,10 @@ crates/hub-web    the front page (cards, live counts, scroll, footer) and
 crates/wyrm       the game: laws world bots grid proto view mirror room
 crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
-crates/luciphon   game #2's core: laws island tiles motion combat hits thumb
-                  bots beasts world gather gear land build life persist
-                  proto view mirror predict room (spec: docs/luciphon.md)
-crates/luciphon-look  the 2D look (the hub's preview)
-crates/luciphon-web   its page: controls state scene/ (3D) hud bag fx play first
+crates/luciphon*  game #2, legacy: core, -look (2D), -web (WebGL2 3D)
+crates/wandfall   game #3's core: laws trig map motion storm world bots
+                  predict proto view room (spec: docs/plunder.md)
+crates/wandfall-web  its page on the engine: state look hud page
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -111,7 +111,7 @@ that reads the same size on any screen (2 on a phone, 1 on a desktop).
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web -p secretspace-wandfall-web --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 bash scripts/caps.sh
 bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen

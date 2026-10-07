@@ -1,8 +1,10 @@
-# The next game: a wand battle royale (vision, not yet to build)
+# Wandfall: a wand battle royale (game #3, being built)
 
-**Status:** the owner's vision, recorded October 2026. **Do not build this
-yet.** The engine comes first (`docs/engine.md`); this file says what the
-engine must one day carry. The owner's words, verbatim:
+**Status:** building, on the owner's word (October 2026): "we can leave
+luciphon how it is ... archive the legacy. we start a new game from the
+new engine, we are cloning the blizzard game plunderstorm". Working title
+**Wandfall** (crates `wandfall`, `wandfall-web`; page `/wandfall/`); the
+owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
 
 > "we are making a versions of the blizzard game PLUNDERSTORM ... which are
 > short games of a battle royal style -- so there will be queues and
@@ -58,3 +60,39 @@ engine must one day carry. The owner's words, verbatim:
    aiming down. [Aim down: zoom, tighter aim, slower movement.]
 5. How it ties to Luciphon's persistent world, if at all: [Separate at first;
    cosmetics carried between them later.]
+
+## Build stages
+
+### Stage A: the first playable (done, October 2026)
+- [x] `crates/wandfall` (engine only): an island from a seed (hills by
+      arithmetic-only noise, the shore, 420 trees, 140 rocks, 14 ruined
+      rings of pillars, all blocking wizards and bolts); movement (run,
+      jump, wade, step up, glide in the drop) in arithmetic only, so the
+      page predicts its wizard to the bit (`the_page_predicts_its_wizard_exactly`).
+- [x] The match: lobby (12 s once someone waits; warm up unhurt) → the drop
+      (everyone glides from 70 m; bots fill to 16) → the fight (a wand bolt:
+      75 m/s, 12 damage, 0.37 s cooldown; 100 health, regen after 6 s) with
+      a five-phase storm, each circle inside the last → the winner shown →
+      lobby. Late arrivals watch, then play the next.
+- [x] Bots: see as people do, notice after a moment, lead and miss a little,
+      strafe and keep their distance, keep to the next circle.
+- [x] The wire (`proto.rs`, fuzzed), the room (`/ws/wandfall`), the page on
+      the engine (`render`): first person, the wand in view, bolts of light,
+      bursts, the storm's wall, the island map with both circles, the feed,
+      names and health over heads, spectating.
+
+### Stage B: spells, levels, loot (next)
+- Levels 1-20 within a match (from knockouts, bots and chests): health and
+  damage grow.
+- Spells found as loot, ranks 1-5 (a duplicate ranks one up): 2 offensive
+  slots (single target, area), 2 utility (a blink or dash, a shield, a
+  heal, crowd control: root, slow, knockback). Keys 1-4 / Q E R F; cooldowns
+  on the HUD.
+- Chests on the map (open by standing at them), drops from the knocked out.
+- Right click aims down the wand: zoom, tighter aim, slower walk (owner's lean).
+- Touch controls (two sticks, cast buttons).
+
+### Stage C: queues and teams
+- A queue screen; matches start at N people or after a wait; duos.
+- The hub card (live preview), a results screen, a season of names.
+- Netcode at scale (`docs/engine.md` §9): 40-60 people, lag-compensated hits.

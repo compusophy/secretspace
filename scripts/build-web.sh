@@ -4,8 +4,8 @@
 # says the newest, so an open page can tell it is out of date.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-build=$(bash scripts/hash.sh crates/engine crates/pixels crates/kit crates/gpu crates/hub-web crates/wyrm crates/wyrm-look crates/wyrm-web crates/luciphon crates/luciphon-look crates/luciphon-web crates/showcase-web web Cargo.toml Cargo.lock)
-SECRETSPACE_PAGE=$build cargo build -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web --release --target wasm32-unknown-unknown
+build=$(bash scripts/hash.sh crates/engine crates/pixels crates/kit crates/gpu crates/render crates/hub-web crates/wyrm crates/wyrm-look crates/wyrm-web crates/luciphon crates/luciphon-look crates/luciphon-web crates/showcase-web crates/wandfall crates/wandfall-web web Cargo.toml Cargo.lock)
+SECRETSPACE_PAGE=$build cargo build -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web -p secretspace-wandfall-web --release --target wasm32-unknown-unknown
 rm -rf dist && mkdir -p dist
 page() { # page <wasm lib name> <out name> <dir under dist> <html>
   mkdir -p "dist/$3/pkg"
@@ -19,5 +19,6 @@ page hub hub . web/index.html
 page wyrm_web wyrm wyrm web/wyrm/index.html
 page luciphon_web luciphon luciphon web/luciphon/index.html
 page showcase_web showcase showcase web/showcase/index.html
+page wandfall_web wandfall wandfall web/wandfall/index.html
 echo "$build" > dist/version.txt
 echo "pages build $build"

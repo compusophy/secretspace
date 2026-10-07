@@ -471,6 +471,7 @@ version = "0.1.0"
 dependencies = [
  "secretspace-engine",
  "secretspace-luciphon",
+ "secretspace-wandfall",
  "secretspace-wyrm",
 ]
 
@@ -486,6 +487,27 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "secretspace-wandfall"
+version = "0.1.0"
+dependencies = [
+ "secretspace-engine",
+]
+
+[[package]]
+name = "secretspace-wandfall-web"
+version = "0.1.0"
+dependencies = [
+ "secretspace-engine",
+ "secretspace-gpu",
+ "secretspace-kit",
+ "secretspace-pixels",
+ "secretspace-render",
+ "secretspace-wandfall",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

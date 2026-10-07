@@ -1,0 +1,14 @@
+[package]
+name = "secretspace-wandfall"
+description = "Wandfall's core: a wand battle royale. The map, movement, the match and its storm, bolts, bots, and the wire. Builds only on the engine; shared by the server and the page."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "wandfall"
+
+[dependencies]
+engine = { package = "secretspace-engine", path = "../engine" }
