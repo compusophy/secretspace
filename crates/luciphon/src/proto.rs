@@ -10,7 +10,7 @@ use crate::combat::{Act, Action, Me};
 use crate::motion::{Body, Busy, Intent, Move, Verb};
 use crate::tiles::{rle, unrle, Tile};
 
-pub const PROTO: u16 = 1;
+pub const PROTO: u16 = 2;
 
 // Up.
 pub const JOIN: u8 = 1;
@@ -67,11 +67,12 @@ impl Up {
                 let (code, arg) = verb_code(it.verb);
                 let mag = arg.unwrap_or(it.throttle);
                 let stick = ((it.throttle > 0) as u8) << 3;
+                let jump = (it.jump as u8) << 4;
                 w.u8(INPUT)
                     .u16(*seq)
                     .u16(it.heading)
                     .u8(mag)
-                    .u8(code | stick)
+                    .u8(code | stick | jump)
                     .u16(it.aim)
             }
             Up::Heart { act, arg } => w.u8(HEART).u8(*act).u8(*arg),
@@ -92,6 +93,9 @@ impl Up {
                 let v = r.u8()?;
                 let aim = r.u16()?;
                 let stick = v & 8 != 0;
+                if v >> 5 != 0 {
+                    return None;
+                }
                 let verb = match v & 7 {
                     0 => Verb::None,
                     1 => Verb::Tap,
@@ -113,6 +117,7 @@ impl Up {
                         throttle,
                         verb,
                         aim,
+                        jump: v & 16 != 0,
                     },
                 }
             }
@@ -150,6 +155,8 @@ pub struct Ent {
     pub kind: u8,
     pub x: i16,
     pub y: i16,
+    /// Height above the ground, 1/256 tile.
+    pub z: i16,
     pub facing: u16,
     /// For a Lumen: movement (low 3 bits), action (next 3), ghost, down.
     pub state: u8,
@@ -170,6 +177,7 @@ pub mod field {
     pub const FLAME: u8 = 8;
     pub const GLIM: u8 = 16;
     pub const FLOW: u8 = 32;
+    pub const Z: u8 = 64;
 }
 
 pub fn q(v: Fx) -> i16 {
@@ -277,10 +285,11 @@ fn put_body(w: &mut Writer, b: &Body) {
     for v in [
         b.x,
         b.y,
+        b.z,
         b.vx,
         b.vy,
+        b.vz,
         b.dash_prior,
-        b.dash_void,
         b.safe.0,
         b.safe.1,
     ] {
@@ -291,42 +300,33 @@ fn put_body(w: &mut Writer, b: &Body) {
         .u32(b.t)
         .i32(b.breath)
         .u32(b.rest);
-    w.i32(b.regen)
-        .u32(b.cooldown)
-        .u32(b.iframes)
-        .u32(b.sling)
-        .i32(b.sling_mul);
-    w.u32(b.coast).u32(b.kick).u8(b.kicked as u8);
+    w.i32(b.regen).u32(b.cooldown).u32(b.iframes);
+    w.u32(b.kick).u8(b.kicked as u8);
     w.u8(b.kick_held.is_some() as u8)
         .u16(b.kick_held.unwrap_or(0));
-    w.u16(b.dash_h)
-        .u16(b.back)
-        .u32(b.load)
-        .u16(b.claim)
-        .u8(b.busy as u8);
+    w.u16(b.dash_h).u32(b.load).u16(b.claim).u8(b.busy as u8);
 }
 
 fn get_body(r: &mut Reader) -> Option<Body> {
-    let mut f = [Fx::ZERO; 8];
+    let mut f = [Fx::ZERO; 9];
     for v in &mut f {
         *v = get_fx(r)?;
     }
     let facing = r.u16()?;
     let mv = match r.u8()? {
         0 => Move::Free,
-        1 => Move::Drift,
         2 => Move::Dash,
         3 => Move::Stun,
-        4 => Move::Teeter,
+        4 => Move::Falling,
         5 => Move::Fallen,
         _ => return None,
     };
     let (t, breath, rest, regen) = (r.u32()?, r.i32()?, r.u32()?, r.i32()?);
-    let (cooldown, iframes, sling, sling_mul) = (r.u32()?, r.u32()?, r.u32()?, r.i32()?);
-    let (coast, kick, kicked) = (r.u32()?, r.u32()?, r.u8()? != 0);
+    let (cooldown, iframes) = (r.u32()?, r.u32()?);
+    let (kick, kicked) = (r.u32()?, r.u8()? != 0);
     let held = r.u8()? != 0;
     let held_h = r.u16()?;
-    let (dash_h, back, load, claim) = (r.u16()?, r.u16()?, r.u32()?, r.u16()?);
+    let (dash_h, load, claim) = (r.u16()?, r.u32()?, r.u16()?);
     let busy = match r.u8()? {
         0 => Busy::No,
         1 => Busy::Striking,
@@ -337,11 +337,12 @@ fn get_body(r: &mut Reader) -> Option<Body> {
     Some(Body {
         x: f[0],
         y: f[1],
-        vx: f[2],
-        vy: f[3],
-        dash_prior: f[4],
-        dash_void: f[5],
-        safe: (f[6], f[7]),
+        z: f[2],
+        vx: f[3],
+        vy: f[4],
+        vz: f[5],
+        dash_prior: f[6],
+        safe: (f[7], f[8]),
         facing,
         mv,
         t,
@@ -350,14 +351,10 @@ fn get_body(r: &mut Reader) -> Option<Body> {
         regen,
         cooldown,
         iframes,
-        sling,
-        sling_mul,
-        coast,
         kick,
         kicked,
         kick_held: held.then_some(held_h),
         dash_h,
-        back,
         load,
         claim,
         busy,
@@ -370,32 +367,20 @@ fn put_action(w: &mut Writer, a: &Action) {
         .u32(a.c)
         .u16(a.aim)
         .u8(a.landed as u8);
-    w.u8(a.lift.is_some() as u8);
-    let (n, s) = a.lift.unwrap_or((0, Fx::ZERO));
-    w.u8(a.build as u8);
-    w.u32(n)
-        .i32(s.0)
-        .i32(a.carry.0)
-        .u8(a.stick as u8)
-        .u32(a.late);
+    w.u8(a.build as u8).i32(a.carry.0).u32(a.late);
 }
 
 fn get_action(r: &mut Reader) -> Option<Action> {
     let act = Act::from_code(r.u8()?)?;
     let (t, c, aim, landed) = (r.u32()?, r.u32()?, r.u16()?, r.u8()? != 0);
-    let lifted = r.u8()? != 0;
-    let build = r.u8()? != 0;
-    let (n, s) = (r.u32()?, Fx(r.i32()?));
-    let (carry, stick, late) = (Fx(r.i32()?), r.u8()? != 0, r.u32()?);
+    let (build, carry, late) = (r.u8()? != 0, Fx(r.i32()?), r.u32()?);
     Some(Action {
         act,
         t,
         c,
         aim,
         landed,
-        lift: lifted.then_some((n, s)),
         carry,
-        stick,
         late,
         build,
     })
@@ -470,6 +455,9 @@ fn put_ent(w: &mut Writer, e: &Ent, mask: u8) {
     if mask & FLOW != 0 {
         w.u8(e.flow);
     }
+    if mask & Z != 0 {
+        w.i16(e.z);
+    }
 }
 
 fn get_ent(r: &mut Reader, e: &mut Ent, mask: u8) -> Option<()> {
@@ -493,10 +481,13 @@ fn get_ent(r: &mut Reader, e: &mut Ent, mask: u8) -> Option<()> {
     if mask & FLOW != 0 {
         e.flow = r.u8()?;
     }
+    if mask & Z != 0 {
+        e.z = r.i16()?;
+    }
     Some(())
 }
 
-const ALL: u8 = 63;
+const ALL: u8 = 127;
 
 impl Down {
     pub fn encode(&self) -> Vec<u8> {
@@ -736,6 +727,7 @@ mod tests {
                     throttle: 200,
                     verb: Verb::Flick,
                     aim: 999,
+                    jump: true,
                 },
             },
             Up::Input {
@@ -745,6 +737,7 @@ mod tests {
                     throttle: 0,
                     verb: Verb::Hold { held_for: 9 },
                     aim: 5,
+                    jump: false,
                 },
             },
             Up::Heart { act: 1, arg: 2 },
@@ -775,15 +768,17 @@ mod tests {
                 kind: kind::LUMEN,
                 x: -300,
                 y: 200,
+                z: 90,
                 name: "moth".into(),
                 ..Ent::default()
             }],
             moved: vec![(
-                field::POS,
+                field::POS | field::Z,
                 Ent {
                     id: 4,
                     x: 1,
                     y: 2,
+                    z: 3,
                     ..Ent::default()
                 },
             )],

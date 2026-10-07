@@ -42,6 +42,7 @@ pub fn lumen_ent(l: &Lumen, laws: &crate::laws::Laws) -> Ent {
         kind: kind::LUMEN,
         x: q(b.x),
         y: q(b.y),
+        z: q(b.z),
         facing: b.facing,
         state: b.mv as u8
             | (l.me.act.act.code() & 7) << 3
@@ -131,6 +132,9 @@ fn mask(old: &Ent, new: &Ent) -> u8 {
     if old.flow != new.flow {
         m |= field::FLOW;
     }
+    if old.z != new.z {
+        m |= field::Z;
+    }
     m
 }
 
@@ -144,11 +148,8 @@ fn event(e: &Event) -> Ev {
             big,
         } => (2, by, on, damage | (big as u8) << 7),
         Event::Whiff { id } => (3, id, 0, 0),
-        Event::Sling { id, gold } => (4, id, 0, gold as u8),
-        Event::Spin { id } => (5, id, 0, 0),
         Event::Dash { id } => (6, id, 0, 0),
         Event::Kick { id } => (7, id, 0, 0),
-        Event::Save { id } => (8, id, 0, 0),
         Event::Dodge { id } => (9, id, 0, 0),
         Event::Thorns { id } => (10, id, 0, 0),
         Event::Down { id } => (11, id, 0, 0),

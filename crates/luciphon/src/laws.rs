@@ -140,43 +140,32 @@ laws! {
     glow: i32 = 34,
     dim: i32 = 52,
     /// How far you see by day, in tiles.
-    sight: i32 = 10,
+    sight: i32 = 24,
 
-    // Movement (§7).
-    walk: Fx = tps(2_500),
-    run: Fx = tps(6_000),
-    accel: Fx = tps2(30_000),
-    skid: Fx = tps2(15_000),
-    /// Turn rate at walk speed or slower, falling to `turn_fast` at a run.
-    turn_slow: u16 = rps(14_000),
-    turn_fast: u16 = rps(6_000),
-    /// Below this speed a heading snaps to the stick.
-    snap: Fx = tps(500),
+    // Movement (§7): first person, quick to start and quick to stop.
+    walk: Fx = tps(3_000),
+    run: Fx = tps(5_500),
+    accel: Fx = tps2(45_000),
+    stop: Fx = tps2(45_000),
+    /// Control in the air, thousandths.
+    air_control: i32 = 300,
+    /// A jump's speed up, gravity, and how far below the island the Dark
+    /// takes you.
+    jump: Fx = tps(6_500),
+    gravity: Fx = tps2(20_000),
+    fall_depth: Fx = tiles(8_000),
+    /// Top speed while striking and while charging, thousandths.
+    strike_slow: i32 = 700,
+    charge_slow: i32 = 500,
     body: Fx = tiles(350),
     /// Top speed falls by `weight_cut` for every `weight_step` materials.
     weight_step: i32 = 50,
     weight_cut: i32 = 50,
     weight_floor: i32 = 700,
     own_land: i32 = 1_150,
-    ice_grip: i32 = 300,
-    ice_skid: i32 = 150,
+    ice_grip: i32 = 150,
     mud_speed: i32 = 500,
     water_speed: i32 = 600,
-
-    // Drift.
-    drift_speed: Fx = tps(4_500),
-    drift_in: u16 = deg(100),
-    drift_out: u16 = deg(30),
-    grip: u16 = rps(7_000),
-    /// A drift with the stick up slides on this long, then skids.
-    drift_coast: u32 = ms(300),
-    blue_at: u32 = 9,
-    gold_at: u32 = 21,
-    spin_at: u32 = 45,
-    blue: i32 = 1_350,
-    gold: i32 = 1_500,
-    sling_ticks: u32 = ms(600),
-    spin_ticks: u32 = ms(300),
 
     // Dash.
     dash_ticks: u32 = 5,
@@ -184,8 +173,6 @@ laws! {
     iframes: u32 = 3,
     dash_breath: i32 = 30_000,
     dash_cooldown: u32 = ms(350),
-    /// A dash may cross this much void if it ends on ground.
-    dash_void: Fx = tiles(2_000),
     /// A flick in a dash's last ticks is held for a wall-kick.
     kick_hold: u32 = 3,
     kick_window: u32 = 10,
@@ -194,12 +181,6 @@ laws! {
     breath: i32 = 100_000,
     breath_regen: i32 = 35_000 / 30,
     breath_rest: u32 = ms(400),
-
-    // The edge.
-    teeter_speed: Fx = tps(9_000),
-    teeter_ticks: u32 = 15,
-    save_breath: i32 = 20_000,
-    save_angle: u16 = deg(90),
 
     // Flow.
     flow_window: u32 = ms(1_500),
@@ -228,7 +209,6 @@ laws! {
     engaged: u32 = ms(10_000),
     launcher_within: u32 = 36,
     launcher: i32 = 2_000,
-    skid_carry: u32 = 10,
     /// The lance: a tap in a dash, or this long after.
     lance_late: u32 = 2,
     lance_reach: Fx = tiles(1_800),

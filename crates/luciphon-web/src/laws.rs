@@ -1,78 +1,73 @@
-//! How the page reads a pointer and shows the world: every threshold of
-//! the gestures (CSS pixels and milliseconds), the camera, the effects.
-//! The world's own laws come from the server in the Welcome.
+//! How the page reads hands and shows the world: looking, the phone's
+//! stick and buttons, the camera, the fog, smoothing. The world's own laws
+//! come from the server in the Welcome.
 
 pub struct Feel {
-    /// A press that moves this far before `hold_ms` is a drag.
-    pub drag_px: f64,
-    /// Released sooner, unmoved: a tap. Still pressed by then: a hold.
-    pub hold_ms: f64,
-    /// The stick: a walk from `walk_px`, a run from `run_px`; past
-    /// `trail_px` the origin trails the pointer.
+    /// Radians a CSS pixel of mouse movement turns; of a look drag.
+    pub mouse: f32,
+    pub drag: f32,
+    /// How far up or down you can look, radians.
+    pub pitch_max: f32,
+    /// Vertical field of view, radians (wider on a tall screen).
+    pub fov: f32,
+    pub fov_tall: f32,
+    /// Eye height above the ground, tiles; and how far the picture goes.
+    pub eye: f32,
+    pub far: f32,
+    /// Fog from here to there, tiles.
+    pub fog_near: f32,
+    pub fog_far: f32,
+    /// A mouse press held this long charges a heavy.
+    pub click_hold_ms: f64,
+    /// The phone's stick: nothing inside `walk_px`, a run from `stick_px`.
     pub walk_px: f64,
-    pub run_px: f64,
-    pub trail_px: f64,
-    /// A flick: at least `flick_speed` px/ms over the last `flick_window`
-    /// ms, and `flick_px` travelled in the last `flick_span` ms; never
-    /// within `swing_ms` of passing within `swing_px` of the origin.
-    pub flick_speed: f64,
-    pub flick_window: f64,
-    pub flick_px: f64,
-    pub flick_span: f64,
-    pub swing_px: f64,
-    pub swing_ms: f64,
-    /// A hold let go sooner than this after the press does nothing.
-    pub release_ms: f64,
-    /// An aim this long or more throws; up to `throw_far_px`.
-    pub throw_px: f64,
-    pub throw_far_px: f64,
-    /// Leave this ring, come back inside `cancel_px`: a free cancel.
-    pub ring_px: f64,
-    pub cancel_px: f64,
-    /// The Heart: its size, how far above the bottom, its hit radius.
-    pub heart_px: f64,
-    pub heart_above: f64,
-    pub heart_hit: f64,
-    /// Sliding this far from a Heart press picks a wheel slot; the wheel
-    /// shows after `wheel_ms`, `wheel_up` px above the press.
-    pub wheel_px: f64,
-    pub wheel_ms: f64,
-    pub wheel_up: f64,
+    pub stick_px: f64,
+    /// A look touch lifted sooner and stiller than this is a strike; held
+    /// still this long, a charge.
+    pub tap_ms: f64,
+    pub tap_px: f64,
+    pub hold_ms: f64,
+    /// The phone's buttons: size, and the gap from the screen's edge.
+    pub button_px: f64,
+    pub edge_px: f64,
+    /// A throw's range follows the look: from `throw_low` (radians,
+    /// looking down) for the nearest to `throw_high` for the farthest.
+    pub throw_low: f32,
+    pub throw_high: f32,
     /// Others are drawn this far behind the newest frame.
     pub behind_ms: f64,
     /// Prediction errors under this many tiles are blended over
     /// `blend_ms`; larger ones snap.
     pub blend_tiles: f32,
     pub blend_ms: f64,
-    /// Frames are drawn at most this often.
-    pub frame_ms: f64,
+    /// Device pixels a CSS pixel, at most (phones draw fewer).
+    pub max_dpr: f64,
+    pub max_dpr_touch: f64,
 }
 
 pub const FEEL: Feel = Feel {
-    drag_px: 10.0,
-    hold_ms: 300.0,
-    walk_px: 10.0,
-    run_px: 28.0,
-    trail_px: 60.0,
-    flick_speed: 1.0,
-    flick_window: 50.0,
-    flick_px: 24.0,
-    flick_span: 80.0,
-    swing_px: 12.0,
-    swing_ms: 100.0,
-    release_ms: 400.0,
-    throw_px: 40.0,
-    throw_far_px: 160.0,
-    ring_px: 24.0,
-    cancel_px: 16.0,
-    heart_px: 56.0,
-    heart_above: 72.0,
-    heart_hit: 32.0,
-    wheel_px: 28.0,
-    wheel_ms: 150.0,
-    wheel_up: 64.0,
+    mouse: 0.0024,
+    drag: 0.0065,
+    pitch_max: 1.35,
+    fov: 1.2,
+    fov_tall: 1.45,
+    eye: 1.05,
+    far: 60.0,
+    fog_near: 9.0,
+    fog_far: 27.0,
+    click_hold_ms: 220.0,
+    walk_px: 8.0,
+    stick_px: 44.0,
+    tap_ms: 260.0,
+    tap_px: 14.0,
+    hold_ms: 320.0,
+    button_px: 62.0,
+    edge_px: 22.0,
+    throw_low: -0.35,
+    throw_high: 0.45,
     behind_ms: 66.0,
     blend_tiles: 0.25,
-    blend_ms: 100.0,
-    frame_ms: 1000.0 / 61.0,
+    blend_ms: 90.0,
+    max_dpr: 2.0,
+    max_dpr_touch: 1.5,
 };

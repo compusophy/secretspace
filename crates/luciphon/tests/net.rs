@@ -9,7 +9,7 @@ use luciphon::laws::LAWS;
 use luciphon::mirror::Mirror;
 use luciphon::motion::{Intent, Verb};
 use luciphon::predict::Predictor;
-use luciphon::proto::{Down, Up};
+use luciphon::proto::{Down, Up, PROTO};
 use luciphon::room::Luciphon;
 use luciphon::thumb::Thumb;
 use luciphon::view::{ents, Viewer};
@@ -20,10 +20,10 @@ fn hostile_bytes_never_panic() {
     let mut room = Luciphon::new(1);
     let mut out = Outbox::default();
     room.open(1, &Who::guest(false), &mut out);
-    room.message(1, &Up::Join { proto: 1 }.encode(), &mut out);
+    room.message(1, &Up::Join { proto: PROTO }.encode(), &mut out);
     let mut rng = Rng::new(9);
     let good: Vec<Vec<u8>> = vec![
-        Up::Join { proto: 1 }.encode(),
+        Up::Join { proto: PROTO }.encode(),
         Up::Input {
             seq: 1,
             it: Intent {
@@ -31,6 +31,7 @@ fn hostile_bytes_never_panic() {
                 throttle: 255,
                 verb: Verb::None,
                 aim: 0,
+                jump: true,
             },
         }
         .encode(),
@@ -83,7 +84,7 @@ fn the_browser_rebuilds_every_tile_and_body_exactly() {
         build: 0,
     };
     room.open(1, &who, &mut out);
-    room.message(1, &Up::Join { proto: 1 }.encode(), &mut out);
+    room.message(1, &Up::Join { proto: PROTO }.encode(), &mut out);
     let mut m = Mirror::default();
     let mut rng = Rng::new(2);
     let mut seq = 0u16;
@@ -100,6 +101,7 @@ fn the_browser_rebuilds_every_tile_and_body_exactly() {
                 _ => Verb::None,
             },
             aim: rng.below(65536) as u16,
+            jump: t % 50 == 20,
         };
         let (it, _) = thumb.fit(raw);
         seq = seq.wrapping_add(1);
@@ -151,7 +153,7 @@ fn prediction_matches_the_server() {
     let mut regen = (1000, 0, 0);
     for t in 0..10_000u32 {
         let seq = t as u16;
-        // A thumb: runs with swings, drifts, dashes, strikes, holds.
+        // A player: runs, turns, jumps, dashes, strikes, holds.
         if rng.chance(1, 20) {
             heading = heading.wrapping_add(rng.below(40_000) as u16);
         }
@@ -176,6 +178,7 @@ fn prediction_matches_the_server() {
                 _ => Verb::None,
             },
             aim: rng.below(65536) as u16,
+            jump: rng.chance(1, 30),
         };
         let (it, _) = thumb.fit(raw);
         p.push(seq, it, &w.tiles, &w.laws);
@@ -191,10 +194,12 @@ fn prediction_matches_the_server() {
             w.intend(id, s, i);
         }
         w.step();
-        // Thorns throw a body about: that is the server's, not predicted.
+        // Thorns throw a body about, and a lance that misses is slow to
+        // recover: that is the server's, not predicted.
+        use luciphon::world::Event;
         if w.events
             .iter()
-            .any(|e| matches!(e, luciphon::world::Event::Thorns { .. }))
+            .any(|e| matches!(e, Event::Thorns { .. } | Event::Whiff { .. }))
         {
             lost_at = t;
         }
@@ -258,4 +263,26 @@ fn bots_use_only_what_a_thumb_can() {
     assert_eq!(bent, 0, "residents made {bent} Intents no thumb could");
     let _ = Fx::ZERO;
     let _ = Viewer::default();
+}
+
+#[test]
+fn a_page_too_old_is_told_and_not_let_in() {
+    let mut room = Luciphon::new(6);
+    let mut out = Outbox::default();
+    let who = Who {
+        soul: 11,
+        name: "old".into(),
+        watch: false,
+        build: 0,
+    };
+    room.open(1, &who, &mut out);
+    out.0.clear();
+    room.message(1, &Up::Join { proto: PROTO - 1 }.encode(), &mut out);
+    let told = out.0.iter().any(|(_, m)| {
+        matches!(Down::decode(m), Some(Down::Welcome { you: 0, oldest, .. }) if oldest > PROTO - 1)
+    });
+    assert!(told, "a Welcome saying how old is too old");
+    assert!(room.world().lumens.iter().all(|l| l.soul != 11));
+    room.message(1, &Up::Join { proto: PROTO }.encode(), &mut out);
+    assert!(room.world().lumens.iter().any(|l| l.soul == 11));
 }

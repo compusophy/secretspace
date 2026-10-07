@@ -250,11 +250,8 @@ impl World {
                 kb = milli(kb, l.launcher);
                 self.count("launcher");
             }
-            if carry > Fx::ZERO
-                && self.lumens[i].me.act.lift.is_none()
-                && carry > self.lumens[i].me.body.speed()
-            {
-                self.count("skid strike");
+            if carry > self.laws.walk {
+                self.count("running strike");
             }
         }
         // Striking a Lumen ends your own ghost.

@@ -1,6 +1,6 @@
 //! A Lumen's own actions, the part the page predicts: a tap's strike (wind
 //! up, land, recover), a lance out of a dash, a hold's charge and its
-//! release (a heavy lunge, or a throw), the skid strike after a slow lift.
+//! release (a heavy lunge, or a throw). Every action points where you look.
 //! `control` turns one Intent into the action's next tick and the body's
 //! step; what it would hit is a `Swing` for the world to settle (`hits`).
 
@@ -51,12 +51,8 @@ pub struct Action {
     pub aim: u16,
     /// It already landed (a lunge lands once).
     pub landed: bool,
-    /// A slow lift this many ticks ago, at this speed (the skid strike).
-    pub lift: Option<(u32, Fx)>,
-    /// The speed a strike carries: the lift's, if it came soon after one.
+    /// The speed a strike carries: the body's when it began.
     pub carry: Fx,
-    /// The stick was down last tick.
-    pub stick: bool,
     /// Ticks left in which a tap after a dash is still a lance.
     pub late: u32,
     /// In build mode, a tap places and a hold removes: no strikes.
@@ -102,26 +98,13 @@ pub fn control(
 ) -> (Moved, Option<Swing>) {
     let (b, a) = (&mut me.body, &mut me.act);
     let mut swing = None;
-    if matches!(b.mv, Move::Stun | Move::Teeter | Move::Fallen) {
-        // Struck, or on the edge: whatever was under way is lost.
+    if matches!(b.mv, Move::Stun | Move::Falling | Move::Fallen) {
+        // Struck, or falling: whatever was under way is lost.
         *a = Action {
-            stick: it.throttle > 0,
             build: a.build,
             ..Action::default()
         };
     }
-    // The skid strike: a slow lift remembers its speed for a moment.
-    let stick = it.throttle > 0;
-    if let Some((n, _)) = &mut a.lift {
-        *n += 1;
-    }
-    if a.lift.is_some_and(|(n, _)| n > l.skid_carry) {
-        a.lift = None;
-    }
-    if a.stick && !stick && it.verb != Verb::Flick {
-        a.lift = Some((0, b.speed()));
-    }
-    a.stick = stick;
     if b.mv == Move::Dash {
         a.late = l.lance_late + 1;
     } else {
@@ -134,18 +117,13 @@ pub fn control(
             swing = Some(Swing::Lance);
             a.act = Act::Recover;
             a.t = l.recovery;
-            a.aim = if b.mv == Move::Dash {
-                b.dash_h
-            } else {
-                b.facing
-            };
+            a.aim = it.aim;
         }
         Verb::Tap if a.act == Act::Idle => {
             a.act = Act::Windup;
             a.t = l.windup;
-            a.aim = b.facing;
-            a.carry = a.lift.map_or(b.speed(), |(_, s)| s);
-            a.lift = None;
+            a.aim = it.aim;
+            a.carry = b.speed();
         }
         Verb::Hold { held_for } if a.act == Act::Idle && b.mv != Move::Dash => {
             a.act = Act::Charge;
@@ -184,9 +162,7 @@ pub fn control(
         Act::Idle => {}
         Act::Charge => {
             a.c = a.c.saturating_add(1);
-            if it.verb == Verb::None && stick {
-                a.aim = it.aim;
-            }
+            a.aim = it.aim;
         }
         Act::Windup => {
             a.t = a.t.saturating_sub(1);

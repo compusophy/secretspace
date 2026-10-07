@@ -16,18 +16,20 @@ a page that draws every pixel itself into one buffer. Its card on the hub
 is the real game, live: the hub watches the room (`?watch=1`, never one of
 the people counted) and draws it with the game's own look.
 
-Game #2, **Luciphon** (a persistent one-thumb brawler-builder on a floating
-island of light), is specced in `docs/luciphon.md` and built from its §15
-through Stage 2; its hub card stays hidden (`/?all=1` shows it) until the
-owner passes the FUN GATE.
+Game #2, **Luciphon** (a persistent brawler-builder on a floating island of
+light, in first person and 3D), is specced in `docs/luciphon.md` and built
+from its §15 through Stage 2 and the first-person revision; its hub card
+stays hidden (`/?all=1` shows it) until the owner passes the FUN GATE.
 
 ## Rules
 
 1. **No hand-written JavaScript or TypeScript.** Pages are a canvas and one
    line that starts the wasm (wasm-bindgen writes its own glue). Every
-   pixel is drawn by `pixels` into a buffer and shown once a frame; the
-   only DOM besides the canvas is `kit::TextField`, an invisible input so
-   phones offer their keyboard.
+   pixel is drawn by `pixels` into a buffer and shown once a frame, except
+   Luciphon's world: WebGL2 driven from Rust (`kit::gl`, GLSL in Rust
+   strings) with a `pixels` HUD layer over it. The only DOM besides the
+   canvas is `kit::TextField`, an invisible input so phones offer their
+   keyboard.
 2. **`engine`, `pixels` have no dependencies; a game's core (`wyrm`)
    depends only on `engine`.** std only, shared by server and page. How
    it looks (`wyrm-look`) is shared by its page and the hub's preview.
@@ -52,8 +54,10 @@ crates/engine     wire rng room (the Room trait) hub (Stats) who (Hello, Seen,
 crates/pixels     Canvas (RGBA buffer, AA shapes, glow, blend), font (5x7),
                   wrap, fit_scale; examples/sheet.rs draws a test sheet
 crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
-                  ui text scale), Link (reconnects, Hello first), Session
-                  (the key), Pointer, Version, Socket, TextField, storage
+                  ui text scale), gl (WebGL2 + a pixel layer), input (keys,
+                  fingers, mouse, pointer lock), Link (reconnects, Hello
+                  first), Session (the key), Pointer, Version, Socket,
+                  TextField, storage
 crates/hub-web    the front page (cards, live counts, scroll, footer) and
                   watch (wyrm's card: the live game, as a watcher)
 crates/wyrm       the game: laws world bots grid proto view mirror room
@@ -62,8 +66,8 @@ crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
 crates/luciphon   game #2's core: laws island tiles motion combat hits thumb
                   bots world gather land build life persist proto view
                   mirror predict room (its spec: docs/luciphon.md)
-crates/luciphon-look  how it looks (page + hub)
-crates/luciphon-web   its page: gesture input state play first
+crates/luciphon-look  the 2D look (the hub's preview)
+crates/luciphon-web   its page: controls state scene/ (3D) hud fx play first
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/<game>/index.html each game's page

@@ -1,12 +1,9 @@
-//! The hold's HUD (v0.2): what you carry beside the Heart, the wheel and
-//! Build's ring of pieces, the build ghost and its channel, the rings of
-//! nodes near you (strike on the ring for double), the Underlight's two
-//! lights to return to, and the dreaming screen.
+//! The hold's HUD: what you carry, the Heart's wheel and Build's ring of
+//! pieces, the keys, the Underlight's two lights to return to, and the
+//! dreaming screen.
 
 use lucilook::palette::{self, GOLD, INK, RIM};
-use lucilook::View;
 use luciphon::proto::Own;
-use luciphon::tiles::{obj, Tiles};
 use pixels::{text_width, Canvas, Rect, Rgba};
 
 pub const SLOTS: [&str; 8] = [
@@ -37,97 +34,68 @@ pub fn bag(c: &mut Canvas, x: i32, y: i32, o: &Own, u: i32) {
     }
 }
 
-/// The wheel over a Heart press at (cx, cy): eight slots (or Build's six
-/// pieces), the one under the pointer lit.
-pub fn wheel(c: &mut Canvas, cx: f32, cy: f32, lit: Option<u8>, picking: bool, u: i32) {
-    let names: &[&str] = if picking { &PIECES } else { &SLOTS };
-    let r = 30.0 * u as f32;
-    c.circle(cx, cy, r + 12.0 * u as f32, Rgba(11, 13, 26, 170));
-    c.ring(cx, cy, r + 12.0 * u as f32, 1.0, Rgba(255, 210, 122, 90));
-    for (k, name) in names.iter().enumerate() {
-        let a = (k as f32 * 45.0).to_radians();
-        let (x, y) = (cx + a.sin() * r, cy - a.cos() * r);
-        let on = lit == Some(k as u8);
-        let col = if on { GOLD } else { Rgba(244, 238, 222, 190) };
-        if on {
-            c.glow_add(x as i32, y as i32, 10 * u, Rgba(255, 210, 122, 120));
-        }
-        let w = text_width(name, u);
-        c.text_shadowed(x as i32 - w / 2, y as i32 - 4 * u, name, u, col);
-    }
-}
-
-/// The build ghost: the tile in front of you, and the channel closing.
-pub fn ghost(
+/// The Heart's wheel about (cx, cy): eight slots (or Build's six pieces),
+/// each a spot to tap; with their keys on a desktop.
+pub fn wheel(
     c: &mut Canvas,
-    v: &View,
-    (x, y, facing): (f32, f32, u16),
-    o: &Own,
-    tiles: &Tiles,
-    l: &luciphon::laws::Laws,
-) {
-    let (ux, uy) = engine::fixed::unit(facing);
-    let (gx, gy) = ((x + ux.to_f32()).floor(), (y + uy.to_f32()).floor());
-    let (sx, sy) = v.to_screen(c, gx, gy);
-    let t = tiles.get(gx as i32, gy as i32);
-    let mine = t.land_of(o.me.body.claim) || o.build == obj::HEARTH;
-    let ok = !t.void() && !t.solid() && mine;
-    let col = if ok {
-        Rgba(255, 210, 122, 200)
-    } else {
-        Rgba(255, 110, 90, 200)
-    };
-    let s = 16.0;
-    if o.build == obj::HEARTH {
-        c.round_rect_line(
-            Rect::new(sx - 2.0 * s, sy - 2.0 * s, 5.0 * s, 5.0 * s),
-            2.0,
-            1.0,
-            col,
+    cx: f32,
+    cy: f32,
+    picking: bool,
+    keys: bool,
+    u: i32,
+) -> Vec<(Rect, u8)> {
+    let names: &[&str] = if picking { &PIECES } else { &SLOTS };
+    let uf = u as f32;
+    let r = 44.0 * uf;
+    c.circle(cx, cy, r + 22.0 * uf, Rgba(11, 13, 26, 190));
+    c.ring(cx, cy, r + 22.0 * uf, 1.0, Rgba(255, 210, 122, 90));
+    let mut spots = Vec::new();
+    for (k, name) in names.iter().enumerate() {
+        let a = (k as f32 * 360.0 / names.len() as f32).to_radians();
+        let (x, y) = (cx + a.sin() * r, cy - a.cos() * r);
+        let label = if keys {
+            format!("{} {name}", k + 1)
+        } else {
+            name.to_string()
+        };
+        let w = text_width(&label, u);
+        let spot = Rect::new(
+            x - w as f32 / 2.0 - 4.0 * uf,
+            y - 8.0 * uf,
+            w as f32 + 8.0 * uf,
+            16.0 * uf,
         );
+        c.round_rect(spot, 4.0, Rgba(255, 255, 255, 20));
+        c.text_shadowed(
+            x as i32 - w / 2,
+            y as i32 - 4 * u,
+            &label,
+            u,
+            Rgba(244, 238, 222, 220),
+        );
+        spots.push((spot, k as u8));
     }
-    c.round_rect_line(Rect::new(sx, sy, s, s), 2.0, 1.5, col);
-    if o.channel > 0 {
-        let k = 1.0 - o.channel as f32 / l.build_channel.max(1) as f32;
-        c.ring(sx + 8.0, sy + 8.0, 4.0 + 8.0 * k, 2.0, GOLD);
-    }
-    let name = PIECES
-        .iter()
-        .zip(luciphon::build::PIECES)
-        .find(|p| p.1 == o.build)
-        .map_or("build", |p| p.0);
-    let w = text_width(name, 1);
-    c.text_shadowed(sx as i32 + 8 - w / 2, sy as i32 - 10, name, 1, col);
+    let mid = if picking { "build" } else { "heart" };
+    c.text_centred(cx as i32, cy as i32 - 4 * u, mid, u, GOLD);
+    spots
 }
 
-/// The rings of nodes near (x, y): each rings every 30 ticks on its own
-/// phase, so a strike landing on the ring gives double.
-pub fn rings(c: &mut Canvas, v: &View, tiles: &Tiles, at: (f32, f32), seed: u64, tick: f64) {
-    let (cx, cy) = (at.0.floor() as i32, at.1.floor() as i32);
-    for ty in cy - 3..=cy + 3 {
-        for tx in cx - 3..=cx + 3 {
-            let o = tiles.get(tx, ty).obj;
-            if !obj::node(o) {
-                continue;
-            }
-            let Some(idx) = Tiles::index(tx, ty) else {
-                continue;
-            };
-            let ph = luciphon::gather::phase(seed, idx as u16) as f64;
-            // 0 at the ring, rising to 1 just before the next.
-            let k = ((tick + ph) % 30.0) / 30.0;
-            let (sx, sy) = v.to_screen(c, tx as f32 + 0.5, ty as f32 + 0.6);
-            let near = (1.0 - k).min(k) < 0.08;
-            let r = 4.0 + 10.0 * (1.0 - k as f32);
-            let a = if near { 230 } else { (40.0 + 80.0 * k) as u8 };
-            c.ring(
-                sx,
-                sy - 4.0,
-                r,
-                if near { 2.0 } else { 1.0 },
-                Rgba(127, 224, 255, a),
-            );
-        }
+/// What the keys do, for a desktop: shown until hidden.
+pub fn keys(c: &mut Canvas, building: bool, u: i32) {
+    let lines: &[&str] = if building {
+        &["1-6 pick a piece", "click: place   hold: remove", "b: done"]
+    } else {
+        &[
+            "wasd move   space jump   shift dash",
+            "click strike   hold heavy   right throw",
+            "e heart   b build   k kindle   r rekindle",
+            "t recall   / hide this",
+        ]
+    };
+    let mut y = c.h - (lines.len() as i32 * 9 + 4) * u;
+    for l in lines {
+        c.text_shadowed(6 * u, y, l, u, Rgba(244, 238, 222, 150));
+        y += 9 * u;
     }
 }
 

@@ -1,9 +1,9 @@
-//! Residents, v0: eight sparring Lumens with no homes. They run, drift,
-//! chase, strike, charge heavies and throw, dodge with a fan of headings
+//! Residents, v0: eight sparring Lumens with no homes. They run, chase,
+//! strike, charge heavies and throw, dash aside with a fan of headings
 //! clear of void, brambles and walls, and flee when they burn low. They
 //! see the world 250-400 ms late (the history ring, 8-12 ticks back), aim
-//! 6-12 degrees off, and act only through Intents a thumb could make: the
-//! same grammar (`thumb`) and the same one-a-tick rate as a person.
+//! 6-12 degrees off, and act only through Intents a person could make: the
+//! same grammar (`thumb`) and the same one-a-tick rate.
 
 use engine::fixed::{atan2, len, turn, unit, Fx};
 
@@ -30,14 +30,11 @@ pub struct Brain {
     pub err: i16,
     pub target: u16,
     pub goal: (Fx, Fx),
-    /// The stick was down last tick; a hold is under way, and its release.
-    pub stick: bool,
+    /// A hold is under way, and its release.
     pub holding: bool,
     /// The charge, in ticks, it lets go at.
     pub charge_to: u32,
     pub throw_range: u8,
-    /// A verb it means to make once the stick is up.
-    pub next: Option<Verb>,
     pub rethink: u32,
     pub seq: u16,
 }
@@ -90,7 +87,6 @@ pub fn think(w: &mut World) {
         let l = &mut w.lumens[i];
         if let Some(b) = l.bot.as_mut() {
             b.seq = b.seq.wrapping_add(1);
-            b.stick = it.throttle > 0;
             match it.verb {
                 Verb::Hold { .. } => b.holding = true,
                 Verb::Release { .. } | Verb::Cancel => b.holding = false,
@@ -112,80 +108,36 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
     let mut rng_roll = || w.rng.below(1000) as u32;
     let roll = rng_roll();
     let roll2 = rng_roll();
+    // Looking straight ahead, going nowhere.
+    let still = Intent {
+        aim: body.facing,
+        ..Intent::default()
+    };
+    // Running this way, looking at `aim`.
+    let go = |heading: u16, throttle: u8, aim: u16| Intent {
+        heading,
+        throttle,
+        aim,
+        ..Intent::default()
+    };
 
     // Charging: let go at the planned tick, aimed at where it saw them.
     if brain.holding {
         let aim = seen_heading(w, i, brain.target, lag).unwrap_or(body.facing);
         let aim = aim.wrapping_add(brain.err as u16);
-        if me.me.act.act != Act::Charge {
-            return Intent {
-                verb: Verb::Cancel,
-                aim,
-                ..Intent::default()
-            };
-        }
-        if me.me.act.c >= brain.charge_to {
-            return Intent {
-                verb: Verb::Release {
-                    range: brain.throw_range,
-                },
-                aim,
-                ..Intent::default()
-            };
-        }
-        return Intent {
-            aim,
-            ..Intent::default()
-        };
-    }
-    if matches!(body.mv, Move::Stun | Move::Fallen) || me.down > 0 {
-        return Intent::default();
-    }
-    // On the edge: flick back.
-    if body.mv == Move::Teeter {
-        mind(w, i).next = None;
-        return if brain.stick {
-            Intent {
-                verb: Verb::Flick,
-                aim: body.back,
-                ..Intent::default()
+        let verb = if me.me.act.act != Act::Charge {
+            Verb::Cancel
+        } else if me.me.act.c >= brain.charge_to {
+            Verb::Release {
+                range: brain.throw_range,
             }
         } else {
-            Intent {
-                heading: body.back,
-                throttle: 255,
-                ..Intent::default()
-            }
+            Verb::None
         };
+        return Intent { verb, aim, ..still };
     }
-    // A verb waiting for the stick to come up.
-    if let Some(v) = brain.next {
-        if v == Verb::Flick && !brain.stick {
-            // A flick ends a drag: drag first.
-            return Intent {
-                heading: body.facing,
-                throttle: 255,
-                ..Intent::default()
-            };
-        }
-        if !brain.stick {
-            mind(w, i).next = None;
-            return Intent {
-                verb: v,
-                aim: body.facing,
-                ..Intent::default()
-            };
-        }
-        if v == Verb::Flick {
-            mind(w, i).next = None;
-            return Intent {
-                verb: Verb::Flick,
-                aim: body.facing,
-                ..Intent::default()
-            };
-        }
-        // Lift the stick first (a skid), then the verb.
-        return Intent::default();
+    if matches!(body.mv, Move::Stun | Move::Falling | Move::Fallen) || me.down > 0 {
+        return still;
     }
 
     // Who is near, as it saw them.
@@ -209,7 +161,7 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
         }
     }
 
-    // Danger: someone close winding up toward it. Dodge sideways.
+    // Danger: someone close winding up toward it. Dash sideways.
     for o in &w.lumens {
         if o.id == me.id || !o.alive() {
             continue;
@@ -224,42 +176,29 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
             && body.breath >= w.laws.dash_breath
             && roll < 120 + brain.nerve as u32
         {
-            let side =
-                atan2(y.sub(oy), x.sub(ox)).wrapping_add(if roll2 < 500 { 16384 } else { 49152 });
+            let at = atan2(oy.sub(y), ox.sub(x));
+            let side = at.wrapping_add(if roll2 < 500 { 16384 } else { 49152 });
             let h = fan(w, x, y, side, 3);
-            if brain.stick {
-                return Intent {
-                    verb: Verb::Flick,
-                    aim: h,
-                    ..Intent::default()
-                };
-            }
-            mind(w, i).next = Some(Verb::Flick);
             return Intent {
-                heading: h,
-                throttle: 255,
-                ..Intent::default()
+                verb: Verb::Flick,
+                ..go(h, 255, at)
             };
         }
     }
 
     // Burning low: run for the Sanctum.
     if low {
-        let home = atan2(y.neg(), x.neg());
-        let h = fan(w, x, y, home, 3);
-        return Intent {
-            heading: h,
-            throttle: 255,
-            ..Intent::default()
-        };
+        let h = fan(w, x, y, atan2(y.neg(), x.neg()), 3);
+        return go(h, 255, h);
     }
 
     if let Some((tid, d, ox, oy)) = nearest.filter(|_| brain.nerve as u32 * 4 > roll / 4) {
         mind(w, i).target = tid;
         let toward = atan2(oy.sub(y), ox.sub(x)).wrapping_add(brain.err as u16);
         let glim = w.lumens[i].glim;
-        // Close: strike (lift the stick, then tap), or charge a heavy.
+        // Close: strike, or charge a heavy, closing in.
         if d < Fx::milli(1_150) {
+            let mut verb = Verb::None;
             if roll < 25 + brain.nerve as u32 / 4 {
                 // Nearly half its heavies are let go in the perfect window.
                 let to = if roll2 < 450 {
@@ -267,38 +206,34 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
                 } else {
                     12 + roll2 % 20
                 };
-                {
-                    let b = mind(w, i);
-                    b.next = Some(Verb::Hold { held_for: 9 });
-                    b.charge_to = to;
-                    b.throw_range = 0;
-                }
+                verb = Verb::Hold { held_for: 0 };
+                let b = mind(w, i);
+                b.charge_to = to;
+                b.throw_range = 0;
             } else if roll < 400 {
-                mind(w, i).next = Some(Verb::Tap);
+                verb = Verb::Tap;
             }
             return Intent {
-                heading: toward,
-                throttle: if brain.stick { 0 } else { 60 },
-                ..Intent::default()
+                verb,
+                ..go(toward, 60, toward)
             };
         }
         // In range for a throw.
         if glim >= w.laws.throw_glim && d > Fx::int(4) && d < Fx::int(8) && roll < 12 {
             let span = (d.sub(Fx::int(4)).0 as i64 * 254 / Fx::int(5).0 as i64) as u8;
-            {
-                let b = mind(w, i);
-                b.next = Some(Verb::Hold { held_for: 9 });
-                b.charge_to = 14 + roll2 % 10;
-                b.throw_range = span.max(1);
-            }
-            return Intent::default();
+            let b = mind(w, i);
+            b.charge_to = 14 + roll2 % 10;
+            b.throw_range = span.max(1);
+            return Intent {
+                verb: Verb::Hold { held_for: 0 },
+                ..go(toward, 0, toward)
+            };
         }
-        // Chase.
+        // Chase, hopping now and then.
         let h = fan(w, x, y, toward, 2);
         return Intent {
-            heading: h,
-            throttle: 255,
-            ..Intent::default()
+            jump: roll2 < 15,
+            ..go(h, 255, toward)
         };
     }
 
@@ -317,11 +252,7 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
     }
     let goal = w.lumens[i].bot.as_ref().map_or((x, y), |b| b.goal);
     let h = fan(w, x, y, atan2(goal.1.sub(y), goal.0.sub(x)), 3);
-    Intent {
-        heading: h,
-        throttle: if roll < 300 { 160 } else { 255 },
-        ..Intent::default()
-    }
+    go(h, if roll < 300 { 160 } else { 255 }, h)
 }
 
 /// A resident's mind (every resident has one).

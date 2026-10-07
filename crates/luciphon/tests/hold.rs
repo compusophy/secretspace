@@ -325,3 +325,29 @@ fn every_old_world_still_loads() {
     let (hx, hy) = c.hearth.expect("a hearth, not a lodging");
     assert_eq!(w.tiles.get(hx, hy).obj, obj::HEARTH);
 }
+
+#[test]
+fn running_off_the_rim_falls_into_the_dark() {
+    let mut w = World::new(LAWS, 21);
+    let id = w.spawn("edge", 9, None);
+    let mut p = Player { id, seq: 0 };
+    // A tile of ground with the Dark just east of it, in the Rim.
+    let (x, y) = (0..128 * 128)
+        .map(Tiles::at_index)
+        .find(|&(x, y)| {
+            x > 40 && !w.tiles.void(x, y) && !w.tiles.solid(x, y) && w.tiles.void(x + 1, y)
+        })
+        .expect("an edge");
+    p.put(&mut w, x as f32 + 0.5, y as f32 + 0.5, 0);
+    let run = Intent {
+        heading: 0,
+        throttle: 255,
+        ..Intent::default()
+    };
+    for _ in 0..HZ * 2 {
+        p.go(&mut w, run);
+    }
+    let l = w.find(id).unwrap();
+    assert!(l.descent > 0, "into the Underlight");
+    assert_eq!(w.tally.get("fell to the Dark"), Some(&1));
+}

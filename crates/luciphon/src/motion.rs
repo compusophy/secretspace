@@ -1,13 +1,15 @@
-//! A Lumen's body and how it moves: every movement rule of §7, in its
-//! order, in fixed point only, so the page predicts its own body bit for
-//! bit. `step` is the whole of it:
+//! A Lumen's body and how it moves, first person: you go where you push,
+//! at once (quick to start, quick to stop), jump, and dash. Strikes face
+//! where you look. In fixed point only, so the page predicts its own body
+//! bit for bit. `step` is the whole of it:
 //!
-//! 1. timers and breath; 2. the ground underfoot; 3. hit-stun or a
-//!    spin-out (no control, flight decays); 4. a dash; 5. control (carve,
-//!    accelerate, skid, drift and its slingshots); 6. the move, one axis at
-//!    a time against solid tiles; 7. the void: teeter, or fall.
+//! 1. timers and breath; 2. the ground underfoot; 3. hit-stun (no control,
+//!    the flight decays); 4. a dash; 5. control (accelerate toward the
+//!    stick's velocity, slower while striking or charging, little in the
+//!    air); 6. the move, one axis at a time against solid tiles; 7. height:
+//!    jumps and gravity, landing, or falling off the island into the Dark.
 
-use engine::fixed::{atan2, len, turn, unit, Fx};
+use engine::fixed::{len, unit, Fx};
 
 use crate::laws::Laws;
 use crate::tiles::{ground, Tiles};
@@ -18,13 +20,15 @@ use crate::tiles::{ground, Tiles};
 pub enum Verb {
     #[default]
     None,
+    /// A strike.
     Tap,
+    /// A dash.
     Flick,
-    /// A hold began `held_for` ticks ago.
+    /// A charge began `held_for` ticks ago.
     Hold {
         held_for: u8,
     },
-    /// A hold let go: 0 for a heavy, else a throw's range (1-255: 4-9 tiles).
+    /// A charge let go: 0 for a heavy, else a throw's range (1-255: 4-9 tiles).
     Release {
         range: u8,
     },
@@ -33,32 +37,32 @@ pub enum Verb {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Intent {
-    /// The stick's heading, and how far it is pushed: 0 the stick is up,
-    /// 1-254 a walk at that share of walk speed, 255 a run.
+    /// Which way to move (world heading), and how hard: 0 standing, 1-254
+    /// a walk at that share of walk speed, 255 a run.
     pub heading: u16,
     pub throttle: u8,
     pub verb: Verb,
-    /// The flick's or the aim's heading.
+    /// Where you look (world heading): strikes, charges and throws go here.
     pub aim: u16,
+    pub jump: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Move {
     #[default]
-    Free,
-    Drift,
-    Dash,
-    /// Hit-stun, or a spin-out: no control while the flight decays.
-    Stun,
-    /// On the edge of the void, a moment from falling.
-    Teeter,
+    Free = 0,
+    Dash = 2,
+    /// Hit-stun: no control while the flight decays.
+    Stun = 3,
+    /// Off the island, dropping into the Dark.
+    Falling = 4,
     /// Gone into the Dark.
-    Fallen,
+    Fallen = 5,
 }
 
-/// What an action leaves of control: nothing, the stick (a strike: a dash
-/// still cancels it), everything but a cancel (a charge roots you), or
-/// nothing at all (a lunge carries you).
+/// What an action leaves of control: everything (but slower while
+/// striking or charging), or nothing (a lunge carries you).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Busy {
     #[default]
@@ -72,11 +76,14 @@ pub enum Busy {
 pub struct Body {
     pub x: Fx,
     pub y: Fx,
+    /// Height above the ground, and its speed (up is positive).
+    pub z: Fx,
     pub vx: Fx,
     pub vy: Fx,
+    pub vz: Fx,
     pub facing: u16,
     pub mv: Move,
-    /// Ticks into a drift or a dash; ticks left of stun or a teeter.
+    /// Ticks into a dash; ticks left of stun.
     pub t: u32,
     /// Breath in thousandths, and ticks until it regenerates.
     pub breath: i32,
@@ -85,21 +92,14 @@ pub struct Body {
     pub regen: i32,
     pub cooldown: u32,
     pub iframes: u32,
-    /// A slingshot: ticks left, and its top-speed multiplier.
-    pub sling: u32,
-    pub sling_mul: i32,
-    /// A drift with the stick up coasts this many ticks more.
-    pub coast: u32,
-    /// The wall-kick window, whether this wall was kicked, and a flick held
+    /// The wall-kick window, whether this wall was kicked, and a dash held
     /// from a dash's last ticks.
     pub kick: u32,
     pub kicked: bool,
     pub kick_held: Option<u16>,
     pub dash_h: u16,
     pub dash_prior: Fx,
-    pub dash_void: Fx,
-    /// Teetering: the way back to ground. The last place on ground.
-    pub back: u16,
+    /// The last place on ground.
     pub safe: (Fx, Fx),
     /// Materials carried (weight), and the claim whose land is its own.
     pub load: u32,
@@ -128,13 +128,19 @@ impl Body {
         self.iframes > 0
     }
 
-    /// Thrown: this velocity, and no control for this many ticks.
+    pub fn grounded(&self) -> bool {
+        self.z == Fx::ZERO && self.vz == Fx::ZERO
+    }
+
+    /// Thrown: this velocity, a little up, and no control for this many
+    /// ticks.
     pub fn launch(&mut self, vx: Fx, vy: Fx, ticks: u32) {
-        if matches!(self.mv, Move::Fallen | Move::Teeter) {
+        if matches!(self.mv, Move::Fallen | Move::Falling) {
             return;
         }
         self.vx = vx;
         self.vy = vy;
+        self.vz = self.vz.max(len(vx, vy).div_int(3));
         self.mv = Move::Stun;
         self.t = ticks.max(1);
         self.busy = Busy::No;
@@ -148,20 +154,14 @@ pub struct Moved {
     pub slam: Fx,
     pub dashed: bool,
     pub kicked: bool,
-    /// A slingshot out of a drift: 1 blue, 2 gold.
-    pub sling: u8,
-    pub spun: bool,
-    pub saved: bool,
+    pub jumped: bool,
     pub fell: bool,
 }
 
 /// The ground's multipliers, thousandths.
 struct Underfoot {
     accel: i32,
-    turn: i32,
-    skid: i32,
     speed: i32,
-    drift: bool,
     dash: bool,
     ice: bool,
 }
@@ -170,24 +170,16 @@ fn underfoot(b: &Body, t: &Tiles, l: &Laws) -> Underfoot {
     let tile = t.under(b.x, b.y);
     let mut u = Underfoot {
         accel: 1000,
-        turn: 1000,
-        skid: 1000,
         speed: 1000,
-        drift: true,
         dash: true,
         ice: false,
     };
     match tile.kind() {
         ground::ICE => {
             u.accel = l.ice_grip;
-            u.turn = l.ice_grip;
-            u.skid = l.ice_skid;
             u.ice = true;
         }
-        ground::MUD => {
-            u.speed = l.mud_speed;
-            u.drift = false;
-        }
+        ground::MUD => u.speed = l.mud_speed,
         ground::WATER => {
             u.speed = l.water_speed;
             u.dash = false;
@@ -204,21 +196,12 @@ fn milli(v: Fx, m: i32) -> Fx {
     Fx((v.0 as i64 * m as i64 / 1000) as i32)
 }
 
-fn rotate(from: u16, to: u16, most: i32) -> u16 {
-    let d = turn(from, to).clamp(-most, most);
-    from.wrapping_add(d as u16)
-}
-
-/// How fast a body at this speed may turn, heading units a tick.
-fn turn_rate(speed: Fx, l: &Laws) -> i32 {
-    let (slow, fast) = (l.turn_slow as i32, l.turn_fast as i32);
-    if speed.0 <= l.walk.0 {
-        slow
-    } else if speed.0 >= l.run.0 {
-        fast
+/// Move `v` toward `want` by at most `step`.
+fn approach(v: Fx, want: Fx, step: Fx) -> Fx {
+    if v < want {
+        v.add(step).min(want)
     } else {
-        let k = (speed.0 - l.walk.0) as i64 * 1000 / (l.run.0 - l.walk.0) as i64;
-        slow - ((slow - fast) as i64 * k / 1000) as i32
+        v.sub(step).max(want)
     }
 }
 
@@ -227,8 +210,6 @@ fn start_dash(b: &mut Body, h: u16, free: bool, l: &Laws, m: &mut Moved) {
     b.mv = Move::Dash;
     b.t = 0;
     b.dash_h = h;
-    b.dash_void = Fx::ZERO;
-    b.facing = h;
     b.iframes = l.iframes;
     b.kick_held = None;
     b.busy = Busy::No;
@@ -246,7 +227,7 @@ pub fn step(b: &mut Body, it: &Intent, t: &Tiles, l: &Laws) -> Moved {
         return m;
     }
     // 1. Timers and breath.
-    for c in [&mut b.cooldown, &mut b.iframes, &mut b.kick, &mut b.sling] {
+    for c in [&mut b.cooldown, &mut b.iframes, &mut b.kick] {
         *c = c.saturating_sub(1);
     }
     if b.rest > 0 {
@@ -256,48 +237,35 @@ pub fn step(b: &mut Body, it: &Intent, t: &Tiles, l: &Laws) -> Moved {
     }
     // 2. The ground.
     let g = underfoot(b, t, l);
-    let stick = it.throttle > 0;
     let flick = it.verb == Verb::Flick;
+    // A dash goes the way you move, or the way you look standing still.
+    let dash_h = if it.throttle > 0 { it.heading } else { it.aim };
 
-    // Flicks: a save, a held kick, a rebound, or a dash.
     match b.mv {
-        Move::Teeter if flick => {
-            if turn(it.aim, b.back).abs() <= l.save_angle as i32 && b.breath >= l.save_breath {
-                let (ux, uy) = unit(b.back);
-                b.x = b.x.add(ux);
-                b.y = b.y.add(uy);
-                b.vx = Fx::ZERO;
-                b.vy = Fx::ZERO;
-                b.breath -= l.save_breath;
-                b.rest = l.breath_rest;
-                b.mv = Move::Free;
-                m.saved = true;
-            }
-        }
-        Move::Dash if flick && b.t + l.kick_hold >= l.dash_ticks => b.kick_held = Some(it.aim),
-        Move::Free | Move::Drift if flick && b.busy != Busy::Charging => {
+        Move::Dash if flick && b.t + l.kick_hold >= l.dash_ticks => b.kick_held = Some(dash_h),
+        Move::Free if flick && b.busy != Busy::Charging => {
             if b.kick > 0 && !b.kicked {
                 b.kicked = true;
-                start_dash(b, it.aim, true, l, &mut m);
+                start_dash(b, dash_h, true, l, &mut m);
                 m.kicked = true;
             } else if b.cooldown == 0 && b.breath >= l.dash_breath && g.dash {
-                start_dash(b, it.aim, false, l, &mut m);
+                start_dash(b, dash_h, false, l, &mut m);
             }
         }
         _ => {}
     }
 
-    let mut speed = b.speed();
-    let mut vh = if speed.0 == 0 {
-        b.facing
-    } else {
-        atan2(b.vy, b.vx)
-    };
+    let air = !b.grounded();
     match b.mv {
         // 3. No control while the flight decays.
         Move::Stun => {
             let decay = milli(l.flight_decay, if g.ice { 150 } else { 1000 });
-            speed = speed.sub(decay).max(Fx::ZERO);
+            let s = b.speed();
+            if s > Fx::ZERO {
+                let k = s.sub(decay).max(Fx::ZERO);
+                b.vx = b.vx.mul(k).div(s);
+                b.vy = b.vy.mul(k).div(s);
+            }
             b.t = b.t.saturating_sub(1);
             if b.t == 0 {
                 b.mv = Move::Free;
@@ -305,93 +273,48 @@ pub fn step(b: &mut Body, it: &Intent, t: &Tiles, l: &Laws) -> Moved {
         }
         // 4. A dash is its own velocity.
         Move::Dash => {
-            vh = b.dash_h;
-            speed = l.dash_speed;
+            let (ux, uy) = unit(b.dash_h);
+            b.vx = ux.mul(l.dash_speed);
+            b.vy = uy.mul(l.dash_speed);
+            b.facing = it.aim;
         }
-        Move::Teeter => {
-            speed = Fx::ZERO;
-            b.t = b.t.saturating_sub(1);
-            if b.t == 0 {
-                b.mv = Move::Fallen;
-                m.fell = true;
-                return m;
-            }
-        }
+        Move::Falling | Move::Fallen => {}
         // 5. Control.
-        Move::Free | Move::Drift if b.busy == Busy::Lunging => b.mv = Move::Free,
-        Move::Free | Move::Drift if b.busy != Busy::No => {
-            speed = speed.sub(milli(l.skid, g.skid)).max(Fx::ZERO);
-            b.mv = Move::Free;
-        }
-        Move::Drift => {
-            if stick {
-                b.facing = it.heading;
-                b.coast = l.drift_coast;
-            } else {
-                b.coast = b.coast.saturating_sub(1);
-            }
-            vh = rotate(vh, b.facing, l.grip as i32 * g.turn / 1000);
-            b.t += 1;
-            if b.t > l.spin_at {
-                b.mv = Move::Stun;
-                b.t = l.spin_ticks;
-                speed = Fx(speed.0 / 2);
-                m.spun = true;
-            } else if turn(vh, b.facing).abs() < l.drift_out as i32 {
-                b.mv = Move::Free;
-                if b.t >= l.gold_at {
-                    (b.sling, b.sling_mul, m.sling) = (l.sling_ticks, l.gold, 2);
-                } else if b.t >= l.blue_at {
-                    (b.sling, b.sling_mul, m.sling) = (l.sling_ticks, l.blue, 1);
-                }
-            } else if b.coast == 0 {
-                b.mv = Move::Free;
-            }
-        }
+        Move::Free if b.busy == Busy::Lunging => {}
         Move::Free => {
-            let h = it.heading;
-            if stick && g.drift && speed >= l.drift_speed && turn(vh, h).abs() > l.drift_in as i32 {
-                b.mv = Move::Drift;
-                b.t = 0;
-                b.coast = l.drift_coast;
-                b.facing = h;
-            } else {
-                if stick {
-                    vh = if speed < l.snap {
-                        h
-                    } else {
-                        rotate(vh, h, turn_rate(speed, l) * g.turn / 1000)
-                    };
-                    b.facing = h;
-                }
-                let mut top = match it.throttle {
-                    0 => Fx::ZERO,
-                    255 => l.run,
-                    n => Fx((l.walk.0 as i64 * n as i64 / 254) as i32),
-                };
-                let cut = (b.load as i32 / l.weight_step) * l.weight_cut;
-                top = milli(top, (1000 - cut).max(l.weight_floor));
-                top = milli(top, g.speed);
-                if b.sling > 0 {
-                    top = milli(top, b.sling_mul);
-                }
-                speed = if speed < top {
-                    speed.add(milli(l.accel, g.accel)).min(top)
-                } else {
-                    speed.sub(milli(l.skid, g.skid)).max(top)
-                };
+            b.facing = it.aim;
+            let mut top = match it.throttle {
+                0 => Fx::ZERO,
+                255 => l.run,
+                n => Fx((l.walk.0 as i64 * n as i64 / 254) as i32),
+            };
+            let cut = (b.load as i32 / l.weight_step) * l.weight_cut;
+            top = milli(top, (1000 - cut).max(l.weight_floor));
+            top = milli(top, g.speed);
+            top = match b.busy {
+                Busy::Striking => milli(top, l.strike_slow),
+                Busy::Charging => milli(top, l.charge_slow),
+                _ => top,
+            };
+            let (ux, uy) = unit(it.heading);
+            let (wx, wy) = (ux.mul(top), uy.mul(top));
+            let mut rate = if top > Fx::ZERO { l.accel } else { l.stop };
+            rate = milli(rate, g.accel);
+            if air {
+                rate = milli(rate, l.air_control);
+            }
+            b.vx = approach(b.vx, wx, rate);
+            b.vy = approach(b.vy, wy, rate);
+            if it.jump && !air {
+                b.vz = l.jump;
+                m.jumped = true;
             }
         }
-        Move::Fallen => {}
     }
-    let (ux, uy) = unit(vh);
-    b.vx = ux.mul(speed);
-    b.vy = uy.mul(speed);
 
     // 6. The move, x then y, against solid tiles.
     let before = b.speed();
-    let hit = slide(b, t, l);
-    if hit {
+    if slide(b, t, l) {
         m.slam = before;
         if b.mv == Move::Dash {
             b.vx = Fx::ZERO;
@@ -407,14 +330,9 @@ pub fn step(b: &mut Body, it: &Intent, t: &Tiles, l: &Laws) -> Moved {
             }
         }
     }
-    let mut ended = false;
     if b.mv == Move::Dash {
         b.t += 1;
-        if t.under(b.x, b.y).void() {
-            b.dash_void = b.dash_void.add(l.dash_speed);
-        }
         if b.t >= l.dash_ticks {
-            ended = true;
             b.mv = Move::Free;
             b.cooldown = l.dash_cooldown;
             b.kick_held = None;
@@ -425,27 +343,25 @@ pub fn step(b: &mut Body, it: &Intent, t: &Tiles, l: &Laws) -> Moved {
         }
     }
 
-    // 7. The void.
-    if t.under(b.x, b.y).void() {
-        if b.mv == Move::Dash && b.dash_void <= l.dash_void {
-            // Crossing a gap; it must end on ground.
-        } else if b.mv == Move::Dash || ended {
-            b.mv = Move::Fallen;
-            m.fell = true;
-        } else if b.speed() <= l.teeter_speed && b.mv != Move::Teeter {
-            b.back = atan2(b.safe.1.sub(b.y), b.safe.0.sub(b.x));
-            b.x = b.safe.0;
-            b.y = b.safe.1;
-            b.vx = Fx::ZERO;
-            b.vy = Fx::ZERO;
-            b.mv = Move::Teeter;
-            b.t = l.teeter_ticks;
+    // 7. Height: jumps and gravity; ground to land on, or the Dark.
+    let over_void = t.under(b.x, b.y).void();
+    if b.mv == Move::Falling || b.vz != Fx::ZERO || b.z != Fx::ZERO || over_void {
+        b.vz = b.vz.sub(l.gravity);
+        b.z = b.z.add(b.vz);
+        if b.z <= Fx::ZERO && !over_void && b.mv != Move::Falling {
+            b.z = Fx::ZERO;
+            b.vz = Fx::ZERO;
+        } else if b.z <= Fx::ZERO && over_void && b.mv != Move::Falling {
+            // Off the edge: nothing below but the Dark.
+            b.mv = Move::Falling;
             b.busy = Busy::No;
-        } else if b.mv != Move::Teeter {
+        }
+        if b.mv == Move::Falling && b.z < l.fall_depth.neg() {
             b.mv = Move::Fallen;
             m.fell = true;
         }
-    } else if b.mv != Move::Teeter {
+    }
+    if b.grounded() && !over_void && b.mv != Move::Falling {
         b.safe = (b.x, b.y);
     }
     m
@@ -457,7 +373,6 @@ fn slide(b: &mut Body, t: &Tiles, l: &Laws) -> bool {
     let r = l.body;
     let eps = Fx(1);
     let mut hit = false;
-    // x
     let nx = b.x.add(b.vx);
     if b.vx.0 != 0 {
         let lead = if b.vx.0 > 0 { nx.add(r) } else { nx.sub(r) };
@@ -475,7 +390,6 @@ fn slide(b: &mut Body, t: &Tiles, l: &Laws) -> bool {
             b.x = nx;
         }
     }
-    // y
     let ny = b.y.add(b.vy);
     if b.vy.0 != 0 {
         let lead = if b.vy.0 > 0 { ny.add(r) } else { ny.sub(r) };
@@ -516,45 +430,72 @@ mod tests {
         Intent {
             heading: h,
             throttle: 255,
+            aim: h,
             ..Intent::default()
         }
     }
 
     #[test]
-    fn a_run_reaches_top_speed_and_a_lift_skids_to_a_stop() {
+    fn you_go_where_you_push_at_once_and_stop_at_once() {
         let l = &LAWS;
         let t = floor(40);
         let mut b = Body::at(Fx::ZERO, Fx::ZERO, l);
-        for _ in 0..30 {
-            step(&mut b, &run(0), &t, l);
-        }
-        assert_eq!(b.speed().0 / 64, l.run.0 / 64);
         let mut n = 0;
-        while b.speed().0 > 0 {
+        while b.speed() < l.run && n < 30 {
+            step(&mut b, &run(0), &t, l);
+            n += 1;
+        }
+        assert!(n <= 6, "up to speed in {n} ticks");
+        // A hard turn: straight away the other way, no drifting.
+        for _ in 0..6 {
+            step(&mut b, &run(32768), &t, l);
+        }
+        assert!(b.vx < Fx::ZERO, "already going back");
+        let mut n = 0;
+        while b.speed() > Fx::ZERO && n < 30 {
             step(&mut b, &Intent::default(), &t, l);
             n += 1;
         }
-        // 6 tiles/s at 15 tiles/s² stops in 0.4 s: 12 ticks.
-        assert!((11..=13).contains(&n), "{n}");
+        assert!(n <= 6, "stopped in {n} ticks");
+        // Strikes face where you look, not where you move.
+        step(
+            &mut b,
+            &Intent {
+                aim: 16384,
+                ..run(0)
+            },
+            &t,
+            l,
+        );
+        assert_eq!(b.facing, 16384);
     }
 
     #[test]
-    fn a_hard_swing_drifts_and_comes_out_slingshot() {
+    fn a_jump_goes_up_and_comes_down() {
         let l = &LAWS;
         let t = floor(40);
-        let mut b = Body::at(Fx::int(-20), Fx::ZERO, l);
-        for _ in 0..30 {
-            step(&mut b, &run(0), &t, l);
+        let mut b = Body::at(Fx::ZERO, Fx::ZERO, l);
+        let m = step(
+            &mut b,
+            &Intent {
+                jump: true,
+                ..Intent::default()
+            },
+            &t,
+            l,
+        );
+        assert!(m.jumped && b.z > Fx::ZERO);
+        let mut top = Fx::ZERO;
+        for _ in 0..60 {
+            step(&mut b, &Intent::default(), &t, l);
+            top = top.max(b.z);
         }
-        // Swing 150 degrees.
-        let h = crate::laws::deg(150);
-        step(&mut b, &run(h), &t, l);
-        assert_eq!(b.mv, Move::Drift);
-        let mut sling = 0;
-        for _ in 0..40 {
-            sling = sling.max(step(&mut b, &run(h), &t, l).sling);
-        }
-        assert_eq!(sling, 1, "about 11 ticks of drift is a blue slingshot");
+        assert!(
+            top > Fx::HALF,
+            "a jump clears half a tile: {}",
+            top.to_f32()
+        );
+        assert!(b.grounded());
     }
 
     #[test]
@@ -562,18 +503,15 @@ mod tests {
         let l = &LAWS;
         let t = floor(40);
         let mut b = Body::at(Fx::ZERO, Fx::ZERO, l);
-        let flick = Intent {
+        let dash = Intent {
             verb: Verb::Flick,
-            aim: 0,
             ..Intent::default()
         };
-        let m = step(&mut b, &flick, &t, l);
-        assert!(m.dashed);
+        assert!(step(&mut b, &dash, &t, l).dashed);
         assert!(b.dodging());
         for _ in 0..4 {
             step(&mut b, &Intent::default(), &t, l);
         }
-        assert_eq!(b.mv, Move::Free);
         assert!(b.x.sub(Fx::int(3)).abs() < Fx(64), "{}", b.x.to_f32());
         assert_eq!(b.breath, l.breath - l.dash_breath);
     }
@@ -586,53 +524,40 @@ mod tests {
             t.set(2, y, Tile::new(ground::MEADOW, obj::ROCK));
         }
         let mut b = Body::at(Fx::ZERO, Fx::HALF, l);
-        let flick = |h| Intent {
+        let dash = |h| Intent {
             verb: Verb::Flick,
             aim: h,
             ..Intent::default()
         };
-        step(&mut b, &flick(0), &t, l);
+        step(&mut b, &dash(0), &t, l);
         let mut slam = Fx::ZERO;
         for _ in 0..5 {
             slam = slam.max(step(&mut b, &Intent::default(), &t, l).slam);
         }
-        assert!(b.x < Fx::int(2).sub(l.body).add(Fx(2)));
         assert_eq!(slam, l.dash_speed);
         assert!(b.kick > 0);
-        let m = step(&mut b, &flick(32768), &t, l);
+        let m = step(&mut b, &dash(32768), &t, l);
         assert!(m.kicked && m.dashed, "a free rebound");
     }
 
     #[test]
-    fn the_edge_teeters_a_walker_and_takes_a_launch() {
+    fn walking_off_the_edge_drops_you_into_the_dark() {
         let l = &LAWS;
         let t = floor(5);
         let mut b = Body::at(Fx::int(4), Fx::HALF, l);
-        let walk = Intent {
-            heading: 0,
-            throttle: 200,
-            ..Intent::default()
-        };
-        let mut n = 0;
-        while b.mv != Move::Teeter && n < 60 {
-            step(&mut b, &walk, &t, l);
-            n += 1;
-        }
-        assert_eq!(b.mv, Move::Teeter);
-        // Flick back toward the ground: saved.
-        let save = Intent {
-            verb: Verb::Flick,
-            aim: 32768,
-            ..Intent::default()
-        };
-        assert!(step(&mut b, &save, &t, l).saved);
-        assert_eq!(b.mv, Move::Free);
-        // Launched off at speed: gone.
-        b.launch(Fx::int(1), Fx::ZERO, 30);
         let mut fell = false;
-        for _ in 0..10 {
-            fell |= step(&mut b, &Intent::default(), &t, l).fell;
+        for _ in 0..200 {
+            fell |= step(&mut b, &run(0), &t, l).fell;
         }
         assert!(fell && b.mv == Move::Fallen);
+        // And a jump carries you over a narrow gap.
+        let mut t = floor(20);
+        t.set(3, 0, Tile::default());
+        let mut b = Body::at(Fx::ZERO, Fx::HALF, l);
+        for k in 0..60 {
+            let jump = k == 6;
+            step(&mut b, &Intent { jump, ..run(0) }, &t, l);
+        }
+        assert!(b.mv == Move::Free && b.x > Fx::int(5), "over the gap");
     }
 }

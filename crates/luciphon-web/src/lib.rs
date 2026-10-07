@@ -1,42 +1,53 @@
-//! Luciphon's page: one pointer (five gestures and the Heart) to Inputs 30
-//! times a second, its own Lumen predicted, everyone else 66 ms behind,
-//! the island drawn by `lucilook` at most 60 times a second. `?perf=1`
-//! shows frame times; `?trace=1` records the pointer for download.
+//! Luciphon's page, in first person: two hands (`controls`) to Inputs 30
+//! times a second, its own Lumen predicted and drawn smoothly between
+//! ticks, everyone else 66 ms behind, the island drawn by the GPU
+//! (`scene`, WebGL2 from Rust) with a pixel HUD over it (`hud`). `?perf=1`
+//! shows frame times.
 
+pub mod controls;
 pub mod first;
-pub mod gesture;
-pub mod input;
+pub mod fx;
+pub mod hud;
 pub mod laws;
 pub mod play;
+pub mod scene;
 pub mod state;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use engine::who::{clean_name, Seen, Status};
+use kit::input::Hand;
 use kit::Net;
-use lucilook::{hud, palette, Look, View};
+use lucilook::palette;
+use luciphon::build::{act, slot};
 use luciphon::combat::Act;
 use luciphon::proto::{Up, PROTO};
+use luciphon::tiles::{obj, Tiles};
 use pixels::{Rect, Rgba};
 use wasm_bindgen::prelude::*;
 
+use controls::{Controls, TICK_MS};
 use first::Panel;
-use input::{Input, TICK_MS};
 use laws::FEEL;
+use scene::{Camera, Frame, Scene};
 use state::State;
 
-const TAUGHT: &str = "secretspace/luciphon/taught";
+const TAUGHT: &str = "secretspace/luciphon/taught3d";
 const VERSION_EVERY: f64 = 5.0 * 60_000.0;
+/// Chunks rebuilt a frame, at most.
+const BUILDS: usize = 2;
 
 struct Page {
-    screen: kit::Screen,
-    look: Look,
+    gl: kit::gl::Gl,
+    scene: Scene,
     st: State,
-    input: Input,
+    fx: fx::Fx,
+    ctl: Controls,
+    hands: kit::input::Hands,
     link: kit::Link,
     session: kit::Session,
     version: kit::Version,
-    pointer: kit::Pointer,
     name: kit::TextField,
     words: kit::TextField,
     panel: Panel,
@@ -48,20 +59,25 @@ struct Page {
     restore_bad: bool,
     touch: bool,
     drawn_at: f64,
-    ticked_at: f64,
     ping_at: f64,
     perf: Option<f64>,
-    /// ?light=1: a night light pass every frame, to measure its cost.
-    light: bool,
-    /// Where each body was drawn last frame (for skid marks and streaks).
-    was: std::collections::HashMap<u16, (f32, f32)>,
-    heart_down: bool,
-    /// Build was picked on the wheel: the next stroke picks a piece.
+    /// The Heart's wheel is open; Build's pieces are being picked.
+    wheel: bool,
     picking: bool,
-    /// The Underlight's two lights (buffer pixels).
+    wheel_spots: Vec<(Rect, u8)>,
+    /// The Underlight's two lights (layer pixels).
     choice: (Rect, Rect),
     /// Since when this page has had no Lumen while joined (it dreams).
     gone_since: f64,
+    /// Where you fell from, for the Underlight's camera.
+    fell: [f32; 3],
+    keys_hidden: bool,
+    was_locked: bool,
+    swing: f32,
+    /// What you have done once, ever (for the hints).
+    taught: u8,
+    /// Asked for the newest page, being too old.
+    asked: bool,
 }
 
 thread_local! {
@@ -79,22 +95,12 @@ fn query(k: &str) -> bool {
         .is_ok_and(|q| q.trim_start_matches('?').split('&').any(|kv| kv == k))
 }
 
-/// The Heart, in CSS pixels: centre and radius.
-fn heart(p: &Page) -> (f64, f64, f64) {
-    let (w, h) = p.screen.css;
-    (
-        w / 2.0,
-        h - FEEL.heart_above - FEEL.heart_px / 2.0,
-        FEEL.heart_hit,
-    )
-}
-
-fn facing(p: &Page) -> u16 {
-    p.st.pred.me.body.facing
-}
-
 fn send(p: &Page, up: &Up) {
     p.link.send(&up.encode());
+}
+
+fn heart(p: &Page, act: u8, arg: u8) {
+    send(p, &Up::Heart { act, arg });
 }
 
 fn join(p: &mut Page) {
@@ -116,6 +122,9 @@ fn play(p: &mut Page) {
         p.link.set_hello(hello);
     }
     join(p);
+    if !p.touch {
+        kit::input::lock(p.gl.canvas());
+    }
 }
 
 fn net(p: &mut Page, now: f64) {
@@ -126,8 +135,8 @@ fn net(p: &mut Page, now: f64) {
                 send(
                     p,
                     &Up::Device {
-                        w: p.screen.css.0 as u16,
-                        h: p.screen.css.1 as u16,
+                        w: p.gl.css.0 as u16,
+                        h: p.gl.css.1 as u16,
                         touch: p.touch,
                     },
                 );
@@ -162,16 +171,32 @@ fn net(p: &mut Page, now: f64) {
                     continue;
                 }
                 let was = p.st.joined;
-                p.st.receive(&b, now, &mut p.look);
+                let under = p.st.descent > 0;
+                p.st.receive(&b, now, &mut p.fx);
                 if p.st.joined && !was {
                     p.joining = false;
-                    p.input.next_at = now;
+                    p.ctl.next_at = now;
+                }
+                if !under && p.st.descent > 0 {
+                    p.fell = p.st.drawn_self(now);
+                }
+                // Rebirth is the update: a newer page loads at the return.
+                if under && p.st.descent == 0 && p.version.newer() {
+                    kit::version::reload();
                 }
             }
         }
     }
     for ms in p.st.felt.drain(..) {
         kit::vibrate(ms);
+    }
+    // Too old for the server: ask for the newest page, and load it.
+    if p.st.outdated && !p.asked {
+        p.asked = true;
+        p.version.poll(now, true);
+    }
+    if p.st.outdated && p.version.newer() {
+        kit::version::reload();
     }
 }
 
@@ -223,6 +248,152 @@ fn dreaming(p: &Page, now: f64) -> bool {
         && now - p.gone_since > 1000.0
 }
 
+fn building(p: &Page) -> bool {
+    p.st.mirror.own.is_some_and(|o| o.build != 0)
+}
+
+/// A wheel slot, or a piece while picking.
+fn pick(p: &mut Page, k: u8) {
+    if p.picking {
+        p.picking = false;
+        if (k as usize) < luciphon::build::PIECES.len() {
+            heart(p, act::PIECE, k);
+        }
+    } else {
+        heart(p, act::WHEEL, k);
+        p.picking = k == slot::BUILD;
+    }
+    p.wheel = false;
+}
+
+fn key(p: &mut Page, code: &str) {
+    if !p.st.joined {
+        if code == "Enter" && p.panel == Panel::Title {
+            play(p);
+        }
+        return;
+    }
+    p.ctl.key(code);
+    if let Some(d) = code
+        .strip_prefix("Digit")
+        .and_then(|d| d.parse::<u8>().ok())
+    {
+        if (1..=8).contains(&d) && (p.wheel || p.picking) {
+            pick(p, d - 1);
+        }
+        return;
+    }
+    match code {
+        "KeyE" => p.wheel = !p.wheel && !p.picking,
+        "KeyB" if building(p) || p.picking => {
+            p.picking = false;
+            heart(p, act::DONE, 0);
+        }
+        "KeyB" => pick(p, slot::BUILD),
+        "KeyK" => pick(p, slot::KINDLE),
+        "KeyR" => pick(p, slot::REKINDLE),
+        "KeyT" => pick(p, slot::RECALL),
+        "KeyH" => heart(p, act::CHIRP, 0),
+        "Slash" => p.keys_hidden = !p.keys_hidden,
+        _ => {}
+    }
+}
+
+fn hands(p: &mut Page, now: f64) {
+    let playing = p.st.joined && p.st.connected;
+    let locked = kit::input::locked();
+    if p.was_locked && !locked {
+        p.ctl.drop_all();
+    }
+    p.was_locked = locked;
+    for code in p.hands.pressed() {
+        key(p, &code);
+    }
+    for h in p.hands.drain() {
+        let down = match h {
+            Hand::Finger {
+                kind: kit::input::Kind::Down,
+                x,
+                y,
+                ..
+            } => Some((x, y)),
+            Hand::Button {
+                down: true, x, y, ..
+            } if !locked => Some((x, y)),
+            _ => None,
+        };
+        if !playing {
+            if let Some((x, y)) = down {
+                let (x, y) = p.gl.to_px(x, y);
+                menu_press(p, x, y);
+            }
+            continue;
+        }
+        // In the Underlight, the two lights to return at.
+        if p.st.descent > 0 {
+            if let Some((x, y)) = down {
+                let (x, y) = p.gl.to_px(x, y);
+                if p.choice.0.contains(x, y) {
+                    heart(p, act::HOME, 0);
+                } else if p.choice.1.contains(x, y) {
+                    heart(p, act::HOME, 1);
+                }
+            }
+            continue;
+        }
+        // Dreaming: a touch wakes you where you lay.
+        if dreaming(p, now) {
+            if down.is_some() {
+                send(p, &Up::Join { proto: PROTO });
+                p.gone_since = now;
+            }
+            continue;
+        }
+        // The wheel takes the next touch: a slot, or closing it.
+        if (p.wheel || p.picking) && p.touch {
+            if let Some((x, y)) = down {
+                let (x, y) = p.gl.to_px(x, y);
+                match p.wheel_spots.iter().find(|s| s.0.contains(x, y)) {
+                    Some(&(_, k)) => pick(p, k),
+                    None => {
+                        p.wheel = false;
+                        if p.picking {
+                            p.picking = false;
+                            heart(p, act::DONE, 0);
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+        p.ctl.feed(&h, locked, p.gl.css, &FEEL);
+    }
+    if std::mem::take(&mut p.ctl.want_lock) && playing && !p.touch {
+        kit::input::lock(p.gl.canvas());
+    }
+    if std::mem::take(&mut p.ctl.heart) {
+        p.wheel = !p.wheel;
+    }
+    p.ctl.tick(now, &FEEL);
+    // Inputs, 30 a second.
+    if playing {
+        if p.ctl.next_at < now - 250.0 {
+            p.ctl.next_at = now;
+        }
+        while now >= p.ctl.next_at {
+            let hands = &p.hands;
+            let (seq, it) = p.ctl.sample(&|k| hands.held(k), &FEEL);
+            send(p, &Up::Input { seq, it });
+            p.st.push(seq, it, now);
+            p.ctl.next_at += TICK_MS;
+        }
+    }
+    if p.taught | p.ctl.done != p.taught {
+        p.taught |= p.ctl.done;
+        kit::save(TAUGHT, &p.taught.to_string());
+    }
+}
+
 fn frame(p: &mut Page, now: f64) {
     if p.st.joined && p.st.mirror.own.is_none() {
         if p.gone_since == 0.0 {
@@ -232,347 +403,292 @@ fn frame(p: &mut Page, now: f64) {
         p.gone_since = 0.0;
     }
     net(p, now);
-    let playing = p.st.joined && p.st.connected;
-    let (hx, hy, hr) = heart(p);
-    let on_heart = move |x: f64, y: f64| ((x - hx).powi(2) + (y - hy).powi(2)).sqrt() < hr;
-    for press in p.pointer.drain() {
-        if !playing {
-            if press.kind == kit::pointer::Kind::Down {
-                let (x, y) = p.screen.to_px(press.x, press.y);
-                menu_press(p, x, y);
-            }
-            continue;
-        }
-        if press.kind == kit::pointer::Kind::Down {
-            let (x, y) = p.screen.to_px(press.x, press.y);
-            // In the Underlight, the two lights to return at.
-            if p.st.descent > 0 {
-                if p.choice.0.contains(x, y) {
-                    send(
-                        p,
-                        &Up::Heart {
-                            act: luciphon::build::act::HOME,
-                            arg: 0,
-                        },
-                    );
-                } else if p.choice.1.contains(x, y) {
-                    send(
-                        p,
-                        &Up::Heart {
-                            act: luciphon::build::act::HOME,
-                            arg: 1,
-                        },
-                    );
-                }
-                continue;
-            }
-            // Dreaming: a tap wakes you where you lay.
-            if dreaming(p, now) {
-                send(p, &Up::Join { proto: PROTO });
-                p.gone_since = now;
-                continue;
-            }
-            p.heart_down = on_heart(press.x, press.y);
-        }
-        if press.kind == kit::pointer::Kind::Up {
-            p.heart_down = false;
-        }
-        let f = facing(p);
-        p.input.feed(&press, &FEEL, &on_heart, f);
+    // Chunks to build, the nearest first, a few a frame.
+    let hues: HashMap<u16, u8> = p.st.claims.iter().map(|(&id, c)| (id, c.hue)).collect();
+    for at in std::mem::take(&mut p.st.gone) {
+        p.scene.forget(&p.gl.gl, at);
+        p.st.stale.remove(&at);
     }
-    let f = facing(p);
-    p.input.tick(now, &FEEL, f);
-    if p.input.done != 0 {
-        kit::save(TAUGHT, &p.input.done.to_string());
-    }
-    // Inputs, 30 a second.
-    if playing {
-        if p.input.next_at < now - 250.0 {
-            p.input.next_at = now;
-        }
-        while now >= p.input.next_at {
-            let (seq, it) = p.input.sample(&FEEL, facing(p));
-            send(p, &Up::Input { seq, it });
-            p.st.pred.push(seq, it, &p.st.mirror.tiles, &p.st.laws);
-            p.input.next_at += TICK_MS;
-        }
-        use luciphon::build::{act, slot};
-        let building = p.st.mirror.own.is_some_and(|o| o.build != 0);
-        for h in std::mem::take(&mut p.input.hearts) {
-            match h {
-                // A tap: leave Build's ring or build mode, else a chirp.
-                None if p.picking => p.picking = false,
-                None if building => send(
-                    p,
-                    &Up::Heart {
-                        act: act::DONE,
-                        arg: 0,
-                    },
-                ),
-                None => {
-                    send(
-                        p,
-                        &Up::Heart {
-                            act: act::CHIRP,
-                            arg: 0,
-                        },
-                    );
-                    // ?trace=1: the Heart saves the pointer trace.
-                    if let Some(t) = &p.input.trace {
-                        kit::download("luciphon-trace.txt", t.join("\n").as_bytes());
-                    }
-                }
-                Some(s) if p.picking => {
-                    p.picking = false;
-                    if (s as usize) < luciphon::build::PIECES.len() {
-                        send(
-                            p,
-                            &Up::Heart {
-                                act: act::PIECE,
-                                arg: s,
-                            },
-                        );
-                    }
-                }
-                Some(s) => {
-                    send(
-                        p,
-                        &Up::Heart {
-                            act: act::WHEEL,
-                            arg: s,
-                        },
-                    );
-                    p.picking = s == slot::BUILD;
-                }
-            }
+    let mut todo: Vec<(i32, i32)> = p.st.stale.iter().copied().collect();
+    let me = p.st.drawn_self(now);
+    let (mx, my) = Tiles::chunk_of(me[0] as i32, me[1] as i32);
+    todo.sort_by_key(|&(x, y)| (x - mx).pow(2) + (y - my).pow(2));
+    for at in todo.into_iter().take(BUILDS) {
+        p.st.stale.remove(&at);
+        if p.st.mirror.chunks.contains(&at) {
+            p.scene.build(&p.gl.gl, &p.st.mirror.tiles, at, &hues);
         }
     }
+    hands(p, now);
     if now - p.ping_at > 1000.0 {
         p.ping_at = now;
         let rtt = (p.st.rtt / 4.0).clamp(0.0, 255.0) as u8;
         send(p, &Up::Ping { t: now as u32, rtt });
     }
     p.version.poll(now, false);
-    p.st.age(now, now - p.ticked_at);
-    p.ticked_at = now;
-
-    // At most 60 frames a second; none in a heavy hit's hit-stop.
-    if now - p.drawn_at < FEEL.frame_ms || now < p.look.fx.stop_until {
+    let dt = (now - p.drawn_at).clamp(0.0, 100.0);
+    p.st.age(now, dt);
+    p.fx.age(now);
+    p.drawn_at = now;
+    if p.gl.lost() {
         return;
     }
-    p.drawn_at = now;
-    draw(p, now);
+    draw(p, now, dt);
     if let Some(avg) = &mut p.perf {
         let ms = kit::now() - now;
         *avg = *avg * 0.95 + ms * 0.05;
-        let line = format!("{:.2} ms", *avg);
-        p.screen
-            .px
-            .text_shadowed(4, p.screen.px.h - 12, &line, 1, palette::INK);
+        let me = p.st.drawn_self(now);
+        let line = format!(
+            "{:.2} ms {} verts @{:.1},{:.1} yaw {:.2}",
+            *avg, p.scene.vertices, me[0], me[1], p.ctl.yaw
+        );
+        let c = &mut p.gl.hud;
+        c.text_shadowed(4, c.h - 12, &line, 1, palette::INK);
         kit::document().set_title(&line);
     }
-    p.screen.present();
+    p.gl.present();
 }
 
-fn draw(p: &mut Page, now: f64) {
-    let u = p.screen.ui();
-    let alive = p.st.joined && p.st.descent == 0 && p.st.pred.ready;
-    // Not yet playing: the Sanctum, as the hub's preview shows it.
-    let (cx, cy) = if p.st.joined {
-        p.st.drawn_self()
+fn camera(p: &mut Page, now: f64) -> Camera {
+    let aspect = p.gl.size.0 as f32 / p.gl.size.1.max(1) as f32;
+    let fov = if aspect < 1.0 {
+        FEEL.fov_tall
     } else {
-        (0.0, 3.0)
+        FEEL.fov
     };
-    let view = View {
-        cx,
-        cy,
-        sight: p.st.laws.sight as f32,
-        u,
+    let mut cam = Camera {
+        eye: [0.0; 3],
+        yaw: p.ctl.yaw,
+        pitch: p.ctl.pitch,
+        fov,
+        aspect,
+        far: FEEL.far,
     };
-    let bodies = p.st.bodies(now);
-    // Flights leave streaks; skids leave marks.
-    for b in &bodies {
-        if let Some(&(x0, y0)) = p.was.get(&b.id) {
-            let skidding = b.you && !p.input.rec.pressing() && b.moving && b.mv() == 0;
-            if b.mv() == 3 || skidding {
-                p.look.fx.skid(x0, y0, b.x, b.y, now);
+    if !p.st.joined {
+        // Before playing: round the Luciphon, slowly.
+        let t = (now / 14_000.0) as f32;
+        cam.eye = [0.5 + t.cos() * 11.0, 3.4, 0.5 + t.sin() * 11.0];
+        cam.yaw = (0.5 - cam.eye[2]).atan2(0.5 - cam.eye[0]);
+        cam.pitch = -0.12;
+    } else if p.st.descent > 0 {
+        // The Underlight: high over where you fell, looking down.
+        cam.eye = [p.fell[0], 14.0, p.fell[1]];
+        cam.pitch = -1.2;
+        cam.yaw = p.ctl.yaw + (now / 9000.0) as f32;
+    } else {
+        let me = p.st.drawn_self(now);
+        let (sx, sy) = p.fx.shake(now);
+        let (s, c) = cam.yaw.sin_cos();
+        cam.eye = [me[0] - s * sx, me[2] + FEEL.eye + sy, me[1] + c * sx];
+    }
+    cam
+}
+
+fn draw(p: &mut Page, now: f64, dt: f64) {
+    let cam = camera(p, now);
+    let alive = p.st.joined && p.st.descent == 0 && p.st.pred.ready && p.st.mirror.own.is_some();
+    let things = p.st.things(now);
+    let own = p.st.mirror.own.unwrap_or_default();
+    let l = &p.st.laws;
+    let me = p.st.pred.me;
+    let hue = scene::chunk::hue(p.st.mirror.ents.get(&p.st.you).map_or(0, |e| e.hue));
+    let flame = own.flame as f32 / l.flame.max(1) as f32;
+
+    // The hand: drawn back in a wind-up, across in a strike.
+    let target = match me.act.act {
+        Act::Windup => -0.7,
+        Act::Active | Act::Lunge => 1.0,
+        Act::Recover => 0.6 * me.act.t as f32 / l.recovery.max(1) as f32,
+        _ => 0.0,
+    };
+    let k = 1.0 - (-dt / 45.0).exp() as f32;
+    p.swing += (target - p.swing) * k;
+    let charging = me.act.act == Act::Charge;
+    let hand = alive.then_some(scene::Hand {
+        hue,
+        flame,
+        swing: p.swing,
+        charge: if charging {
+            (me.act.c as f32 / l.charge_full as f32).min(1.0)
+        } else {
+            0.0
+        },
+        perfect: charging && (l.charge_full..=l.perfect_to).contains(&me.act.c),
+    });
+    let at = p.st.drawn_self(now);
+    let fan = (alive && (me.act.act == Act::Active || now - p.st.struck_at < 90.0)).then(|| {
+        let a = me.act.aim as f32 / 65536.0 * std::f32::consts::TAU;
+        ([at[0], at[2] + 0.8, at[1]], a, l.reach.to_f32(), 0.16)
+    });
+    let ghost = (alive && own.build != 0).then(|| {
+        let b = &me.body;
+        let (gx, gy) = luciphon::build::ghost(b.x, b.y, b.facing);
+        let t = p.st.mirror.tiles.get(gx, gy);
+        let mine = t.land_of(b.claim) || own.build == obj::HEARTH;
+        (
+            gx,
+            gy,
+            !t.void() && !t.solid() && mine,
+            own.build == obj::HEARTH,
+        )
+    });
+    // The rings of nodes near you: strike on the ring for double.
+    let mut rings = Vec::new();
+    if alive {
+        let (cx, cy) = (me.body.x.floor(), me.body.y.floor());
+        let tick = p.st.tick_now(now);
+        for ty in cy - 4..=cy + 4 {
+            for tx in cx - 4..=cx + 4 {
+                let o = p.st.mirror.tiles.get(tx, ty).obj;
+                let Some(idx) = Tiles::index(tx, ty).filter(|_| obj::node(o)) else {
+                    continue;
+                };
+                let ph = luciphon::gather::phase(p.st.seed, idx as u16) as f64;
+                let k = (((tick + ph) % 30.0) / 30.0) as f32;
+                let near = (1.0 - k).min(k) < 0.08;
+                let r = 0.35 + 0.6 * (1.0 - k);
+                let a = if near { 0.8 } else { 0.1 + 0.25 * k };
+                rings.push(([tx as f32 + 0.5, 0.0, ty as f32 + 0.5], r, a));
             }
         }
     }
-    p.was = bodies.iter().map(|b| (b.id, (b.x, b.y))).collect();
-    let c = &mut p.screen.px;
-    lucilook::world(c, &mut p.look, &view, &p.st.mirror.tiles, &bodies, now);
-    if p.light {
-        // A quarter-resolution light map, multiplied over the picture.
-        let (lw, lh) = ((c.w + 3) / 4, (c.h + 3) / 4);
-        let map: Vec<[u8; 3]> = (0..lw * lh)
-            .map(|i| {
-                let (x, y) = ((i % lw - lw / 2) as f32, (i / lw - lh / 2) as f32);
-                let k = (1.0 - (x * x + y * y).sqrt() / 40.0).clamp(0.12, 1.0);
-                [(k * 255.0) as u8, (k * 235.0) as u8, (k * 200.0) as u8]
-            })
-            .collect();
-        c.light(&map, lw, lh, 4);
+    let mut sparks = Vec::new();
+    p.fx.points(now, &mut sparks);
+    if p.st.descent > 0 {
+        // The thread of your path since your last return.
+        for &(x, y) in &p.st.path {
+            sparks.extend_from_slice(&[x, 0.15, y, 1.0, 0.82, 0.48, 0.8, 0.18]);
+        }
     }
-    let scale = p.screen.scale;
+    let under = p.st.descent > 0;
+    let f = Frame {
+        cam,
+        things: &things,
+        hand,
+        ghost,
+        rings,
+        fan,
+        sparks: &sparks,
+        you: alive.then_some((hue, scene::flame(flame))),
+        under,
+        now,
+        fog: if under {
+            (20.0, 70.0)
+        } else {
+            (FEEL.fog_near, FEEL.fog_far)
+        },
+    };
+    let vp = p.scene.draw(&p.gl, &f);
+    overlay(p, now, &vp, &cam, &things, alive);
+}
 
+/// Everything in pixels over the picture.
+fn overlay(
+    p: &mut Page,
+    now: f64,
+    vp: &kit::gl::M4,
+    cam: &Camera,
+    things: &[state::Thing],
+    alive: bool,
+) {
+    let u = p.gl.ui();
+    let locked = kit::input::locked();
+    p.gl.hud.wipe();
+    let own = p.st.mirror.own.unwrap_or_default();
     if alive {
-        let me = &p.st.pred.me;
-        let (sx, sy) = view.to_screen(c, cx, cy);
-        let own = p.st.mirror.own.unwrap_or_default();
+        let c = &mut p.gl.hud;
         let l = &p.st.laws;
-        play::rings(
+        let me = p.st.pred.me;
+        hud::names(c, vp, cam.eye, things, u);
+        hud::marker(c, vp, [0.5, 4.6, 0.5], palette::GOLD, u);
+        if let Some(info) = p.st.claims.get(&me.body.claim) {
+            if let Some((hx, hy)) = info.hearth {
+                let col = Rgba::hsl(info.hue as f32 / 256.0 * 360.0, 0.7, 0.65);
+                hud::marker(c, vp, [hx as f32 + 0.5, 1.4, hy as f32 + 0.5], col, u);
+            }
+        }
+        for &(_, x, y) in &p.st.mirror.far {
+            let at = [x as f32 + 0.5, 1.8, y as f32 + 0.5];
+            hud::marker(c, vp, at, Rgba(255, 240, 190, 220), u);
+        }
+        hud::crosshair(c, u);
+        if me.act.act == Act::Charge {
+            hud::charge(c, me.act.c, l, u);
+        }
+        hud::vitals(
             c,
-            &view,
-            &p.st.mirror.tiles,
-            (cx, cy),
-            p.st.seed,
-            p.st.tick_now(now),
+            own.flame as f32 / l.flame as f32,
+            me.body.breath as f32 / l.breath as f32,
+            u,
         );
-        if own.build != 0 {
-            play::ghost(
-                c,
-                &view,
-                (cx, cy, me.body.facing),
-                &own,
-                &p.st.mirror.tiles,
-                l,
-            );
-        }
-        // Your hearth, off screen: a marker toward it in your hue.
-        if let Some((hx, hy)) = p.st.claims.get(&me.body.claim).and_then(|c| c.hearth) {
-            let (mx, my) = view.to_screen(c, hx as f32 + 0.5, hy as f32 + 0.5);
-            let hue = p.st.claims.get(&me.body.claim).map_or(0, |c| c.hue);
-            hud::marker(c, mx, my, Rgba::hsl(hue as f32 / 256.0 * 360.0, 0.7, 0.65));
-        }
         if let Some((t, at)) = &p.st.toast {
             if now - at < 2200.0 {
                 let s = pixels::fit_scale(t, c.w - 20, 2 * u);
                 c.text_centred(c.w / 2, c.h / 4, t, s, palette::GOLD);
             }
         }
-        hud::vitals(
-            c,
-            sx,
-            sy + 2.0,
-            own.flame as f32 / l.flame as f32,
-            me.body.breath as f32 / l.breath as f32,
-        );
-        if me.act.act == Act::Charge {
-            hud::charge(c, sx, sy, me.act.c, l);
-            if let Some((h, len)) = p.input.rec.aim() {
-                if len >= FEEL.throw_px {
-                    let shown = (len.min(FEEL.throw_far_px) / scale) as f32;
-                    hud::arrow(c, sx, sy, h, shown, own.glim >= l.throw_glim);
-                }
-            }
-        }
-        // The floating stick.
-        if let Some((ox, oy)) = p.input.rec.origin() {
-            let (bx, by) = p.screen.to_px(ox, oy);
-            let c = &mut p.screen.px;
-            c.ring(
-                bx,
-                by,
-                (FEEL.run_px / scale) as f32,
-                1.0,
-                Rgba(255, 255, 255, 50),
-            );
-            if let Some((h, d)) = p.input.rec.stick() {
-                let (ux, uy) = engine::fixed::unit(h);
-                let k = (d.min(FEEL.trail_px) / scale) as f32;
-                c.circle(
-                    bx + ux.to_f32() * k,
-                    by + uy.to_f32() * k,
-                    4.0,
-                    Rgba(255, 255, 255, 110),
-                );
-            }
-        }
-    }
-    let c = &mut p.screen.px;
-    // The Luciphon, off screen: a marker toward it; and every Beacon.
-    let (lx, ly) = view.to_screen(c, 0.5, 0.5);
-    hud::marker(c, lx, ly, palette::GOLD);
-    for &(_, x, y) in &p.st.mirror.far {
-        let (bx, by) = view.to_screen(c, x as f32 + 0.5, y as f32 + 0.5);
-        hud::marker(c, bx, by, Rgba(255, 240, 190, 220));
-    }
-    // The Underlight while you are gone.
-    if p.st.descent > 0 {
-        if !p.look.under.active {
-            p.look.under.begin(c, now);
-        }
-        let path: Vec<(f32, f32)> =
-            p.st.path
+        if own.build != 0 {
+            let name = play::PIECES
                 .iter()
-                .map(|&(x, y)| view.to_screen(c, x, y))
-                .collect();
-        let killer =
-            p.st.mirror
-                .ents
-                .get(&p.st.killer)
-                .map(|e| view.to_screen(c, e.x as f32 / 256.0, e.y as f32 / 256.0));
-        p.look.under.draw(c, &path, killer, now, u);
-    } else if p.look.under.active {
-        p.look.under.end();
-        // Rebirth is the update: a newer page loads now, at the return.
-        if p.version.newer() {
-            kit::version::reload();
+                .zip(luciphon::build::PIECES)
+                .find(|x| x.1 == own.build)
+                .map_or("a piece", |x| x.0);
+            let line = format!("placing: {name}");
+            c.text_centred(c.w / 2, c.h / 2 + 22 * u, &line, u, palette::GOLD);
+            if own.channel > 0 {
+                let k = 1.0 - own.channel as f32 / l.build_channel.max(1) as f32;
+                let (x, y) = (c.w as f32 / 2.0, c.h as f32 / 2.0);
+                c.ring(x, y, 6.0 + 10.0 * k, 2.0, palette::GOLD);
+            }
         }
     }
     if p.st.joined {
-        let (hx, hy, _) = heart(p);
-        let (bx, by) = p.screen.to_px(hx, hy);
-        let r = (FEEL.heart_px / 2.0 / p.screen.scale) as f32;
-        let c = &mut p.screen.px;
-        hud::heart(
-            c,
-            Rect::new(bx - r, by - r, 2.0 * r, 2.0 * r),
-            p.heart_down,
-            now,
-        );
-        let own = p.st.mirror.own.unwrap_or_default();
-        play::bag(c, (bx + r) as i32 + 8, by as i32 - 10 * u, &own, u);
-        // The wheel, a moment into a Heart press.
-        if let Some((ox, oy, t, lit)) = p.input.rec.wheel(&FEEL) {
-            if now - t >= FEEL.wheel_ms {
-                let (wx, wy) = p.screen.to_px(ox, oy - FEEL.wheel_up);
-                play::wheel(&mut p.screen.px, wx, wy, lit, p.picking, u);
-            }
-        } else if p.picking {
-            let c = &mut p.screen.px;
-            let line = "slide from the heart: a piece";
-            c.text_centred(
-                c.w / 2,
-                c.h - (FEEL.heart_above / p.screen.scale) as i32 - 50 * u,
-                line,
-                u,
-                palette::GOLD,
-            );
-        }
-        let c = &mut p.screen.px;
+        let build_keys = building(p) || p.picking;
+        let c = &mut p.gl.hud;
         let top = format!("{} here, {} awake", p.st.people, p.st.awake);
         c.text_shadowed(6 * u, 6 * u, &top, u, palette::DIM);
-        let taught: u8 = kit::load(TAUGHT).and_then(|t| t.parse().ok()).unwrap_or(0);
-        if p.input.rec.wheel(&FEEL).is_none() && !p.picking {
-            first::hint(c, taught | p.input.done, u, now);
+        play::bag(c, 6 * u, 18 * u, &own, u);
+        if alive && p.touch {
+            hud::touch(c, &p.ctl, p.gl.css, p.gl.scale, &FEEL, u);
+        }
+        if alive && !p.touch {
+            if !locked {
+                let a = (200.0 + 50.0 * (now / 400.0).sin()) as u8;
+                let y = c.h / 2 - 30 * u;
+                c.text_centred(c.w / 2, y, "click to play", 2 * u, Rgba(255, 210, 122, a));
+            }
+            if !p.keys_hidden {
+                play::keys(c, build_keys, u);
+            }
+        }
+        if alive && (p.wheel || p.picking) {
+            let (cx, cy) = (c.w as f32 / 2.0, c.h as f32 / 2.0);
+            p.wheel_spots = play::wheel(&mut p.gl.hud, cx, cy, p.picking, !p.touch, u);
+        }
+        let c = &mut p.gl.hud;
+        if alive && !p.wheel && !p.picking && (p.touch || locked) {
+            first::hint(c, p.taught, p.touch, u, now);
+        }
+        if let Some((col, _)) = p.fx.flash {
+            hud::flash(c, col);
         }
     }
     if p.st.descent > 0 {
-        let own = p.st.mirror.own.unwrap_or_default();
         let has =
             p.st.claims
                 .get(&own.me.body.claim)
                 .is_some_and(|c| c.hearth.is_some());
-        p.choice = play::choice(&mut p.screen.px, has, own.home, u);
+        let c = &mut p.gl.hud;
+        let line = "the underlight";
+        c.text_centred(c.w / 2, c.h / 5, line, 2 * u, Rgba(127, 224, 255, 200));
+        p.choice = play::choice(c, has, own.home, u);
     }
     if dreaming(p, now) {
-        play::dreaming(&mut p.screen.px, u, now);
+        play::dreaming(&mut p.gl.hud, u, now);
     }
     // The Stillness: the world holds; the picture stays, under gold.
     if p.st.joined && !p.st.connected {
-        let c = &mut p.screen.px;
+        let c = &mut p.gl.hud;
         let k = (((now / 1200.0).sin() + 1.0) * 30.0) as u8;
         c.fill_rect(0, 0, c.w, c.h, Rgba(40, 30, 10, 90 + k));
         let line = "the world holds still";
@@ -597,8 +713,8 @@ fn draw(p: &mut Page, now: f64) {
             awake: p.st.awake,
             touch: p.touch,
         };
-        p.spots = first::draw(&mut p.screen.px, &look, now);
-        let place = |r: Rect| Some(p.screen.to_css(r.x, r.y, r.w, r.h));
+        p.spots = first::draw(&mut p.gl.hud, &look, now);
+        let place = |r: Rect| Some(p.gl.to_css(r.x, r.y, r.w, r.h));
         p.name.place(if p.panel == Panel::Title {
             place(p.spots.name)
         } else {
@@ -615,33 +731,55 @@ fn draw(p: &mut Page, now: f64) {
     }
 }
 
+fn no_webgl() {
+    if let Some(b) = kit::document().body() {
+        b.set_inner_html(
+            "<p style=\"color:#f4eede;font:16px sans-serif;padding:24px\">luciphon is drawn in 3D: it needs a browser with WebGL2.</p>",
+        );
+    }
+}
+
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
-    let mut screen = kit::Screen::new("screen");
-    screen.fit_view(352.0);
-    let canvas = kit::document()
-        .get_element_by_id("screen")
-        .ok_or("no #screen")?;
+    let touch = kit::touch();
+    let Some(mut gl) = kit::gl::Gl::new("screen") else {
+        no_webgl();
+        return Ok(());
+    };
+    let max = if touch {
+        FEEL.max_dpr_touch
+    } else {
+        FEEL.max_dpr
+    };
+    gl.fit(352.0, max);
+    let scene = match Scene::new(&gl) {
+        Ok(s) => s,
+        Err(e) => {
+            kit::document().set_title(&e);
+            no_webgl();
+            return Ok(());
+        }
+    };
     let session = kit::Session::load();
     let name = kit::TextField::new(engine::who::MAX_NAME as u32, "your name");
     name.set_value(&session.name());
     let words = kit::TextField::new(120, "eleven words");
     let link = kit::Link::open("luciphon", session.hello(&session.name(), false), false);
-    let mut input = Input::default();
-    if query("trace=1") {
-        input.trace = Some(Vec::new());
-    }
-    input.done = kit::load(TAUGHT).and_then(|t| t.parse().ok()).unwrap_or(0);
+    let hands = kit::input::Hands::attach(gl.canvas());
+    let taught = kit::load(TAUGHT).and_then(|t| t.parse().ok()).unwrap_or(0);
     PAGE.with(|p| {
         *p.borrow_mut() = Some(Page {
-            screen,
-            look: Look::default(),
+            gl,
+            scene,
             st: State::default(),
-            input,
+            fx: fx::Fx::default(),
+            ctl: Controls::default(),
+            taught,
+            asked: false,
+            hands,
             link,
             session,
             version: kit::Version::watch(VERSION_EVERY),
-            pointer: kit::Pointer::attach(&canvas),
             name,
             words,
             panel: Panel::Title,
@@ -651,39 +789,26 @@ pub fn start() -> Result<(), JsValue> {
             renaming: false,
             joining: false,
             restore_bad: false,
-            touch: kit::touch(),
+            touch,
             drawn_at: 0.0,
-            ticked_at: 0.0,
             ping_at: 0.0,
             perf: query("perf=1").then_some(0.0),
-            light: query("light=1"),
-            was: std::collections::HashMap::new(),
-            heart_down: false,
+            wheel: false,
             picking: false,
+            wheel_spots: Vec::new(),
             choice: (Rect::default(), Rect::default()),
             gone_since: 0.0,
+            fell: [0.0; 3],
+            keys_hidden: false,
+            was_locked: false,
+            swing: 0.0,
         })
     });
     kit::frames(|now| {
         with(|p| frame(p, now));
     });
-    kit::on(&kit::window(), "resize", |_| {
-        with(|p| p.screen.fit_view(352.0));
-    });
-    kit::on(&kit::window(), "keydown", |e| {
-        if let Ok(e) = e.dyn_into::<web_sys::KeyboardEvent>() {
-            with(|p| {
-                if e.key() == "Enter" && !p.st.joined && p.panel == Panel::Title {
-                    play(p);
-                }
-                // ?trace=1: T saves the pointer trace.
-                if e.key() == "t" && p.st.joined {
-                    if let Some(t) = &p.input.trace {
-                        kit::download("luciphon-trace.txt", t.join("\n").as_bytes());
-                    }
-                }
-            });
-        }
+    kit::on(&kit::window(), "resize", move |_| {
+        with(|p| p.gl.fit(352.0, max));
     });
     Ok(())
 }

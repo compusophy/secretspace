@@ -1,6 +1,6 @@
 [package]
 name = "secretspace-luciphon-web"
-description = "Luciphon's page: one pointer, five gestures and the Heart; the island drawn pixel by pixel in Rust."
+description = "Luciphon's page, in first person: two hands, WebGL2 driven from Rust, a pixel HUD over it."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,4 +18,4 @@ pixels = { package = "secretspace-pixels", path = "../pixels" }
 engine = { package = "secretspace-engine", path = "../engine" }
 kit = { package = "secretspace-kit", path = "../kit" }
 wasm-bindgen = "=0.2.129"
-web-sys = { version = "0.3", features = ["KeyboardEvent"] }
+web-sys = { version = "0.3", features = ["Element", "HtmlElement", "WebGl2RenderingContext"] }

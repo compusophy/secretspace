@@ -229,20 +229,10 @@ pub enum Event {
     Whiff {
         id: u16,
     },
-    Sling {
-        id: u16,
-        gold: bool,
-    },
-    Spin {
-        id: u16,
-    },
     Dash {
         id: u16,
     },
     Kick {
-        id: u16,
-    },
-    Save {
         id: u16,
     },
     Dodge {
@@ -460,10 +450,6 @@ impl World {
             if moved.dashed && recovering {
                 *self.tally.entry("dash cancel").or_default() += 1;
             }
-            if l.me.body.mv == Move::Teeter && !moved.saved && l.me.body.t == self.laws.teeter_ticks
-            {
-                *self.tally.entry("teeter").or_default() += 1;
-            }
             if let Some(s) = swing {
                 swings.push((i, s));
             }
@@ -531,23 +517,8 @@ impl World {
 
     fn techniques(&mut self, i: usize, m: Moved) {
         let id = self.lumens[i].id;
-        if m.sling > 0 {
-            self.events.push(Event::Sling {
-                id,
-                gold: m.sling == 2,
-            });
-            self.technique(
-                i,
-                if m.sling == 2 {
-                    "gold slingshot"
-                } else {
-                    "blue slingshot"
-                },
-            );
-        }
-        if m.spun {
-            self.events.push(Event::Spin { id });
-            self.count("spin-out");
+        if m.jumped {
+            self.count("jump");
         }
         if m.kicked {
             self.events.push(Event::Kick { id });
@@ -556,11 +527,7 @@ impl World {
             self.events.push(Event::Dash { id });
             self.count("dash");
         }
-        if m.saved {
-            self.events.push(Event::Save { id });
-            self.technique(i, "ledge save");
-        }
-        if m.sling > 0 || m.kicked || m.saved {
+        if m.kicked {
             let xp = self.laws.xp_way;
             self.gain(i, 5, xp);
         }
@@ -722,7 +689,7 @@ impl World {
                     lum.flow = 0;
                     lum.thumb = Thumb::default();
                     if let Some(b) = lum.bot.as_mut() {
-                        (b.stick, b.holding, b.next) = (false, false, None);
+                        b.holding = false;
                     }
                     lum.deaths.retain(|&t| tick.wrapping_sub(t) < 18_000);
                     let stacks = lum.deaths.len().min(3) as i32;

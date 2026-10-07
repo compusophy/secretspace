@@ -16,8 +16,8 @@ use crate::proto::{ClaimInfo, Down, Up, PROTO};
 use crate::view::Viewer;
 use crate::world::World;
 
-/// The oldest page protocol this server still speaks.
-const OLDEST: u16 = 1;
+/// The oldest page protocol this server still speaks (2: first person).
+const OLDEST: u16 = 2;
 /// Boards go out this often, in ticks.
 const BOARD_EVERY: u32 = 2 * HZ;
 /// A Lumen loaded from a save waits this long for its soul.
@@ -186,6 +186,8 @@ impl Room for Luciphon {
         };
         let you = self.viewers.get(&conn).map_or(0, |v| v.you);
         match up {
+            // Too old a page to play: a Welcome that says so, and no Lumen.
+            Up::Join { proto } if proto < OLDEST => out.send(conn, self.welcome(0)),
             Up::Join { .. } => self.join(conn, out),
             Up::Input { seq, it } => {
                 if you != 0 {

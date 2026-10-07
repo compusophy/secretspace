@@ -1,7 +1,7 @@
-//! The first screen: the name (one name everywhere), PLAY, the five
-//! gestures in a line each, your recovery words to write down, and a
-//! field to restore a soul from its words. And once playing, the ghost-
-//! thumb hints, one gesture at a time until you have done each.
+//! The first screen, over the island turning slowly behind it: the name
+//! (one name everywhere), PLAY, the controls in a line each, your recovery
+//! words to write down, and a field to restore a soul from its words. And
+//! once playing, a hint at a time until you have done each thing once.
 
 use lucilook::palette::{DARK, DIM, GOLD, INK};
 use pixels::{fit_scale, text_width, wrap, Canvas, Rect, Rgba};
@@ -162,17 +162,17 @@ pub fn draw(c: &mut Canvas, l: &Look, now: f64) -> Spots {
             y += s.play.h + 12.0 * uf;
             let how = if l.touch {
                 [
-                    "drag: run",
-                    "tap: strike",
-                    "flick: dash",
-                    "hold: heavy, or drag to aim a throw",
+                    "left thumb: move",
+                    "right thumb: look, tap to strike",
+                    "hold still: a heavy",
+                    "buttons: jump, dash, throw",
                 ]
             } else {
                 [
-                    "drag: run",
-                    "click: strike",
-                    "flick: dash",
-                    "hold: heavy, or drag to aim a throw",
+                    "mouse: look   wasd: move",
+                    "click: strike   hold: a heavy",
+                    "space: jump   shift: dash",
+                    "hold right: throw (look up: further)",
                 ]
             };
             for h in how {
@@ -242,45 +242,24 @@ pub fn draw(c: &mut Canvas, l: &Look, now: f64) -> Spots {
     s
 }
 
-/// A ghost thumb showing the next gesture you have not yet made, near
-/// where your thumb would be: drag, tap, flick, hold.
-pub fn hint(c: &mut Canvas, done: u8, u: i32, now: f64) {
-    let (text, kind) = match () {
-        _ if done & 1 == 0 => ("drag to run", 0),
-        _ if done & 2 == 0 => ("tap to strike", 1),
-        _ if done & 4 == 0 => ("flick to dash", 2),
-        _ if done & 8 == 0 => ("hold to charge", 3),
+/// The next thing you have not yet done, low on the screen: move, strike,
+/// dash, charge, jump.
+pub fn hint(c: &mut Canvas, done: u8, touch: bool, u: i32, now: f64) {
+    let pick = |a: &'static str, b: &'static str| if touch { a } else { b };
+    let text = match () {
+        _ if done & 1 == 0 => pick("left thumb to move", "wasd to move"),
+        _ if done & 2 == 0 => pick("tap on the right to strike", "click to strike"),
+        _ if done & 16 == 0 => pick("jump", "space to jump"),
+        _ if done & 4 == 0 => pick("dash", "shift to dash"),
+        _ if done & 8 == 0 => pick(
+            "hold still on the right: a heavy",
+            "hold the click: a heavy",
+        ),
         _ => return,
     };
-    let (cx, cy) = (c.w / 2, c.h * 3 / 4);
-    let t = (now % 1600.0) / 1600.0;
-    let (dx, dy, a) = match kind {
-        0 => ((t * 40.0) as i32, 0, 200),
-        1 => (0, 0, if t < 0.3 { 255 } else { 90 }),
-        2 => ((t * t * 90.0) as i32, -(t * t * 30.0) as i32, 200),
-        _ => (0, 0, (120.0 + 135.0 * t) as i32),
-    };
-    c.glow_add(
-        cx - 20 * u + dx * u,
-        cy + dy * u,
-        6 * u,
-        Rgba(255, 240, 210, a.min(255) as u8),
-    );
-    if kind == 3 {
-        c.ring(
-            (cx - 20 * u) as f32,
-            cy as f32,
-            (16.0 - 10.0 * t as f32) * u as f32,
-            1.5,
-            Rgba(255, 210, 122, 200),
-        );
-    }
+    let a = (170.0 + 60.0 * (now / 500.0).sin()) as u8;
+    let y = c.h * 2 / 3;
     let w = text_width(text, u);
-    c.text_shadowed(
-        cx - w / 2 + 10 * u,
-        cy + 14 * u,
-        text,
-        u,
-        Rgba(244, 238, 222, 210),
-    );
+    c.glow_add(c.w / 2, y + 3 * u, w / 2 + 6 * u, Rgba(255, 210, 122, 40));
+    c.text_shadowed(c.w / 2 - w / 2, y, text, u, Rgba(244, 238, 222, a));
 }

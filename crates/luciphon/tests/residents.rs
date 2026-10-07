@@ -26,7 +26,8 @@ fn ten_minutes_of_residents_use_every_technique() {
     let has = |k: &str| w.tally.get(k).copied().unwrap_or(0) > 0;
     for t in [
         "dash",
-        "blue slingshot",
+        "jump",
+        "running strike",
         "landed strike",
         "heavy",
         "throw",

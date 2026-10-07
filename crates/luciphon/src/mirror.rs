@@ -75,6 +75,9 @@ impl Mirror {
                         if mask & FLOW != 0 {
                             known.flow = e.flow;
                         }
+                        if mask & Z != 0 {
+                            known.z = e.z;
+                        }
                     }
                 }
                 for &(i, t) in &f.tiles {

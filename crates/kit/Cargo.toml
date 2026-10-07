@@ -1,6 +1,6 @@
 [package]
 name = "secretspace-kit"
-description = "The browser end every page shares: a pixel screen, input, sockets, storage. Rust only."
+description = "The browser end every page shares: a pixel screen (or WebGL2 with a pixel layer), input, sockets, storage. Rust only."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -48,4 +48,11 @@ features = [
   "Url",
   "HtmlAnchorElement",
   "XmlHttpRequest",
+  "WebGl2RenderingContext",
+  "WebGlProgram",
+  "WebGlShader",
+  "WebGlBuffer",
+  "WebGlTexture",
+  "WebGlUniformLocation",
+  "WebGlVertexArrayObject",
 ]

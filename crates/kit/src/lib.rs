@@ -1,11 +1,14 @@
 //! The browser end every page here shares, so a game's page is only its
 //! own drawing and rules: a pixel `Screen` the game draws into and shows
-//! once a frame, a `Link` to its room (or a plain `Socket`), the `Session`
-//! that says who this is, one `Pointer` at a time, the page's `version`,
-//! an invisible `TextField` (so a phone still offers its keyboard),
-//! storage, and a frame loop. Rust only: the page's one line of script
-//! just starts the wasm.
+//! once a frame (or a WebGL2 screen, `gl`, with a pixel layer over it), a
+//! `Link` to its room (or a plain `Socket`), the `Session` that says who
+//! this is, one `Pointer` at a time (or every hand at once, `input`), the
+//! page's `version`, an invisible `TextField` (so a phone still offers its
+//! keyboard), storage, and a frame loop. Rust only: the page's one line of
+//! script just starts the wasm.
 
+pub mod gl;
+pub mod input;
 pub mod link;
 pub mod pointer;
 pub mod session;

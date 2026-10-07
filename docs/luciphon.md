@@ -2,6 +2,8 @@
 
 **Status:** this is the plan for game #2 and the checklist for its first two milestones. It is written for an engineer who knows the repo (read `CLAUDE.md` first) and nothing else.
 
+**Revised: first person, in 3D.** After Stage 2 the owner found the one-thumb, top-down movement wrong for the game and asked for full 3D in first person, with standard FPS controls, keeping the world. §3 (camera and look), §4 (controls) and §7's movement now describe that, and the checklist "First person" (§15, after Stage 2) records it. Everything else stands: the island, fights, gathering, hearths, land, residents and saves. Drift, slingshots, spin-outs, the skid strike, teeter and the ledge save are gone; where later sections still name them, read them as history.
+
 **Where it comes from.** Concept #1 (the Lumen) is the core: its movement, its combat, and its rule that nothing else gets built until running and knocking bots around is fun. Concept #4 supplies the plumbing: object-safe room hooks, a soul id that will need no migration later, fixed tile sizes, and fallback glyphs for cosmetics. Concept #3 supplies the meaning: the Underlight, Depth, the Daimon, witnesses, the Ouroboros Pool, and the rule that every layer has three roles. Concept #2 supplies the world's memory: genesis, Strata, the Tithe, and land that remembers its shape.
 
 **How to read the numbers.** Every number here is a starting value. World rules live in `crates/luciphon/src/laws.rs` as `Laws`, which the server and the page share. Gesture thresholds, camera and effects live in `crates/luciphon-web/src/laws.rs` as `Feel`, which only the page uses, so tuning the feel never restarts the world (rule 3). Lines marked **Decided:** settle something the owner left open, and a one-line reason follows each. Lines marked **Proposed:** are waiting on an open question (§18).
@@ -10,9 +12,9 @@
 
 ## 1. Pitch
 
-Luciphon is a persistent island of light floating in the Dark, and you play it with one finger. You are a **Lumen**, a small hooded light-bearer.
+Luciphon is a persistent island of light floating in the Dark, and you play it in first person. You are a **Lumen**, a small hooded light-bearer.
 
-- **Moving and fighting.** Drag to run with real momentum. Swing the stick back past your velocity to drift around a tree without losing speed. Flick to dash through a blow. Tap to strike whatever is in front of you: a birch gives wood, a rock gives stone, a rival gets launched. The dimmer someone is, the further they fly, so kills come from knocking people into thorns, into walls, and off the Rim where the island ends.
+- **Moving and fighting.** Run where you push, jump gaps, dash through a blow. Strike whatever you look at: a birch gives wood, a rock gives stone, a rival gets launched. The dimmer someone is, the further they fly, so kills come from knocking people into thorns, into walls, and off the Rim where the island ends.
 - **Between fights.** You punch trees on their ring. The **glim** you carry orbits you as visible motes. It is your money, your night sight and your ammunition, and it also makes you easy to spot. You light a hearth, paint your land with light by running loops out from it, and plant sunwheat on it.
 - **At night.** The Hush rises, and only lit ground is safe. A Wellspring erupts somewhere in the Dim for whoever dares to go and take it.
 - **When you fall.** You pass through the **Underlight**: the same world in negative, with your path since your last return drawn as one thread of light and your killer marked. Then you come back.
@@ -23,170 +25,76 @@ Luciphon is a persistent island of light floating in the Dark, and you play it w
 
 ## 2. Pillars
 
-1. **Movement is the skill.** Momentum, drift, slingshot, dash, wall-kick and the save on the edge. How you arrive decides how hard you hit.
+1. **Movement is the skill.** Running, jumping, the dash, the wall-kick, and never walking off the edge. How fast you arrive decides how hard you hit.
 2. **Light is everything.** Your Flame is your life. Carried glim is your wallet, your sight and your ammunition. Your land is ground you lit. Carrying light makes you seen.
-3. **One pointer, one grammar.** Five gestures with the same rules on a mouse and a thumb. No hotkeys and no second finger. The Heart is the only on-screen control; every other choice is a thing in the world that you tap.
+3. **One grammar, two hands.** Standard first-person controls on a desktop (mouse look, WASD) and twin thumbs on a phone, with the same verbs underneath: strike, dash, jump, charge, release. The server holds every Intent to that grammar (`thumb`), a person's or a resident's.
 4. **The world remembers, and never kicks you.** From v0.2 the world is saved every 10 s. Leaving is a safe Dream, a deploy is the Stillness, and you come back where you stood.
 5. **Layers within layers.** In every layer one lives, one witnesses, and the witness can send a little light down. That covers the hub, the world, the Underlight, the Pool and the desk.
 
 ## 3. Camera and look
 
-**Decided: a 3/4 oblique top-down 2.5D pixel world, north-up, never rotating, centred on you** (the camera of A Link to the Past or Stardew). Why: it is the only camera where one pointer can be heading, aim and target at once. It keeps knockback lines into thorns and the Rim readable, characters face the camera so halos and hats read, and it fits the measured phone budget.
+**Decided (revised): first person, drawn in 3D by the GPU.** The camera is your Lumen's eyes, 1.05 tiles up; the mouse or the right thumb turns it at once, between ticks. The world is low-poly and lit: "lantern noir" in three dimensions.
 
-This sets aside the owner's lean toward a WoW, Fortnite or first-person camera. On one thumb with a software renderer, those cameras need a second input or exceed the phone budget. Immersion comes instead from darkness and light, the sight circle, front faces and shadows, and from the nested first-person layers (below), which arrive with the Pool and the desk.
+### The renderer
 
-### Projection and buffer
-
-- **Tiles are 16 buffer pixels on every device.** The size is fixed once the legibility gate (Stage 1.13) passes, and from then on one atlas works forever.
-- **Buffer.** The page draws at full resolution through a new opt-in `Screen::fit_view(352)`:
-  - `scale = clamp(min(ceil(w/960), floor(min(w,h)/352)), 1, 4)`, so the short side is at least 352 buffer px (22 tiles) whenever the window allows it.
-  - A 390x844 phone draws at scale 1, 1440x900 at scale 2 (720x450), and 1080p at scale 2 (960x540).
-  - Below 352 CSS px the scale is 1 and the buffer is at most 960 wide, centred.
-  - wyrm and the hub keep `fit()`.
-- **Sight.**
-  - By day you see a circle of radius 10 tiles.
-  - At night the radius is `6 + 0.2 × sqrt(carried glim)`, capped at 9.
-  - The server sends nothing you cannot see (§14), so a bigger screen shows more darkness, not more world. The same rule is the interest boundary and the guard against scouting.
-- **Look-ahead.** Up to 1 tile along your velocity while running, and toward the aim while charging. It is damped to zero during knockback and hit-stun.
-- **Heights.** Heights come from front faces, one-pixel drop shadows and light. Ground is flat until v0.3; walls, trees, rocks, the hearth and the Luciphon have front faces. The world data is x, y and level from day one, so heights or a better renderer later change neither the server nor the wire.
-- **Occlusion.** A wall, tree or roof in front of a character drops to 35% alpha.
-- **Edge markers.** Anything that matters and is off screen is marked at the screen edge: the Luciphon (always), your hearth, tonight's Wellspring, Beacons, and later kin and boss timers.
+- **WebGL2 driven from Rust** (`kit::gl`, GLSL in Rust strings; still no hand-written script). Rule 1 of `CLAUDE.md` allows it for Luciphon only; wyrm and the hub still draw every pixel with `pixels`.
+- **A mesh a chunk** (`luciphon-web/src/scene/chunk.rs`): the ground (each tile its kind's colour, land tinted by its claim's hue, natural ground slightly uneven), cliffs where the island meets the Dark, a rocky underside hanging deeper toward the middle with stalactites, and every object standing on it (`scene/things.rs`). A chunk is rebuilt when a tile in it changes, at most two a frame, nearest first. The whole island is about 320k vertices.
+- **Moving things** are drawn one by one: hooded Lumens in their soul's hue with their Flame's light in the hood, motes, glim on the ground, after-images of a dash, a stunned flicker, a ghost's transparency.
+- **Light.** A dim moon and sky, and the sixteen lights nearest the eye: the Luciphon, lanterns, hearths, crystals, glowmoss, every Lumen, mote and glim, and your own. Fog closes in from 9 to 27 tiles; glowing things show through it.
+- **The sky**: a gradient with stars above, the Dark below with the Underlight's faint violet far down.
+- **Your hand**: a wisp of your light low on the right, drawn back in a wind-up, across in a strike, swelling while you charge (gold in the perfect window).
+- **The HUD** is a `pixels` layer over the picture, shown sharp: the crosshair and a charge filling round it, Flame and breath, names and Flame over Lumens near you, markers toward the Luciphon, your hearth and Beacons (held at the screen's edge when off it), what you carry, the phone's stick and buttons, and a red flash when you are hit.
+- **Sight.** The server sends what is within 24 tiles (§14). The fog hides the edge of it.
 
 ### Three cameras, three meanings (§11)
 
-- **Watched:** the oblique world, the way the sky sees you.
-- **Unwatched:** the Underlight, the same camera in negative with your body removed. It needs no new art.
-- **Watching:** first person or a framed screen, used only for nested layers (the Pool, a cabinet, the desk, a vision). That is a 320x180 raycaster (3.1 ms measured on the 4x phone) or another room's framebuffer blitted into the scene. These come later.
-
-Third-person 3D is out: it measured 11-19 ms on the phone and needs a second camera input. WebGL is out except as a one-quad presenter, which is not needed.
+- **Watched:** your own eyes.
+- **Unwatched:** the Underlight, a camera high over where you fell, looking down at the same world in negative, with your path as a thread of light.
+- **Watching (later):** a framed screen inside the world for nested layers.
 
 ### Look: "lantern noir"
 
-- **Palette.**
-  - The Dark: `#0b0d1a`.
-  - Light gold: `#ffd27a`.
-  - Ember (the Flare stance): `#ff7a3d`.
-  - Kin teal: `#5fd3c8`.
-  - Hushling violet-grey: `#7d6f93`.
-  - Sanctum marble: `#e9e4d8`.
-  - Rim glass: `#7fe0ff`.
-  - Each ring has 12-16 colours. Colour comes from light: each soul has one hue, which tints its land.
-- **Lumens.**
-  - A 12x16 hooded figure with two dots of light for eyes and a core whose brightness is its Flame.
-  - The halo (8x3, showing Depth rings) floats above, and the hat slot (8x5) sits between hood and halo.
-  - Four facings with a mirror; run, strike, dash and charge frames.
-  - If the legibility gate fails: 20-px tiles with a 9-tile day sight, or a 16x24 Lumen.
-- **Sprites.**
-  - Written as text grids in Rust source, one sheet per file, decoded at boot into an atlas, and drawn with a new integer, alpha-keyed `pixels` blit.
-  - Glows, motes and sparks are baked sprites drawn with an additive integer blit.
-  - Float antialiased shapes are for the HUD only (rings, arcs, the wheel), at most 40 a frame.
-- **Ground.**
-  - Ground is cached per visible chunk (512x512 px), redrawn one tile at a time as tiles change, and copied in rows.
-  - Known terrain outside your sight comes from a pre-baked indigo silhouette atlas. Beyond known chunks it is black.
-- **Lighting.**
-  - By day the ambient light (0.85, a grey-gold dawn haze, never a cheerful noon) is baked into the atlas, and lights are additive sprites.
-  - From dusk to dawn a quarter-resolution light map (98x211 on a phone) is built from up to 64 radial lights plus a tint per kindled tile. It is upsampled with a 4x4 Bayer dither and multiplied over the scene in one integer pass. Night ambient is 0.12.
-  - The budget is 1.5 ms at 4x, measured in Stage 1 before the look is committed. If it is over, the fallback is light per tile from 8 pre-shaded atlas levels.
-- **Feel, drawn only.**
-  - 50 ms of hit-stop and a 2-px shake on heavy hits. These are presentation only; prediction never pauses.
-  - Sparks, knockback streaks and skid marks.
-  - The slingshot spark: blue at 300 ms of drift, gold at 700 ms.
-  - The charge ring shrinking to a bright band in the perfect window.
-  - The resonance ring on nodes.
-- **HUD in the world.**
-  - A Flame arc under your feet with a breath arc inside it, the charge ring, and glim motes orbiting you.
-  - Numbers appear only for the bag: icons with 5x7 digits beside the Heart.
-  - The day's progress is a thin arc on the top edge.
-  - The UI is icon-first: at most 24 characters on any line, using `wrap` and `fit_scale`.
-- **Sound (v0.3, `kit::Sound`, synthesized in Rust).**
-  - Everything is a bell: inharmonic partials 1, 2.0, 2.76, 5.4 and 8.9, tuned to one pentatonic scale.
-  - Your voice is a pitch and timbre derived from your soul, so kin sound like a chord.
-  - Resonant strikes are notes, so a skilled gatherer plays a melody.
-  - The Luciphon tolls the hours, and night is a low drone.
-  - The Hush is real silence: the mix low-passes and drains near it.
+- **Palette.** The Dark `#0b0d1a`, light gold `#ffd27a`, ember `#ff7a3d`, kin teal `#5fd3c8`, Hushling violet-grey `#7d6f93`, Sanctum marble `#e9e4d8`, Rim glass `#7fe0ff`. Each soul has one hue, which tints its land and its robe.
+- **Feel, drawn only.** Sparks that burst and fall, rings that spread on the ground, a shake and a flash when you are hit, the strike's reach drawn as a fan, the build ghost as a glowing box, and the rings of nodes near you (strike on the ring for double).
+- **Sound (v0.3, `kit::Sound`, synthesized in Rust).** Everything is a bell, tuned to one pentatonic scale; resonant strikes are notes; the Luciphon tolls the hours; the Hush is real silence.
 
 ## 4. Controls
 
-**Decided: one pointer, five gestures plus the Heart, the same rules on mouse and thumb, and no keyboard bindings.** Why: competitive parity, and moomoo.io shows how hotkey combos get taken over by macros.
+**Decided (revised): standard first-person controls.** Direct and responsive: you go where you push at once and stop at once, with no drifting or skidding.
 
-Thresholds are in CSS px and ms and live in `Feel`. The recogniser is a pure function in `luciphon-web/src/gesture.rs`, tested natively.
-
-### The gestures
-
-Every press away from the Heart is exactly one of three gestures. If it moves 10 px before 300 ms, it is a drag. If it releases before 300 ms without moving that far, it is a tap. If it is still at 300 ms, it is a hold.
-
-| Gesture | How (mouse: left button; phone: one thumb) | What it does |
+| | Desktop | Phone |
 |---|---|---|
-| **Drag: run** | Press anywhere except the Heart and move 10 px within 300 ms. A floating stick appears at the press point. | Heading is the stick's angle. 10-28 px from the origin is a walk (up to 2.5 tiles/s, proportional); 28 px or more is a run (6 tiles/s). Past 60 px the origin trails the pointer. Swinging the stick more than 100 degrees from your velocity at speed starts a **drift** (§7). |
-| **Slow lift: plant** | Release a drag without a flick. | You **skid** to a stop over about 0.4 s. Facing stays where you steered. |
-| **Tap: strike** | Press and release within 300 ms, moving under 10 px. Where you press does not matter. | The cone strike in front of you (§7). In build mode, a tap places the piece on the ghost tile. |
-| **Flick: dash** | Release a drag while the pointer moves at least 1.0 px/ms over the last 50 ms and has travelled 24 px in the last 80 ms. | A 3-tile dash that way, with i-frames (§7). **Flicks happen only on release; motion during a drag is always steering.** A release within 100 ms of the pointer passing within 12 px of the stick origin is never a flick, so a fast drift swing cannot misfire as a dash. |
-| **Hold: charge and aim** | Press and stay within 10 px for 300 ms. | You root, and a charge ring closes. The charge counts from the press. Dragging now aims an arrow from your Lumen. An arrow under 40 px, or no drag, gives a **heavy lunge** (auto-aimed when there is no drag). An arrow of 40 px or more gives a **throw** whose range follows the arrow's length. A release less than 400 ms after the press does nothing. Once the pointer has left the 24-px ring, releasing back inside 16 px of the origin **cancels for free**. Flicks are ignored while charging. In build mode a hold does not charge: with the ghost on one of your own pieces, it removes that piece. |
-| **Heart: voice and hands** | A 56-px glyph at bottom centre, 72 px above the safe area (32-px hit radius), or a right-click when no other button is down. | **Tap:** chirp. In build mode, a tap leaves build mode. **Press and slide 28 px (v0.2):** picks the slot in that direction from the press point on an 8-slot wheel. The wheel is drawn after 150 ms, 64 px above the press point so the thumb does not hide it. Releasing within 28 px of the press point cancels. Experts flick out without waiting for it. *v0.3: holding still for 600 ms charges a Call.* |
+| Look | The mouse, once the page has it (click to play; Esc gives it back) | Drag with the right thumb |
+| Move | WASD or the arrows, relative to where you look | The left thumb: a stick wherever it lands (walk inside 44 px, run beyond) |
+| Strike | Click | Tap with the right thumb |
+| Heavy | Hold the click (from 220 ms), let go | Hold the right thumb still (from 320 ms), let go |
+| Throw | Hold the right button, let go; look up to throw further | The throw button, held and let go |
+| Jump | Space | The jump button |
+| Dash | Shift (the way you move, or the way you look standing still) | The dash button |
+| Heart | E opens the wheel, 1-8 picks; B build, K kindle, R rekindle, T recall, H chirp | The heart button opens the wheel; tap a slot |
+| Build | B, then 1-6 for a piece; click places, hold removes; B again is done | The wheel's build, then a piece; tap places, hold removes |
 
-The wheel (v0.2), from north going clockwise:
-
-1. N, **Build**: release here, then a second stroke on the same kind of ring picks Hearth, Wall, Door, Thorns, Lantern or Planter.
-2. NE, **Wave**.
-3. E, **Kindle** on or off.
-4. SE, **Cheer**.
-5. S, **Rekindle**: eat a Sunwheat, or burn 10 glim, to restore 25 Flame over 2 s. A hit interrupts it.
-6. SW, **Sit**.
-7. W, **Recall**: an 8 s channel to your hearth. Moving or a hit breaks it.
-8. NW, **Bow**.
-
-Later milestones replace slots with Offer, Stance and an Emote ring.
-
-### Rules that keep parity
-
-- **One pointer at a time.** A second touch, or a second button while one is down, is ignored until the first lifts.
-- **Latched stick (mouse and pen only).**
-  - A slow lift from a run latches the stick instead of planting you. Hover keeps steering it from the same origin, and bringing the pointer back within 10 px of the origin stops you.
-  - The next press unlatches the stick exactly as a lift would (a skid) and is read as a new gesture.
-  - It is still one stick and one verb at a time, so a mouse never moves and strikes at once. It only spares a trackpad finger.
-- **Hover does nothing else.** No target preview and no build ghost from hover. Everyone sees the same two things: a soft outline on their current auto-target (the page runs the core's `pick` on its own mirror, and the server's pick decides), and the build ghost on the tile in front of them.
-- **No keys** apart from typing a name. A key may come later only as a 1:1 equivalent of a gesture that cannot be combined with a held pointer. WASD is never allowed: it would let a desktop player move and strike at once.
-
-### On a phone
-
-- The game plays one-handed from the bottom third of a 390x844 portrait screen.
-- The stick floats wherever the thumb lands, so your Lumen at the screen centre is never under your thumb.
-- The Heart is within either thumb's arc.
-- Choice cards (later) float in the upper middle. You take one with a tap, or by sliding from the Heart toward it.
-- Haptics go through `navigator.vibrate`, which only Android has (iOS has none): 10 ms on a resonant hit or a landed lance, 25 ms on a perfect release, 15 ms on a dash.
-- Landscape works the same way, because the sight circle sets the view.
-
-### First-run teaching (no text walls)
-
-A faint ghost thumb animates one gesture at a time near your thumb:
-
-1. Drag.
-2. Tap, near a teaching birch at the Sanctum's edge that pulses until it is struck (from v0.2, struck on its ring).
-3. Flick.
-4. Hold.
-
-Each hint disappears for good once you have performed it, stored in `secretspace/luciphon/taught`.
+- Every Input carries where you look (`aim`); strikes, charges and throws go there, and your body faces it.
+- **The grammar** (`thumb.rs`): a charge begins only when none is under way, and only a charge can be released or cancelled; strikes and dashes may come while moving. The server trims anything else, so a script gains nothing over a person.
+- **Thresholds** live in `Feel` (`luciphon-web/src/laws.rs`); the input logic is `controls.rs`, pure and tested natively.
+- **Hints.** One line at a time until you have done each once (move, strike, jump, dash, charge), stored in `secretspace/luciphon/taught3d`.
 
 ### Where depth comes from
 
-Five gestures crossed with the movement states (walk, run, skid, drift, dash, teeter, charging) and the context give about 30 distinct actions, all coming out of the physics:
-
 | Technique | Input | Result |
 |---|---|---|
-| Skid strike | Slow lift while running, then tap within 10 ticks | The strike carries your speed at the lift: up to 16 damage |
-| Slingshot | Drift 300-700+ ms, then straighten | +35% (blue) or +50% (gold) top speed for 0.6 s |
-| Spin-out | Drift past 1.5 s | A 0.3 s stagger: the cost of greed |
+| Running strike | Strike at a run | The strike carries your speed: up to 16 damage |
 | Launcher | Third strike landed on one target within 1.2 s | Double knockback |
-| Lance | Tap during a dash | A 1.8-tile line, 14 damage, 1.5x knockback; a whiff costs 400 ms |
-| Dash cancel | Flick during strike recovery | Recovery skipped |
-| Wall-kick | Dash into a wall, then flick within 10 ticks (or flick in the dash's last 3 ticks) | A free rebound dash (walled bases double as parkour) |
-| Ledge save | Flick toward the ground during the 0.5 s teeter | Saved, at a cost of 20 breath |
-| Feint | Start a charge, read their dash, cancel, then tap | Free cancel; positional mind games |
+| Lance | Strike during a dash, or just after | A 1.8-tile line, 14 damage, 1.5x knockback; a whiff costs 400 ms |
+| Dash cancel | Dash during strike recovery | Recovery skipped |
+| Wall-kick | Dash into a wall, then dash within 10 ticks | A free rebound dash |
+| Jump | Over a gap, or over a low blow | You keep a third of your control in the air |
+| Feint | Start a charge, read their dash, let go early | Nothing spent; positional mind games |
 | Perfect release | Release a charge 0.60-0.73 s after the press | A 34-damage lunge, or a piercing throw |
-| Resonant gather (v0.2) | Strike a node on its ring | Double yield; every third in a row rings the node out |
-| Flow 1-3 | Chain techniques within 1.5 s of each other | Brighter halo, +15% knockback, a full charge, and you become a beacon |
+| Resonant gather | Strike a node on its ring | Double yield; every third in a row rings the node out |
+| Flow 1-3 | Chain techniques within 1.5 s of each other | +15% knockback, a full charge, and you become a beacon |
 
-**Casual floor (v0.2).** Dwelling beside a node after one strike keeps striking it at the base rate (nodes and your own repairs only), and the tap auto-targets. **The server never fights players for you.** Timing windows belong to the server and outcomes are positional, so a script gains nothing over a good player.
+**Casual floor.** Dwelling beside a node after one strike keeps striking it at the base rate. **The server never fights players for you.** Timing windows belong to the server and outcomes are positional.
 
 ## 5. Core loops
 
@@ -293,61 +201,40 @@ The Luciphon pulses on every in-game hour (every 37.5 s).
 
 | Law | Value |
 |---|---|
-| Walk / run top speed | 2.5 / 6.0 tiles/s |
-| Acceleration | 30 tiles/s² |
-| Skid deceleration | 15 tiles/s², so a stop from 6 takes 0.4 s |
-| Turn rate | 14 rad/s at 2.5 tiles/s or slower, falling linearly to 6 rad/s at 6.0 (carve, don't pivot) |
+| Walk / run top speed | 3.0 / 5.5 tiles/s (the stick's push sets a walk's share) |
+| Acceleration / stopping | 45 tiles/s² each: up to a run in 4 ticks, stopped in 4 |
+| Air control | 30% of that |
+| Jump | 6.5 tiles/s up against 20 tiles/s² of gravity: about a tile high, 0.65 s in the air |
+| Striking / charging | Top speed ×0.7 / ×0.5 |
 | Body radius | 0.35 tiles. Bodies push each other apart softly after the step (not predicted). |
 | Weight | Top speed × (1 - 0.05 × floor(materials/50)), never below 0.7. Glim weighs nothing. |
 | Own kindled ground | Top speed ×1.15 |
-| Ice / mud / shallow water | Ice: acceleration and turn rate ×0.3, skid ×0.15. Mud: top speed ×0.5, no drift. Water: top speed ×0.6, no dash. |
+| Ice / mud / shallow water | Ice: acceleration ×0.15. Mud: top speed ×0.5. Water: top speed ×0.6, no dash. |
 
 **The step.** `motion::step(&mut Body, &Intent, &Tiles, &Laws)` runs in this order every tick:
 
-1. Count down the timers (dash, i-frames, cooldowns, hit-stun, ghost, slingshot) and regenerate breath.
+1. Count down the timers and regenerate breath.
 2. Read the ground under the body for its multipliers.
-3. **Hit-stun or spin-out:** no control, and flight speed decays at 12 tiles/s² (×0.15 on ice). Go to step 6.
-4. **Dashing:** velocity is the dash velocity. Go to step 6.
-5. **Control.**
-   - The target heading h* is the stick heading. The target speed s* is the top speed for the throttle × weight × own land × ground × slingshot, or 0 with the stick up.
-   - **When drifting:** facing = h*. Rotate v toward facing at the grip, 7 rad/s; |v| changes only through ground friction.
-   - **Otherwise:** if |v| is under 0.5 tiles/s, v's heading snaps to h*; otherwise rotate v toward h* by at most the turn rate × ground. Then move |v| toward s*: up at acceleration × ground, down at skid deceleration × ground, never below 0.
-   - Check drift entry and exit.
-6. **Move** by v, colliding with solid tiles one axis at a time (x, then y). A contact may cause a wall slam or open the wall-kick window.
-7. **Void:** teeter, or fall.
+3. **Hit-stun:** no control, and flight speed decays at 12 tiles/s² (×0.15 on ice).
+4. **Dashing:** velocity is the dash velocity.
+5. **Control:** facing becomes where you look. The wanted velocity is the stick's heading at its top speed (throttle × weight × own land × ground × striking or charging); the velocity moves toward it by the acceleration (or the stopping rate with the stick up), a third as fast in the air. A jump, on the ground, starts the climb.
+6. **Move** by the velocity, colliding with solid tiles one axis at a time (x, then y). A contact may cause a wall slam or open the wall-kick window.
+7. **Height:** gravity while in the air; landing on ground; over the void with nothing under you, you fall, and 8 tiles down the Dark takes you (cause: the Dark). A jump carries you over a one-tile gap.
 
-**Drift.**
+**Dash.**
 
-- **Entry.** Speed at least 4.5 tiles/s and the stick more than 100 degrees from the velocity heading.
-- **While drifting.** Releasing the stick continues the slide for 0.3 s, then you skid.
-- **Exit,** when the angle drops below 30 degrees:
-  - after 9 or more ticks (300 ms), a **blue slingshot**: top speed ×1.35 for 0.6 s;
-  - after 21 or more ticks (700 ms), a **gold slingshot**: ×1.5;
-  - past 45 ticks (1.5 s), a **spin-out**: 0.3 s with no control and speed halved.
-- The grip turns faster than a carve, so a drift is the quickest way to reverse: a 150-degree swing takes about 11 ticks and gives a blue slingshot. Gold needs a long arc around something.
-
-**Dash (flick).**
-
-- 3 tiles over 5 ticks (18 tiles/s), with i-frames on ticks 0-2 (100 ms, counted from the dash's *server* tick).
-- Costs 30 of 100 breath, with a 0.35 s cooldown after the dash ends.
-- Afterwards, speed is the lower of your prior speed and run speed, along the dash heading.
-- A dash cancels strike recovery. It can cross up to 2 tiles of void if it ends on ground; a dash that ends over void falls, with no teeter.
-- A flick during a dash is dropped, unless it comes in the dash's last 3 ticks. Then it is held for a wall-kick, and dropped if the dash ends without hitting a wall.
+- 3 tiles over 5 ticks (18 tiles/s), with i-frames on ticks 0-2, the way you move (or the way you look, standing still).
+- Costs 30 of 100 breath, with a 0.35 s cooldown after the dash ends. Afterwards, speed is the lower of your prior speed and run speed, along the dash heading.
+- A dash cancels strike recovery. A dash over the void ends in a fall.
+- A dash pressed in a dash's last 3 ticks is held for a wall-kick.
 
 **Breath.** 100. It regenerates at 35/s once 0.4 s have passed since you last spent it.
 
-**Wall-kick.** A dash into a solid tile stops you. A flick within 10 ticks (333 ms), or one held from the dash's last 3 ticks, is a free rebound dash: no breath, once per wall contact.
-
-**Teeter.**
-
-- When you enter a void tile at 9 tiles/s or slower and not mid-dash, you are clamped to the edge and teeter for 15 ticks (0.5 s).
-- A flick within 90 degrees of the way back to ground, with at least 20 breath, **saves** you: you hop 1 tile back and pay 20 breath.
-- Otherwise you fall and gutter (cause: the Dark).
-- If you enter the void faster than 9 tiles/s, you fall straight away. Clean launches kill.
+**Wall-kick.** A dash into a solid tile stops you. A dash within 10 ticks (333 ms), or one held from the dash's last 3 ticks, is a free rebound: no breath, once per wall contact.
 
 **Flow 1-3.**
 
-- These count as techniques: drift exits, wall-kicks, resonant hits, landed strikes, ledge saves, and dodges (an i-frame passing through a hit).
+- These count as techniques: wall-kicks, resonant hits, landed strikes, lances, perfect releases, and dodges (an i-frame passing through a hit).
 - Each one within 1.5 s of the last raises Flow by 1, up to 3.
 - At Flow 3 you deal +15% knockback, your next charge starts full, and you are a beacon visible from 2x sight.
 - Flow falls by 1 after every 1.5 s without a technique.
@@ -385,7 +272,7 @@ The Luciphon pulses on every in-game hour (every 37.5 s).
 
 - **Thorns** (natural brambles; built thorns from v0.2): 12 damage plus a bounce of 8 tiles/s along the thorn's outward normal, with 0.5 s of contact immunity per thorn piece.
 - **Wall slam:** hitting a solid tile faster than 7 tiles/s deals `(v - 7) × 4`. Never in the Sanctum.
-- **Void:** teeter or fall, as above.
+- **Void:** fall, as above.
 
 ### Death: the Descent, and the return
 
@@ -429,7 +316,7 @@ The Luciphon pulses on every in-game hour (every 37.5 s).
 - **Own movement is predicted.**
   - On each frame the page resets its body to the authoritative state at `ack` and replays its unacknowledged Inputs.
   - Errors under 0.25 tile are blended over 100 ms; larger ones snap.
-  - Predicted: motion against static tiles, drift, dash, teeter, and the drawing of your own wind-ups and charges.
+  - Predicted: motion against static tiles, jumps and falls, dash, and the drawing of your own wind-ups and charges.
   - Not predicted: hits, damage, knockback you receive, body collisions, pickups.
 - **Two timelines.**
   - Everything deterministic (your body, node rings, the clock) is drawn in **predicted time**.
@@ -437,7 +324,7 @@ The Luciphon pulses on every in-game hour (every 37.5 s).
   - So timing windows are fair without trusting the browser:
     - **resonance** is judged on the server's tick, which is the tick the page drew the ring on;
     - **charge length** is `release seq - (hold seq - held_for)`, which latency does not change. The server checks it is consistent with arrival times within 6 ticks;
-    - the **teeter save**, the **wall-kick** and the **lance** use their Input's own seq.
+    - the **wall-kick** and the **lance** use their Input's own seq.
 - **Lag compensation** for strikes, heavies and lances by Lumens.
   - Target bodies are rewound by `min(rtt/2 + 66 ms, 100 ms)`, at most 3 ticks.
   - The rewind uses a 12-tick history ring, which residents' perception shares.
@@ -1038,7 +925,7 @@ pub trait Room: Send {
 |---|---|
 | `lib.rs` | Boot, the frame loop capped at 60 fps, Link, and `?perf=1` (frame timings drawn in a corner and written to `document.title`) |
 | `laws.rs` | `pub struct Feel`: gesture thresholds, camera, effects |
-| `gesture.rs` | The pure recogniser, from pointer trace to `Gesture`, tested natively |
+| `controls.rs` | Two hands to Inputs (revised: first person), pure and tested natively |
 | `input.rs` | Gesture to `Input` and `Heart` messages, haptics, and `?trace=1` (records the pointer stream for download) |
 | `state.rs` | Mirror, prediction, interpolation, clock lead |
 | `first.rs` | Name screen, recovery words and restore, ghost-thumb hints |
@@ -1050,7 +937,9 @@ pub trait Room: Send {
 - `web/vercel.json`: the pkg path, and a no-cache rule for `version.txt`.
 - Check that `deploy.yml`'s RELAY injection covers the new page.
 
-### The wire (protocol 1)
+### The wire (protocol 2)
+
+*Protocol 2 (first person) adds the Input's jump bit (bit 4 of the verb byte), a Lumen's height (`Ent.z`, field bit 64) and the body's height and climb in your own state, and drops the drift fields. A Join older than the server's oldest gets a Welcome with no Lumen; the page then loads the newest build.*
 
 **Up**, browser to server:
 
@@ -1245,6 +1134,15 @@ Browser checks are Playwright scripts kept in the scratchpad and **never committ
   - dies in the Dim and sees half the bag dropped;
   - after a server push mid-loop, comes back with bag, hearth and land intact.
   - *Built 2026-10-07 and proven by `crates/luciphon/tests/hold.rs`, which plays the whole of it through the world from a soul with nothing: wood and stone struck from a birch and a rock, a hearth through build mode, a kindled loop of 20+ tiles, a planter's Sunwheat ripened and struck, a fall in the Dim leaving half the bag (half its glim to the Dark), and a save and reload that keeps bag, hearth and land. On a phone the wheel, Build's ring, the ghost and kindling were checked in a browser; the 5-minute timing on a real phone is the owner's to try.*
+
+### First person (the owner's revision after Stage 2)
+
+- [x] **F.1** Movement rewritten for first person (`motion.rs`): direct acceleration and stopping, jump and gravity, falling off the edge into the Dark, the dash the way you move; facing is where you look. Drift, slingshots, spin-outs, teeter and the ledge save removed. Laws in §7.
+- [x] **F.2** The wire, protocol 2: the Input's jump bit (verb byte bit 4), height on the Lumen (`Ent.z`, field 64) and in your own body; the grammar relaxed to strikes and dashes while moving (`thumb.rs`); residents aim where they look and hop while chasing; the server's sight raised to 24.
+- [x] **F.3** `kit::gl` (WebGL2 from Rust, a pixel layer over it) and `kit::input` (keys, every finger, the mouse's buttons and movement, pointer lock); `pixels` layers keep premultiplied alpha.
+- [x] **F.4** The page in 3D (`luciphon-web`): `controls.rs` (desktop and twin thumbs), `scene/` (chunk meshes, objects, Lumens, lights, fog, sky, sparks, the hand, the Underlight in negative), `hud.rs`, the title over the island turning.
+- **Done when** on a desktop and a phone you can join, look, run, jump, strike a birch for wood, dash, charge a heavy, throw, see the residents and fall off the edge into the Underlight.
+  - *Built 2026-10-07. Played in headless Chromium on a desktop (pointer lock, WASD, jump, strike, a walk of 53 tiles off the Rim into the Underlight and back at the Luciphon) and on a 390x844 phone (twin thumbs through CDP touch: the stick, a look, a tap that struck a birch for wood, the jump button). Charges, heavies and throws are proven natively (`controls.rs`, `combat.rs`); `running_off_the_rim_falls_into_the_dark` and `prediction_matches_the_server` (bit for bit, with jumps) hold. A frame takes 1-3 ms of CPU. How it feels on a real phone is the owner's to try.*
 
 ### Stage 3: alive
 

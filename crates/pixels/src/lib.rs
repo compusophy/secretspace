@@ -113,7 +113,16 @@ impl Canvas {
         }
     }
 
-    /// Blend `c` into pixel `i` with coverage `cover` (0..=255).
+    /// Clear to nothing at all: a layer to draw over something else. A
+    /// layer holds premultiplied colour (what `blend` writes over clear
+    /// pixels), so light added to it (`add`) still shows.
+    pub fn wipe(&mut self) {
+        self.data.fill(0);
+    }
+
+    /// Blend `c` into pixel `i` with coverage `cover` (0..=255): source
+    /// over, premultiplied, so an opaque picture stays opaque and a layer
+    /// gains alpha.
     #[inline]
     fn blend(&mut self, i: usize, c: Rgba, cover: u32) {
         let a = c.3 as u32 * cover / 255;
@@ -125,13 +134,14 @@ impl Canvas {
             p[0] = c.0;
             p[1] = c.1;
             p[2] = c.2;
+            p[3] = 255;
         } else {
             let k = |s: u8, d: u8| ((s as u32 * a + d as u32 * (255 - a) + 127) / 255) as u8;
             p[0] = k(c.0, p[0]);
             p[1] = k(c.1, p[1]);
             p[2] = k(c.2, p[2]);
+            p[3] = (a + (p[3] as u32 * (255 - a) + 127) / 255) as u8;
         }
-        p[3] = 255;
     }
 
     pub fn pixel(&mut self, x: i32, y: i32, c: Rgba) {
@@ -415,6 +425,21 @@ pub fn wrap(s: &str, width: i32, scale: i32) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_layer_keeps_its_alpha_and_a_picture_stays_opaque() {
+        let mut c = Canvas::new(2, 1);
+        c.wipe();
+        c.pixel(0, 0, Rgba(200, 100, 0, 128));
+        // Premultiplied: half of the colour, half covered.
+        assert_eq!(&c.data[0..4], &[100, 50, 0, 128]);
+        c.pixel(0, 0, Rgba(200, 100, 0, 128));
+        assert_eq!(c.data[3], 192);
+        assert_eq!(&c.data[4..8], &[0, 0, 0, 0]);
+        c.clear(Rgba::rgb(0, 0, 0));
+        c.pixel(1, 0, Rgba(200, 100, 0, 128));
+        assert_eq!(&c.data[4..8], &[100, 50, 0, 255]);
+    }
 
     #[test]
     fn shapes_stay_inside_the_buffer() {
