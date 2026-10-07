@@ -40,7 +40,8 @@ stage by stage, and do not start v0.2 before the owner passes the FUN GATE.
 6. **Caps:** a source file holds at most 1,000 lines; this file at most
    8,000 characters. At a cap: split, shrink, or delete. Never raise one.
 7. **wasm32 always green:** `cargo clippy -p secretspace-hub -p
-   secretspace-wyrm-web --target wasm32-unknown-unknown -- -D warnings`.
+   secretspace-wyrm-web -p secretspace-luciphon-web --target
+   wasm32-unknown-unknown -- -D warnings`.
 
 ## Map
 
@@ -96,7 +97,7 @@ that reads the same size on any screen (2 on a phone, 1 on a desktop).
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p secretspace-hub -p secretspace-wyrm-web --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 bash scripts/caps.sh
 bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen

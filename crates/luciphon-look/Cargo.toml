@@ -1,0 +1,16 @@
+[package]
+name = "secretspace-luciphon-look"
+description = "How Luciphon looks: the island, Lumens, light and the Underlight, drawn into pixels. Shared by its page and the hub's preview."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "lucilook"
+
+[dependencies]
+luciphon = { package = "secretspace-luciphon", path = "../luciphon" }
+pixels = { package = "secretspace-pixels", path = "../pixels" }
+engine = { package = "secretspace-engine", path = "../engine" }

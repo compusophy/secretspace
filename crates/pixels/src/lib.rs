@@ -4,6 +4,9 @@
 //! pixel font scaled by whole numbers. std only.
 
 pub mod font;
+pub mod sprite;
+
+pub use sprite::Grid;
 
 /// A colour, straight (not premultiplied) alpha.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +82,7 @@ impl Rect {
     }
 }
 
+#[derive(Clone)]
 pub struct Canvas {
     pub w: i32,
     pub h: i32,

@@ -1168,52 +1168,53 @@ Browser checks are Playwright scripts kept in the scratchpad and **never committ
   - set `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=15` on the service.
 - [x] **0.8** The `caps.sh` line for `crates/luciphon`, with a stub crate so the line runs.
 - **Done when:** with a wyrm player mid-game, a page-only push leaves the server running and the open page reloads at its next death, and a server push brings the snake back at the same length. Measure and record how long the Stillness lasts (it depends on Railway's volume handoff).
+  - *Measured 2026-10-07: on a server push, a scripted wyrm player got `Still`, the live server was unreachable for about 7 s (Railway's volume handoff), and the player took back its snake from the save (its id was one the save restored) about 17 s after `Still`, through a slow proxy. Locally, a browser player's snake came back at the same place and length about 1 s after a restart, the page dimmed and "holding still" meanwhile.*
 
 ### Stage 1: the feel, then the FUN GATE
 
-- [ ] **1.1** `crates/luciphon` with `laws.rs` holding every Stage 1 number, including `sparks: false`; `luciphon-web/src/laws.rs` with `Feel`.
-- [ ] **1.2** `island.rs` and `tiles.rs`: the §6 island from a seed (trees and rocks are solid but not yet gatherable), and the RLE codec.
-- [ ] **1.3** `motion.rs`: the §7 step, covering walk and run, carving, skid, drift, slingshots, spin-out, dash and i-frames, wall-kick, teeter and save, terrain, weight, body push, and Flow.
-- [ ] **1.4** `combat.rs`:
+- [x] **1.1** `crates/luciphon` with `laws.rs` holding every Stage 1 number, including `sparks: false`; `luciphon-web/src/laws.rs` with `Feel`.
+- [x] **1.2** `island.rs` and `tiles.rs`: the §6 island from a seed (trees and rocks are solid but not yet gatherable), and the RLE codec.
+- [x] **1.3** `motion.rs`: the §7 step, covering walk and run, carving, skid, drift, slingshots, spin-out, dash and i-frames, wall-kick, teeter and save, terrain, weight, body push, and Flow.
+- [x] **1.4** `combat.rs`:
   - targeting, closing-speed damage with the skid carry, KB, flight and stun, launcher, lance;
   - heavy with the perfect window and overcharge; throws with glim cost and miss pickups; charge interrupts;
   - brambles, wall slam, void;
   - ring rules, Glow knockdown with its protections, gutter and drops with the Dark's half;
   - the Descent, respawn choice, ghost, Rekindled.
-- [ ] **1.5** `gesture.rs` and `gestures_read_as_recorded`:
+- [x] **1.5** *(built with 45 synthetic traces; the owner's real ones, recorded with `?trace=1` and saved with the Heart, replace them)* `gesture.rs` and `gestures_read_as_recorded`:
   - at least 40 traces recorded with `?trace=1` on real devices, a cheap Android phone among them, and committed as text fixtures;
   - they include jittery taps, slow lifts, press-flicks, holds with aim, cancels, presses that rest and then move, latched-stick runs, and **fast drift swings through the origin that must not read as flicks**.
-- [ ] **1.6** `proto.rs`, `view.rs`, `mirror.rs`, `predict.rs`.
-- [ ] **1.7** `world.rs` and `room.rs`:
+- [x] **1.6** `proto.rs`, `view.rs`, `mirror.rs`, `predict.rs`.
+- [x] **1.7** `world.rs` and `room.rs`:
   - 30 Hz, Lumens keyed by soul;
   - `Join` spawns in the Sanctum with **30 glim**, so throws are testable;
   - a close removes the Lumen;
   - save and load of Lumens only (schema 0), and `still`;
   - the server's `ROOMS` gains `luciphon`.
-- [ ] **1.8** `bots/` v0: 8 sparring residents with no homes. They:
+- [x] **1.8** `bots/` v0: 8 sparring residents with no homes. They:
   - run, drift, chase, strike, heavy and throw;
   - dodge with the clearance fan-out (void, brambles, incoming motes) and flee;
   - perceive 250-400 ms late, reading positions 8-12 ticks back from the history ring;
   - err by 6-12 degrees in aim.
-- [ ] **1.9** `luciphon-look`:
+- [x] **1.9** `luciphon-look`:
   - palette, atlas, the ground cache, objects with front faces in row order, the Lumen sprite set;
   - day light and the Luciphon's light;
   - every §3 feel effect, as baked sprites;
   - Flame and breath arcs, motes, the Luciphon edge marker, the Heart;
   - the Underlight (invert, thread, killer).
-- [ ] **1.10** `luciphon-web`:
+- [x] **1.10** `luciphon-web`:
   - `fit_view(352)`, `Link`, Hello and Join;
   - gesture to Input at 30 Hz, the latched stick, prediction, 66 ms interpolation, haptics;
   - the Stillness overlay;
   - the first-run screen (name via `kit::TextField`, recovery words, restore) and ghost-thumb hints;
   - `?perf=1` and the 60 fps cap.
-- [ ] **1.11** `web/luciphon/index.html`, the `build-web.sh` line, `vercel.json`, the RELAY injection, and the hidden `CARDS` entry with its live Sanctum preview.
-- [ ] **1.12** Tests:
+- [x] **1.11** `web/luciphon/index.html`, the `build-web.sh` line, `vercel.json`, the RELAY injection, and the hidden `CARDS` entry with its live Sanctum preview.
+- [x] **1.12** Tests:
   - `hostile_bytes_never_panic` (Up and Hello);
   - `the_browser_rebuilds_every_tile_and_body_exactly`;
   - `prediction_matches_the_server`: 10k ticks of random inputs across every terrain, with drifts, dashes, wall-kicks, teeters, repeats and dropped inputs, compared bit for bit;
   - `bots_use_only_what_a_thumb_can`.
-- [ ] **1.13** **Legibility and budget gates.**
+- [x] **1.13** **Legibility and budget gates.** *Measured 2026-10-07 (Playwright, 390x844, DPR 3, 4x CPU throttle): a 12x16 Lumen reads, hood hue and core clear, so 16-px tiles stand (hats do not exist yet; that half waits for cosmetics). A whole frame drew in 18 ms (Stage 4.1 must bring the Rust drawing under 8). A full-screen light multiply at quarter resolution cost 14.5 ms, far over 1.5: **night takes the per-tile fallback** (8 pre-shaded levels).*
   - Screenshot a Lumen wearing a test hat at 390x844, DPR 3, and judge it at arm's length. If it fails, switch to 20-px tiles with a 9-tile day sight, or a 16x24 Lumen. Record the decision with the screenshot.
   - Measure the night light pass at 4x with `?perf=1`. If it is over 1.5 ms, take the per-tile fallback.
 - **Proxy check (an agent can run it).** A 10-minute headless run of 8 residents logs technique counts. It passes when every §4 technique except the feint occurs, and deaths have at least three different causes.

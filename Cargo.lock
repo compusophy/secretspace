@@ -95,6 +95,8 @@ version = "0.1.0"
 dependencies = [
  "secretspace-engine",
  "secretspace-kit",
+ "secretspace-luciphon",
+ "secretspace-luciphon-look",
  "secretspace-pixels",
  "secretspace-wyrm",
  "secretspace-wyrm-look",
@@ -118,6 +120,28 @@ name = "secretspace-luciphon"
 version = "0.1.0"
 dependencies = [
  "secretspace-engine",
+]
+
+[[package]]
+name = "secretspace-luciphon-look"
+version = "0.1.0"
+dependencies = [
+ "secretspace-engine",
+ "secretspace-luciphon",
+ "secretspace-pixels",
+]
+
+[[package]]
+name = "secretspace-luciphon-web"
+version = "0.1.0"
+dependencies = [
+ "secretspace-engine",
+ "secretspace-kit",
+ "secretspace-luciphon",
+ "secretspace-luciphon-look",
+ "secretspace-pixels",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
