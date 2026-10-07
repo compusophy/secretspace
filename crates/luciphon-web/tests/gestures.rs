@@ -23,6 +23,7 @@ fn word(g: &Gesture) -> String {
         }
         Gesture::Cancel => "cancel".into(),
         Gesture::Heart => "heart".into(),
+        Gesture::Wheel(s) => format!("wheel {s}"),
     }
 }
 

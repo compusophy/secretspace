@@ -35,7 +35,7 @@ pub fn glim_step(g: u32) -> u8 {
     }
 }
 
-pub fn lumen_ent(l: &Lumen) -> Ent {
+pub fn lumen_ent(l: &Lumen, laws: &crate::laws::Laws) -> Ent {
     let b = &l.me.body;
     Ent {
         id: l.id,
@@ -50,7 +50,8 @@ pub fn lumen_ent(l: &Lumen) -> Ent {
         flame: (l.flame.max(0) / 1000).min(255) as u8,
         glim: glim_step(l.glim),
         hue: l.hue,
-        flow: l.flow,
+        // Flow, and a newcomer's Sparks in the high bit.
+        flow: l.flow | (l.spark(laws) as u8) << 7,
         name: l.name.clone(),
     }
 }
@@ -67,6 +68,12 @@ pub fn own(l: &Lumen) -> Own {
         down: l.down.min(255) as u8,
         descent: l.descent.min(255) as u8,
         killer: l.killer,
+        wheat: l.wheat,
+        kindle: l.kindle,
+        build: l.build.unwrap_or(0),
+        channel: l.channel.map_or(0, |c| c.2.min(255) as u8),
+        home: l.home,
+        levels: l.xp.map(|x| crate::build::level(x) as u8),
     }
 }
 
@@ -74,7 +81,7 @@ pub fn own(l: &Lumen) -> Own {
 pub fn ents(w: &World) -> Vec<(Ent, Fx, Fx)> {
     let mut out = Vec::new();
     for l in w.lumens.iter().filter(|l| l.alive()) {
-        out.push((lumen_ent(l), l.me.body.x, l.me.body.y));
+        out.push((lumen_ent(l, &w.laws), l.me.body.x, l.me.body.y));
     }
     for m in &w.motes {
         let hue = w.find(m.owner).map_or(0, |o| o.hue);

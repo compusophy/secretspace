@@ -99,6 +99,16 @@ impl World {
         }
         let (x, y) = (lum.me.body.x.floor(), lum.me.body.y.floor());
         let soul = lum.soul;
+        // A soul with no hearth yet keeps a lodging: a vault by the
+        // Luciphon, and no land.
+        if self.claim_of(soul).is_none()
+            && x * x + y * y <= 25
+            && lum.glim + lum.materials() > self.laws.lamp
+        {
+            let (name, hue) = (lum.name.clone(), lum.hue);
+            let id = self.new_claim(soul, &name, hue);
+            self.lumens[i].claim = id;
+        }
         let Some(c) = self.claim_of(soul) else {
             return;
         };

@@ -7,6 +7,7 @@ pub mod first;
 pub mod gesture;
 pub mod input;
 pub mod laws;
+pub mod play;
 pub mod state;
 
 use std::cell::RefCell;
@@ -55,6 +56,12 @@ struct Page {
     /// Where each body was drawn last frame (for skid marks and streaks).
     was: std::collections::HashMap<u16, (f32, f32)>,
     heart_down: bool,
+    /// Build was picked on the wheel: the next stroke picks a piece.
+    picking: bool,
+    /// The Underlight's two lights (buffer pixels).
+    choice: (Rect, Rect),
+    /// Since when this page has had no Lumen while joined (it dreams).
+    gone_since: f64,
 }
 
 thread_local! {
@@ -207,7 +214,23 @@ fn menu_press(p: &mut Page, x: f32, y: f32) {
     }
 }
 
+/// Joined, connected, and no Lumen for a second: asleep.
+fn dreaming(p: &Page, now: f64) -> bool {
+    p.st.joined
+        && p.st.connected
+        && p.st.mirror.own.is_none()
+        && p.gone_since > 0.0
+        && now - p.gone_since > 1000.0
+}
+
 fn frame(p: &mut Page, now: f64) {
+    if p.st.joined && p.st.mirror.own.is_none() {
+        if p.gone_since == 0.0 {
+            p.gone_since = now;
+        }
+    } else {
+        p.gone_since = 0.0;
+    }
     net(p, now);
     let playing = p.st.joined && p.st.connected;
     let (hx, hy, hr) = heart(p);
@@ -221,6 +244,34 @@ fn frame(p: &mut Page, now: f64) {
             continue;
         }
         if press.kind == kit::pointer::Kind::Down {
+            let (x, y) = p.screen.to_px(press.x, press.y);
+            // In the Underlight, the two lights to return at.
+            if p.st.descent > 0 {
+                if p.choice.0.contains(x, y) {
+                    send(
+                        p,
+                        &Up::Heart {
+                            act: luciphon::build::act::HOME,
+                            arg: 0,
+                        },
+                    );
+                } else if p.choice.1.contains(x, y) {
+                    send(
+                        p,
+                        &Up::Heart {
+                            act: luciphon::build::act::HOME,
+                            arg: 1,
+                        },
+                    );
+                }
+                continue;
+            }
+            // Dreaming: a tap wakes you where you lay.
+            if dreaming(p, now) {
+                send(p, &Up::Join { proto: PROTO });
+                p.gone_since = now;
+                continue;
+            }
             p.heart_down = on_heart(press.x, press.y);
         }
         if press.kind == kit::pointer::Kind::Up {
@@ -245,12 +296,54 @@ fn frame(p: &mut Page, now: f64) {
             p.st.pred.push(seq, it, &p.st.mirror.tiles, &p.st.laws);
             p.input.next_at += TICK_MS;
         }
-        while p.input.hearts > 0 {
-            p.input.hearts -= 1;
-            send(p, &Up::Heart { act: 1, arg: 0 });
-            // ?trace=1: the Heart saves the pointer trace (a phone has no keys).
-            if let Some(t) = &p.input.trace {
-                kit::download("luciphon-trace.txt", t.join("\n").as_bytes());
+        use luciphon::build::{act, slot};
+        let building = p.st.mirror.own.is_some_and(|o| o.build != 0);
+        for h in std::mem::take(&mut p.input.hearts) {
+            match h {
+                // A tap: leave Build's ring or build mode, else a chirp.
+                None if p.picking => p.picking = false,
+                None if building => send(
+                    p,
+                    &Up::Heart {
+                        act: act::DONE,
+                        arg: 0,
+                    },
+                ),
+                None => {
+                    send(
+                        p,
+                        &Up::Heart {
+                            act: act::CHIRP,
+                            arg: 0,
+                        },
+                    );
+                    // ?trace=1: the Heart saves the pointer trace.
+                    if let Some(t) = &p.input.trace {
+                        kit::download("luciphon-trace.txt", t.join("\n").as_bytes());
+                    }
+                }
+                Some(s) if p.picking => {
+                    p.picking = false;
+                    if (s as usize) < luciphon::build::PIECES.len() {
+                        send(
+                            p,
+                            &Up::Heart {
+                                act: act::PIECE,
+                                arg: s,
+                            },
+                        );
+                    }
+                }
+                Some(s) => {
+                    send(
+                        p,
+                        &Up::Heart {
+                            act: act::WHEEL,
+                            arg: s,
+                        },
+                    );
+                    p.picking = s == slot::BUILD;
+                }
             }
         }
     }
@@ -328,6 +421,36 @@ fn draw(p: &mut Page, now: f64) {
         let (sx, sy) = view.to_screen(c, cx, cy);
         let own = p.st.mirror.own.unwrap_or_default();
         let l = &p.st.laws;
+        play::rings(
+            c,
+            &view,
+            &p.st.mirror.tiles,
+            (cx, cy),
+            p.st.seed,
+            p.st.tick_now(now),
+        );
+        if own.build != 0 {
+            play::ghost(
+                c,
+                &view,
+                (cx, cy, me.body.facing),
+                &own,
+                &p.st.mirror.tiles,
+                l,
+            );
+        }
+        // Your hearth, off screen: a marker toward it in your hue.
+        if let Some((hx, hy)) = p.st.claims.get(&me.body.claim).and_then(|c| c.hearth) {
+            let (mx, my) = view.to_screen(c, hx as f32 + 0.5, hy as f32 + 0.5);
+            let hue = p.st.claims.get(&me.body.claim).map_or(0, |c| c.hue);
+            hud::marker(c, mx, my, Rgba::hsl(hue as f32 / 256.0 * 360.0, 0.7, 0.65));
+        }
+        if let Some((t, at)) = &p.st.toast {
+            if now - at < 2200.0 {
+                let s = pixels::fit_scale(t, c.w - 20, 2 * u);
+                c.text_centred(c.w / 2, c.h / 4, t, s, palette::GOLD);
+            }
+        }
         hud::vitals(
             c,
             sx,
@@ -406,18 +529,42 @@ fn draw(p: &mut Page, now: f64) {
             now,
         );
         let own = p.st.mirror.own.unwrap_or_default();
-        let glim = format!("{} glim", own.glim);
-        c.text_shadowed(
-            (bx + r) as i32 + 8,
-            by as i32 - 4 * u,
-            &glim,
-            u,
-            palette::GOLD,
-        );
+        play::bag(c, (bx + r) as i32 + 8, by as i32 - 10 * u, &own, u);
+        // The wheel, a moment into a Heart press.
+        if let Some((ox, oy, t, lit)) = p.input.rec.wheel(&FEEL) {
+            if now - t >= FEEL.wheel_ms {
+                let (wx, wy) = p.screen.to_px(ox, oy - FEEL.wheel_up);
+                play::wheel(&mut p.screen.px, wx, wy, lit, p.picking, u);
+            }
+        } else if p.picking {
+            let c = &mut p.screen.px;
+            let line = "slide from the heart: a piece";
+            c.text_centred(
+                c.w / 2,
+                c.h - (FEEL.heart_above / p.screen.scale) as i32 - 50 * u,
+                line,
+                u,
+                palette::GOLD,
+            );
+        }
+        let c = &mut p.screen.px;
         let top = format!("{} here, {} awake", p.st.people, p.st.awake);
         c.text_shadowed(6 * u, 6 * u, &top, u, palette::DIM);
         let taught: u8 = kit::load(TAUGHT).and_then(|t| t.parse().ok()).unwrap_or(0);
-        first::hint(c, taught | p.input.done, u, now);
+        if p.input.rec.wheel(&FEEL).is_none() && !p.picking {
+            first::hint(c, taught | p.input.done, u, now);
+        }
+    }
+    if p.st.descent > 0 {
+        let own = p.st.mirror.own.unwrap_or_default();
+        let has =
+            p.st.claims
+                .get(&own.me.body.claim)
+                .is_some_and(|c| c.hearth.is_some());
+        p.choice = play::choice(&mut p.screen.px, has, own.home, u);
+    }
+    if dreaming(p, now) {
+        play::dreaming(&mut p.screen.px, u, now);
     }
     // The Stillness: the world holds; the picture stays, under gold.
     if p.st.joined && !p.st.connected {
@@ -508,6 +655,9 @@ pub fn start() -> Result<(), JsValue> {
             light: query("light=1"),
             was: std::collections::HashMap::new(),
             heart_down: false,
+            picking: false,
+            choice: (Rect::default(), Rect::default()),
+            gone_since: 0.0,
         })
     });
     kit::frames(|now| {

@@ -1225,25 +1225,26 @@ Browser checks are Playwright scripts kept in the scratchpad and **never committ
 
 ### Stage 2: the hold
 
-- [ ] **2.1** `gather.rs`: the §8 nodes, ring multipliers, resonance and ring-out, dwell, regrowth, pickups, bag and weight, glim cap and motes, Beacons; the Planter and Sunwheat.
-- [ ] **2.2** `build.rs`: hearth placement and core, the walling-in checks, vault, lamp and banking, build mode, wall, door, thorns, lantern, planter, removal; lodgings.
-- [ ] **2.3** `claim.rs`:
+- [x] **2.1** `gather.rs`: the §8 nodes, ring multipliers, resonance and ring-out, dwell, regrowth, pickups, bag and weight, glim cap and motes, Beacons; the Planter and Sunwheat.
+- [x] **2.2** `build.rs`: hearth placement and core, the walling-in checks, vault, lamp and banking, build mode, wall, door, thorns, lantern, planter, removal; lodgings.
+- [x] **2.3** `claim.rs`:
   - kindle mode, wick and stake, the 48-tile limit, the 60 s timeout;
   - close and flood fill (the 64x64 box, the 300-tile and cap limits), snuff;
   - speed bonus, land yield, upkeep, fading, outlines and half-price re-kindle, cold hearths, ruins.
-- [ ] **2.4** The wheel (§4) with Build's second ring, Kindle, Rekindle, Recall and four emotes.
-- [ ] **2.5** `persist.rs`:
+- [x] **2.4** The wheel (§4) with Build's second ring, Kindle, Rekindle, Recall and four emotes.
+- [x] **2.5** `persist.rs`:
   - sections META, TILES, NODES, PIECES, HEARTHS, LUMENS, DROPS, OUTLINES; `save` and `load`;
   - **freeze schema 1** and commit `world-s1.snap`;
   - tests: `every_old_world_still_loads`, `snapshot_round_trips_exactly`, `hostile_snapshots_never_panic`.
-- [ ] **2.6** The lifecycle: Dream, Linger, the 20 s idle Dream, waking where you dreamed, two tabs, guests; hearth or Luciphon respawn chosen in the Underlight.
-- [ ] **2.7** Sparks switched on; new souls start with 0 glim; skill XP saved for every skill, the level-up ring, and the Lantern at Kindling 5.
+- [x] **2.6** The lifecycle: Dream, Linger, the 20 s idle Dream, waking where you dreamed, two tabs, guests; hearth or Luciphon respawn chosen in the Underlight.
+- [x] **2.7** Sparks switched on; new souls start with 0 glim; skill XP saved for every skill, the level-up ring, and the Lantern at Kindling 5.
 - **Done when** a phone player:
   - builds a hearth from nothing in 5 minutes or less;
   - closes a 20-tile loop;
   - plants and harvests Sunwheat;
   - dies in the Dim and sees half the bag dropped;
   - after a server push mid-loop, comes back with bag, hearth and land intact.
+  - *Built 2026-10-07 and proven by `crates/luciphon/tests/hold.rs`, which plays the whole of it through the world from a soul with nothing: wood and stone struck from a birch and a rock, a hearth through build mode, a kindled loop of 20+ tiles, a planter's Sunwheat ripened and struck, a fall in the Dim leaving half the bag (half its glim to the Dark), and a save and reload that keeps bag, hearth and land. On a phone the wheel, Build's ring, the ghost and kindling were checked in a browser; the 5-minute timing on a real phone is the owner's to try.*
 
 ### Stage 3: alive
 

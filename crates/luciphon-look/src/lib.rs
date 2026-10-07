@@ -143,8 +143,15 @@ pub fn draw_lumen(c: &mut Canvas, b: &Body, sx: i32, sy: i32, now: f64) {
         c.glow_add(sx, sy - 8, 7, Rgba(255, 220, 150, 160));
     }
     // Flow: a halo, brighter each step.
-    if b.flow > 0 {
-        let a = 60 + 60 * b.flow.min(3) as u32;
+    // A newcomer's Sparks: a small light that twinkles over the hood.
+    if b.flow & 0x80 != 0 {
+        let k = (180.0 + (now / 160.0 + b.id as f64).sin() * 70.0) as u8;
+        c.add(sx, y - 6, Rgba(255, 250, 220, 255), k as u32);
+        c.add(sx + 1, y - 7, Rgba(255, 240, 200, 255), (k / 2) as u32);
+        c.add(sx - 1, y - 5, Rgba(255, 240, 200, 255), (k / 2) as u32);
+    }
+    if b.flow & 3 > 0 {
+        let a = 60 + 60 * (b.flow & 3) as u32;
         c.fill_rect(sx - 4, y - 3, 8, 1, Rgba(255, 220, 140, a as u8));
         c.fill_rect(sx - 3, y - 4, 6, 1, Rgba(255, 240, 190, (a / 2) as u8));
     }
@@ -161,6 +168,9 @@ pub fn draw_lumen(c: &mut Canvas, b: &Body, sx: i32, sy: i32, now: f64) {
 /// One thing standing on tile (tx, ty): its sprite with its foot on the
 /// tile's bottom edge, faded if a Lumen stands just behind it.
 fn draw_thing(c: &mut Canvas, o: u8, sx: i32, sy: i32, faded: bool, now: f64) {
+    if o == obj::HEARTH {
+        return draw_hearth(c, sx + 8, sy, now);
+    }
     let g = match o {
         obj::BIRCH => BIRCH,
         obj::OAK => OAK,
@@ -168,8 +178,25 @@ fn draw_thing(c: &mut Canvas, o: u8, sx: i32, sy: i32, faded: bool, now: f64) {
         obj::CRYSTAL => CRYSTAL,
         obj::PILLAR => PILLAR,
         obj::BRAMBLE => BRAMBLE,
+        obj::WALL => WALL,
+        obj::DOOR => DOOR,
+        obj::THORNS => THORNS,
+        obj::LANTERN => LANTERN,
+        obj::PLANTER => PLANTER,
+        obj::SPROUT => SPROUT,
+        obj::RIPE => RIPE,
+        obj::WILTED => WILTED,
+        o if o & obj::BARE != 0 => match o & !obj::BARE {
+            obj::BIRCH | obj::OAK => STUMP,
+            obj::ROCK => RUBBLE,
+            obj::CRYSTAL => SHARD,
+            _ => return,
+        },
         _ => return,
     };
+    if o == obj::LANTERN {
+        c.glow_add(sx + 8, sy - 10, 22, Rgba(255, 210, 122, 120));
+    }
     let alpha = if faded { 90 } else { 255 };
     let paint = thing_paint(alpha);
     c.grid(&g, sx, sy - g.h() + 2, 1, false, &paint);
@@ -177,6 +204,36 @@ fn draw_thing(c: &mut Canvas, o: u8, sx: i32, sy: i32, faded: bool, now: f64) {
         let pulse = (128.0 + (now / 400.0 + sx as f64).sin() * 60.0) as u32;
         c.glow_add(sx + 7, sy - 6, 6, Rgba(127, 224, 255, pulse as u8));
     }
+}
+
+/// A hearth: a ring of stones round a fire, three tiles across, its feet
+/// at screen (sx, sy) (the bottom of its middle tile).
+fn draw_hearth(c: &mut Canvas, sx: i32, sy: i32, now: f64) {
+    let stone = Rgba::rgb(120, 116, 124);
+    for k in 0..12 {
+        let a = k as f32 / 12.0 * std::f32::consts::TAU;
+        let (x, y) = (sx as f32 + a.cos() * 15.0, sy as f32 - 8.0 + a.sin() * 8.0);
+        c.fill_rect(
+            x as i32 - 3,
+            y as i32 - 2,
+            6,
+            5,
+            palette::shade(stone, (k % 3) * 12 - 12),
+        );
+    }
+    let flick = 0.8 + 0.2 * (now / 120.0).sin() as f32;
+    c.glow_add(sx, sy - 10, (30.0 * flick) as i32, Rgba(255, 170, 90, 110));
+    for k in 0..5 {
+        let h = 6 + ((now / 90.0 + k as f64).sin() * 3.0) as i32;
+        c.fill_rect(
+            sx - 5 + k * 2,
+            sy - 8 - h,
+            2,
+            h,
+            Rgba::rgb(255, 150 + k as u8 * 15, 70),
+        );
+    }
+    c.glow_add(sx, sy - 12, 6, Rgba(255, 240, 200, 255));
 }
 
 /// The Luciphon: a bell-lantern on a marble plinth, three tiles square,
@@ -248,7 +305,13 @@ pub fn world(c: &mut Canvas, look: &mut Look, v: &View, tiles: &Tiles, bodies: &
     for ty in ty0..=ty1 {
         for tx in tx0..=tx1 {
             let o = tiles.get(tx, ty).obj;
-            if o != obj::NONE && o != obj::GLOWMOSS && o != obj::LUCIPHON {
+            // A hearth is drawn once, from its middle tile.
+            let edge_of_hearth = o == obj::HEARTH
+                && !(tiles.get(tx - 1, ty).obj == obj::HEARTH
+                    && tiles.get(tx + 1, ty).obj == obj::HEARTH
+                    && tiles.get(tx, ty - 1).obj == obj::HEARTH
+                    && tiles.get(tx, ty + 1).obj == obj::HEARTH);
+            if o != obj::NONE && o != obj::GLOWMOSS && o != obj::LUCIPHON && !edge_of_hearth {
                 items.push(((ty + 1) * TILE, Item::Thing(o, tx, ty)));
             }
         }

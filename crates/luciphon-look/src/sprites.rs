@@ -197,6 +197,110 @@ pub const BRAMBLE: Grid = Grid::new(&[
     "..ssssssssssss..",
 ]);
 
+pub const STUMP: Grid = Grid::new(&["......kwWk......", ".....swwWWs.....", ".....ssssss....."]);
+
+pub const RUBBLE: Grid = Grid::new(&["...rr....rR.....", "..qRRq..qRRq.r..", "...ssss..sss.s.."]);
+
+pub const SHARD: Grid = Grid::new(&[
+    ".......x........",
+    "......xXx.......",
+    "......xXx.......",
+    ".....ssss.......",
+]);
+
+pub const WALL: Grid = Grid::new(&[
+    "bBbBbBbBbBbBbBbB",
+    "BbbbBbbbBbbbBbbb",
+    "bBbBbBbBbBbBbBbB",
+    "bbbbbbbbbbbbbbbb",
+    "BbbbBbbbBbbbBbbb",
+    "bbbbbbbbbbbbbbbb",
+    "qqqqqqqqqqqqqqqq",
+    "qbqqqbqqqbqqqbqq",
+    "qqqqqqqqqqqqqqqq",
+    "qqbqqqbqqqbqqqbq",
+    "qqqqqqqqqqqqqqqq",
+    "ssssssssssssssss",
+]);
+
+pub const DOOR: Grid = Grid::new(&[
+    "bBbBbBbBbBbBbBbB",
+    "Bbbbbkkkkkkbbbbb",
+    "bBbbkhhhhhhkbBbB",
+    "bbbbkhhhhhhkbbbb",
+    "Bbbbkhhhhhhkbbbb",
+    "bbbbkhhhhhhkbbbb",
+    "qqqqkhhhhhhkqqqq",
+    "qbqqkhhhhGhkqbqq",
+    "qqqqkhhhhhhkqqqq",
+    "qqbqkhhhhhhkqqbq",
+    "qqqqkhhhhhhkqqqq",
+    "ssssssssssssssss",
+]);
+
+pub const THORNS: Grid = Grid::new(&[
+    "...y.....y......",
+    ".y.vy..y.vy..y..",
+    "..vVv.yvVvy.vVy.",
+    ".yvVVvvVVVvvVVv.",
+    "vVVvVVVvVVVVVvVy",
+    "yvVVVvVVVVvVVVv.",
+    ".vVVVVVVvVVVVVvy",
+    "..vvvvvvvvvvvv..",
+    "..ssssssssssss..",
+]);
+
+pub const LANTERN: Grid = Grid::new(&[
+    "......kkkk......",
+    ".....kyYYyk.....",
+    ".....kYYYYk.....",
+    ".....kyYYyk.....",
+    "......kkkk......",
+    ".......bb.......",
+    ".......bB.......",
+    ".......bb.......",
+    ".......bB.......",
+    ".......bb.......",
+    "......bbBb......",
+    "......ssss......",
+]);
+
+pub const PLANTER: Grid = Grid::new(&[
+    "..bBbBbBbBbBb...",
+    "..bmmmmmmmmmb...",
+    "..qqqqqqqqqqq...",
+    "..sssssssssss...",
+]);
+
+pub const SPROUT: Grid = Grid::new(&[
+    "....g..g..g.....",
+    "....G..G..G.....",
+    "..bBbBbBbBbBb...",
+    "..bmmmmmmmmmb...",
+    "..qqqqqqqqqqq...",
+    "..sssssssssss...",
+]);
+
+pub const RIPE: Grid = Grid::new(&[
+    "...y.y.y.y.y....",
+    "...Y.Y.Y.Y.Y....",
+    "...y.y.y.y.y....",
+    "...g.g.g.g.g....",
+    "..bBbBbBbBbBb...",
+    "..bmmmmmmmmmb...",
+    "..qqqqqqqqqqq...",
+    "..sssssssssss...",
+]);
+
+pub const WILTED: Grid = Grid::new(&[
+    "....w.w..w.w....",
+    "...wb.bw.b.bw...",
+    "..bBbBbBbBbBb...",
+    "..bmmmmmmmmmb...",
+    "..qqqqqqqqqqq...",
+    "..sssssssssss...",
+]);
+
 /// Things' palette.
 pub fn thing_paint(alpha: u8) -> impl Fn(u8) -> Option<Rgba> {
     move |ch| {
@@ -219,6 +323,9 @@ pub fn thing_paint(alpha: u8) -> impl Fn(u8) -> Option<Rgba> {
             b't' => Rgba::rgb(190, 120, 150),
             b'v' => Rgba::rgb(70, 30, 52),
             b'V' => Rgba::rgb(110, 50, 80),
+            b'y' => Rgba::rgb(230, 180, 90),
+            b'Y' => Rgba::rgb(255, 228, 150),
+            b'h' => Rgba::rgb(52, 38, 32),
             b's' => return Some(Rgba(0, 0, 10, 70)),
             _ => return None,
         };
@@ -238,7 +345,10 @@ mod tests {
         for g in FEET {
             assert!(g.rows.iter().all(|r| r.len() == LUMEN_W as usize));
         }
-        for g in [BIRCH, OAK, ROCK, CRYSTAL, PILLAR, BRAMBLE] {
+        for g in [
+            BIRCH, OAK, ROCK, CRYSTAL, PILLAR, BRAMBLE, STUMP, RUBBLE, SHARD, WALL, DOOR, THORNS,
+            LANTERN, PLANTER, SPROUT, RIPE, WILTED,
+        ] {
             assert!(g.rows.iter().all(|r| r.len() == 16), "{:?}", g.rows[0]);
         }
     }

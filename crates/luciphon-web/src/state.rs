@@ -39,6 +39,12 @@ pub struct State {
     pub killer: u16,
     /// Things the page felt this frame (for haptics).
     pub felt: Vec<u32>,
+    /// Every claim, by id; the world's seed; when the newest frame came.
+    pub claims: HashMap<u16, luciphon::proto::ClaimInfo>,
+    pub seed: u64,
+    frame_at: f64,
+    /// A word that shows for a moment (a level, a refusal).
+    pub toast: Option<(String, f64)>,
 }
 
 impl Default for State {
@@ -61,6 +67,10 @@ impl Default for State {
             descent: 0,
             killer: 0,
             felt: Vec::new(),
+            claims: HashMap::new(),
+            seed: 0,
+            frame_at: 0.0,
+            toast: None,
         }
     }
 }
@@ -72,7 +82,15 @@ impl State {
             return;
         };
         match &d {
-            Down::Welcome { laws, you, .. } => {
+            Down::Claims(list) => {
+                self.claims = list.iter().map(|c| (c.id, c.clone())).collect();
+                let hues = list.iter().map(|c| (c.id, c.hue)).collect();
+                look.ground.hues(hues, &self.mirror.tiles);
+            }
+            Down::Welcome {
+                laws, you, seed, ..
+            } => {
+                self.seed = *seed;
                 if let Some(l) = Laws::decode(laws) {
                     self.laws = l;
                 }
@@ -118,6 +136,7 @@ impl State {
         }
         // A frame.
         let Down::Frame(f) = d else { return };
+        self.frame_at = now;
         for &(i, _) in &f.tiles {
             let (x, y) = luciphon::tiles::Tiles::at_index(i as usize);
             look.ground.retile(&self.mirror.tiles, x, y);
@@ -189,9 +208,50 @@ impl State {
                 10 => fx.burst(x, y - 0.3, 10, 4.0, lucilook::palette::EMBER, now),
                 12 => fx.burst(x, y - 0.3, 24, 6.0, lucilook::palette::GOLD, now),
                 13 => fx.ring(x, y - 0.4, 1.6, lucilook::palette::GOLD, now),
+                14 if e.n & 1 != 0 => {
+                    let (tx, ty) = luciphon::tiles::Tiles::at_index(e.b as usize);
+                    fx.ring(
+                        tx as f32 + 0.5,
+                        ty as f32 + 0.2,
+                        0.8,
+                        lucilook::palette::RIM,
+                        now,
+                    );
+                    if e.a == self.you {
+                        self.felt.push(10);
+                    }
+                }
+                16 => {
+                    fx.burst(x, y - 0.3, 30, 7.0, lucilook::palette::GOLD, now);
+                    if e.a == self.you {
+                        self.toast = Some((format!("{} tiles kindled", e.b), now));
+                    }
+                }
+                17 => fx.burst(x, y - 0.3, 16, 5.0, lucilook::palette::EMBER, now),
+                20 if e.a == self.you => {
+                    const SKILLS: [&str; 7] = [
+                        "hewing",
+                        "delving",
+                        "kindling",
+                        "tending",
+                        "valor",
+                        "wayfaring",
+                        "voice",
+                    ];
+                    fx.ring(x, y - 0.5, 2.4, lucilook::palette::GOLD, now);
+                    let name = SKILLS.get(e.n as usize).unwrap_or(&"skill");
+                    self.toast = Some((format!("{name} {}", e.b), now));
+                }
+                21 => fx.burst(x, y - 0.3, 8, 3.0, lucilook::palette::GOLD, now),
+                23 if e.a == self.you => self.toast = Some(("not here".into(), now)),
                 _ => {}
             }
         }
+    }
+
+    /// The world's tick now, between frames.
+    pub fn tick_now(&self, now: f64) -> f64 {
+        self.mirror.tick as f64 + ((now - self.frame_at) / crate::input::TICK_MS).clamp(0.0, 3.0)
     }
 
     /// Where your own Lumen is drawn: predicted, with a small error eased.

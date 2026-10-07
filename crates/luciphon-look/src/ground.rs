@@ -17,6 +17,48 @@ const HALF: i32 = luciphon::tiles::SIZE / 2;
 #[derive(Default)]
 pub struct Ground {
     chunks: HashMap<(i32, i32), Canvas>,
+    /// Each claim's hue, for its land's light.
+    hues: HashMap<u16, u8>,
+}
+
+/// A claim's light: its land tinted by its soul's hue, brighter on an open
+/// wick, and a border where it meets anyone else's.
+fn tint(
+    c: &mut Canvas,
+    tiles: &Tiles,
+    hues: &HashMap<u16, u8>,
+    tx: i32,
+    ty: i32,
+    ox: i32,
+    oy: i32,
+) {
+    let t = tiles.get(tx, ty);
+    let owner = t.owner();
+    let Some(&hue) = hues.get(&owner).filter(|_| owner != 0) else {
+        return;
+    };
+    let h = hue as f32 / 256.0 * 360.0;
+    let wick = t.wick().is_some();
+    let glow = Rgba::hsl(h, 0.65, if wick { 0.7 } else { 0.55 });
+    c.fill_rect(
+        ox,
+        oy,
+        TILE,
+        TILE,
+        Rgba(glow.0, glow.1, glow.2, if wick { 120 } else { 56 }),
+    );
+    let edge = Rgba::hsl(h, 0.8, 0.75);
+    for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        if tiles.get(tx + dx, ty + dy).owner() == owner {
+            continue;
+        }
+        match (dx, dy) {
+            (1, 0) => c.fill_rect(ox + TILE - 1, oy, 1, TILE, edge),
+            (-1, 0) => c.fill_rect(ox, oy, 1, TILE, edge),
+            (0, 1) => c.fill_rect(ox, oy + TILE - 1, TILE, 1, edge),
+            _ => c.fill_rect(ox, oy, TILE, 1, edge),
+        }
+    }
 }
 
 fn tile_pixels(c: &mut Canvas, tiles: &Tiles, tx: i32, ty: i32, ox: i32, oy: i32) {
@@ -110,14 +152,34 @@ impl Ground {
             for x in 0..CHUNK {
                 let (tx, ty) = (cx * CHUNK + x - HALF, cy * CHUNK + y - HALF);
                 tile_pixels(&mut c, tiles, tx, ty, x * TILE, y * TILE);
+                tint(&mut c, tiles, &self.hues, tx, ty, x * TILE, y * TILE);
             }
         }
         self.chunks.insert((cx, cy), c);
     }
 
+    /// The claims' hues; their land is baked again when they change.
+    pub fn hues(&mut self, hues: HashMap<u16, u8>, tiles: &Tiles) {
+        if hues == self.hues {
+            return;
+        }
+        self.hues = hues;
+        let known: Vec<(i32, i32)> = self.chunks.keys().copied().collect();
+        for (cx, cy) in known {
+            self.bake(tiles, cx, cy);
+        }
+    }
+
     /// Redraw one tile of a baked chunk (and the cliff under it).
     pub fn retile(&mut self, tiles: &Tiles, tx: i32, ty: i32) {
-        for (x, y) in [(tx, ty), (tx, ty + 1)] {
+        // The tile, the cliff below it, and its neighbours' borders.
+        for (x, y) in [
+            (tx, ty),
+            (tx, ty + 1),
+            (tx + 1, ty),
+            (tx - 1, ty),
+            (tx, ty - 1),
+        ] {
             let (cx, cy) = Tiles::chunk_of(x, y);
             if let Some(c) = self.chunks.get_mut(&(cx, cy)) {
                 let (ox, oy) = (
@@ -125,6 +187,7 @@ impl Ground {
                     (y + HALF - cy * CHUNK) * TILE,
                 );
                 tile_pixels(c, tiles, x, y, ox, oy);
+                tint(c, tiles, &self.hues, x, y, ox, oy);
             }
         }
     }

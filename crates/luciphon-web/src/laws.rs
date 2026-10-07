@@ -33,6 +33,11 @@ pub struct Feel {
     pub heart_px: f64,
     pub heart_above: f64,
     pub heart_hit: f64,
+    /// Sliding this far from a Heart press picks a wheel slot; the wheel
+    /// shows after `wheel_ms`, `wheel_up` px above the press.
+    pub wheel_px: f64,
+    pub wheel_ms: f64,
+    pub wheel_up: f64,
     /// Others are drawn this far behind the newest frame.
     pub behind_ms: f64,
     /// Prediction errors under this many tiles are blended over
@@ -63,6 +68,9 @@ pub const FEEL: Feel = Feel {
     heart_px: 56.0,
     heart_above: 72.0,
     heart_hit: 32.0,
+    wheel_px: 28.0,
+    wheel_ms: 150.0,
+    wheel_up: 64.0,
     behind_ms: 66.0,
     blend_tiles: 0.25,
     blend_ms: 100.0,

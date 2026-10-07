@@ -203,6 +203,15 @@ pub struct Own {
     /// In the Underlight: ticks until the return, and who did it.
     pub descent: u8,
     pub killer: u16,
+    /// v0.2: Sunwheat carried; kindle mode; the piece in build mode (0:
+    /// none) and the channel's ticks left; returning at the hearth; the
+    /// level of every skill.
+    pub wheat: u32,
+    pub kindle: bool,
+    pub build: u8,
+    pub channel: u8,
+    pub home: bool,
+    pub levels: [u8; 7],
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -399,6 +408,14 @@ fn put_own(w: &mut Writer, o: &Own) {
         .u32(o.stone)
         .u8(o.flow);
     w.u16(o.ghost).u8(o.down).u8(o.descent).u16(o.killer);
+    w.u32(o.wheat)
+        .u8(o.kindle as u8)
+        .u8(o.build)
+        .u8(o.channel)
+        .u8(o.home as u8);
+    for l in o.levels {
+        w.u8(l);
+    }
 }
 
 fn get_own(r: &mut Reader) -> Option<Own> {
@@ -416,6 +433,18 @@ fn get_own(r: &mut Reader) -> Option<Own> {
         down: r.u8()?,
         descent: r.u8()?,
         killer: r.u16()?,
+        wheat: r.u32()?,
+        kindle: r.u8()? != 0,
+        build: r.u8()?,
+        channel: r.u8()?,
+        home: r.u8()? != 0,
+        levels: {
+            let mut l = [0u8; 7];
+            for v in &mut l {
+                *v = r.u8()?;
+            }
+            l
+        },
     })
 }
 

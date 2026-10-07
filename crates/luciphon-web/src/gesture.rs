@@ -31,6 +31,8 @@ pub enum Gesture {
     },
     Cancel,
     Heart,
+    /// A slide off the Heart: the wheel's slot, 0 north, clockwise to 7.
+    Wheel(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,13 +53,27 @@ enum State {
         t: f64,
         left: bool,
     },
-    Heart,
+    Heart {
+        ox: f64,
+        oy: f64,
+        t: f64,
+    },
 }
 
 /// A heading from a screen delta (y down, as the world's).
 pub fn heading(dx: f64, dy: f64) -> u16 {
     let a = dy.atan2(dx) / std::f64::consts::TAU;
     ((a.rem_euclid(1.0) * 65536.0).round() as u32 & 0xffff) as u16
+}
+
+/// The wheel slot a slide of (dx, dy) from the Heart points at: 0 north,
+/// clockwise; None within `wheel_px`.
+pub fn slot(dx: f64, dy: f64, f: &Feel) -> Option<u8> {
+    if (dx * dx + dy * dy).sqrt() < f.wheel_px {
+        return None;
+    }
+    let a = dx.atan2(-dy).to_degrees().rem_euclid(360.0);
+    Some(((a + 22.5) / 45.0) as u8 % 8)
 }
 
 pub struct Recogniser {
@@ -128,6 +144,17 @@ impl Recogniser {
         !matches!(self.state, State::Idle)
     }
 
+    /// A Heart press under way: where, when, and the slot the pointer
+    /// is on now (None while still within the Heart).
+    pub fn wheel(&self, f: &Feel) -> Option<(f64, f64, f64, Option<u8>)> {
+        match self.state {
+            State::Heart { ox, oy, t } => {
+                Some((ox, oy, t, slot(self.at.0 - ox, self.at.1 - oy, f)))
+            }
+            _ => None,
+        }
+    }
+
     /// Time passing with nothing new: a still press becomes a hold.
     pub fn tick(&mut self, now: f64, f: &Feel, out: &mut Vec<Gesture>) {
         if let State::Pressed { x, y, t } = self.state {
@@ -174,11 +201,14 @@ impl Recogniser {
                 }
                 self.trail.clear();
                 self.trail.push_back((p.t, p.x, p.y));
-                if p.second || heart(p.x, p.y) {
-                    self.state = State::Heart;
-                    if p.second {
-                        out.push(Gesture::Heart);
-                    }
+                if p.second {
+                    out.push(Gesture::Heart);
+                } else if heart(p.x, p.y) {
+                    self.state = State::Heart {
+                        ox: p.x,
+                        oy: p.y,
+                        t: p.t,
+                    };
                 } else {
                     self.state = State::Pressed {
                         x: p.x,
@@ -251,10 +281,11 @@ impl Recogniser {
                     });
                 }
             }
-            (Kind::Up, State::Heart) => {
+            (Kind::Up, State::Heart { ox, oy, .. }) => {
                 self.state = State::Idle;
-                if !p.second {
-                    out.push(Gesture::Heart);
+                match slot(p.x - ox, p.y - oy, f) {
+                    Some(s) => out.push(Gesture::Wheel(s)),
+                    None => out.push(Gesture::Heart),
                 }
             }
             (Kind::Cancel, State::Drag { .. }) => {

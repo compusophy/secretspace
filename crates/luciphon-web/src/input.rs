@@ -22,7 +22,8 @@ pub struct Input {
     pub next_at: f64,
     last_stick: bool,
     heading: u16,
-    pub hearts: u32,
+    /// Heart taps (None) and wheel slots picked, to act on.
+    pub hearts: Vec<Option<u8>>,
     /// Gestures seen (bits: drag, tap, flick, hold), for the hints.
     pub done: u8,
     pub trace: Option<Vec<String>>,
@@ -82,7 +83,8 @@ impl Input {
                     self.verbs.push_back((Verb::Release { range }, aim));
                 }
                 Gesture::Cancel => self.verbs.push_back((Verb::Cancel, facing)),
-                Gesture::Heart => self.hearts += 1,
+                Gesture::Heart => self.hearts.push(None),
+                Gesture::Wheel(s) => self.hearts.push(Some(s)),
                 Gesture::Lift => {}
             }
         }
