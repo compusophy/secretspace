@@ -29,8 +29,8 @@ carry a wand battle royale (`docs/plunder.md`, not yet to build).
 1. **No hand-written JavaScript or TypeScript.** Pages are a canvas and one
    line that starts the wasm (wasm-bindgen writes its own glue). Every
    pixel is drawn by `pixels` into a buffer and shown once a frame, except
-   Luciphon's world: WebGL2 driven from Rust (`kit::gl`, GLSL in Rust
-   strings) with a `pixels` HUD layer over it. The only DOM besides the
+   3D: WebGPU (`gpu`, WGSL) or WebGL2 (`kit::gl`, GLSL), shaders as Rust
+   strings, with a `pixels` HUD layer over it. The only DOM besides the
    canvas is `kit::TextField`, an invisible input so phones offer their
    keyboard.
 2. **`engine`, `pixels` have no dependencies; a game's core (`wyrm`)
@@ -46,8 +46,9 @@ carry a wand battle royale (`docs/plunder.md`, not yet to build).
 6. **Caps:** a source file holds at most 1,000 lines; this file at most
    8,000 characters. At a cap: split, shrink, or delete. Never raise one.
 7. **wasm32 always green:** `cargo clippy -p secretspace-hub -p
-   secretspace-wyrm-web -p secretspace-luciphon-web --target
-   wasm32-unknown-unknown -- -D warnings`.
+   secretspace-wyrm-web -p secretspace-luciphon-web -p
+   secretspace-showcase-web --target wasm32-unknown-unknown -- -D
+   warnings`. Every WGSL string has a naga test.
 
 ## Map
 
@@ -61,6 +62,8 @@ crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   fingers, mouse, pointer lock), Link (reconnects, Hello
                   first), Session (the key), Pointer, Version, Socket,
                   TextField, storage
+crates/gpu        the engine: WebGPU device (wgpu), Caps,
+                  the pixel layer; crates/showcase-web is its test page
 crates/hub-web    the front page (cards, live counts, scroll, footer) and
                   watch (wyrm's card: the live game, as a watcher)
 crates/wyrm       the game: laws world bots grid proto view mirror room
@@ -109,7 +112,7 @@ that reads the same size on any screen (2 on a phone, 1 on a desktop).
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 bash scripts/caps.sh
 bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen

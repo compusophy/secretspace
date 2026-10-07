@@ -225,16 +225,34 @@ Every phase:
 5. Ship each phase behind its tier.
 
 ### Phase 0: spike and plumbing (1-2 days)
-- [ ] `crates/gpu`: device on web and native, `Caps`, a surface sized like
-      `kit::gl::Gl` (DPR caps), and the pixel-layer composite.
-- [ ] `crates/showcase-web` + `web/showcase/index.html` + a `page` line in
+- [x] `crates/gpu`: device on the web, `Caps`, a surface sized like
+      `kit::gl::Gl` (`kit::gl::measure`, DPR caps), and the pixel-layer
+      composite (`layer.rs`: one fullscreen triangle, `textureLoad`, so the
+      layer stays sharp). The adapter is asked for before the canvas is
+      touched, so a failure leaves it free for WebGL2. Optional features
+      (timestamps, f16, filterable f32, RG11B10 targets) come when offered.
+      *Native device: not yet* (off the web the crate builds its shaders
+      only); it comes with golden images in Phase 1.
+- [x] `crates/showcase-web` + `web/showcase/index.html` + a `page` line in
       `scripts/build-web.sh` + its pkg path in `web/vercel.json`. It clears,
       draws a test triangle, and shows the HUD layer.
-- [ ] §2.5 hooks; renderer choice and the GL fallback at start.
+- [x] §2.5 hooks; renderer choice and the GL fallback at start. Done:
+      `?t=ms`, `?hud=0`, `?shot=1` ("shot ready" after 3 frames), `?perf=1`
+      (`showcase webgpu 45fps first 74ms`), `?gpu=0`. Later: `?cam=` (no
+      camera yet) and the fixed resolution for `?shot=1`.
 - [ ] Measure: wasm size (gzipped), time to first frame, device creation
-      time on Chrome, Safari and Firefox.
-- [ ] Native tests: an empty frame offscreen (skip if no adapter), and Naga
-      validation of every WGSL string.
+      time on Chrome, Safari and Firefox. **Measured (October 2026):** the
+      showcase wasm is 342,182 bytes, 106,415 gzipped (wgpu's WebGPU
+      backend, the GL fallback and the HUD; Luciphon's page is 154,671
+      gzipped). Headless Chromium 1194 on SwiftShader: WebGPU found
+      (`--enable-unsafe-webgpu --use-webgpu-adapter=swiftshader`), first
+      frame 52-130 ms from page open (device creation included), 36-48 fps
+      in software; without an adapter it falls back to WebGL2 (first frame
+      63-113 ms). *Left: real GPUs, Safari and Firefox.*
+- [ ] Native tests: an empty frame offscreen (skip if no adapter) *(with
+      the native device)*, and Naga validation of every WGSL string *(done:
+      `crates/gpu/tests/wgsl.rs`, `crates/showcase-web/tests/wgsl.rs`; every
+      new WGSL string gets one)*.
 
 ### Phase 1: the engine core, and Luciphon's look on it (3-5 days)
 - [ ] `crates/render`:

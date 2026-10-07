@@ -309,6 +309,48 @@ uniform sampler2D t;
 out vec4 o;
 void main() { o = texture(t, uv); }";
 
+/// How a 3D screen fits the window: CSS pixels per layer pixel (as
+/// `Screen::fit_view` picks them, at least `min_short` on the short side),
+/// device pixels per CSS pixel drawn (up to `max_dpr`), the window in CSS
+/// pixels, the drawing buffer, and the pixel layer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fit {
+    pub scale: f64,
+    pub dpr: f64,
+    pub css: (f64, f64),
+    pub size: (u32, u32),
+    pub hud: (i32, i32),
+}
+
+pub fn measure(min_short: f64, max_dpr: f64) -> Fit {
+    let w = crate::window();
+    let css = (
+        w.inner_width()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(800.0),
+        w.inner_height()
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(600.0),
+    );
+    let s = (css.0 / 960.0)
+        .ceil()
+        .min((css.0.min(css.1) / min_short).floor());
+    let scale = s.clamp(1.0, 4.0);
+    let dpr = w.device_pixel_ratio().clamp(1.0, max_dpr.max(1.0));
+    Fit {
+        scale,
+        dpr,
+        css,
+        size: (
+            (css.0 * dpr).round().max(1.0) as u32,
+            (css.1 * dpr).round().max(1.0) as u32,
+        ),
+        hud: ((css.0 / scale).ceil() as i32, (css.1 / scale).ceil() as i32),
+    }
+}
+
 /// The canvas as a WebGL2 screen, with its pixel layer.
 pub struct Gl {
     canvas: HtmlCanvasElement,
@@ -370,33 +412,12 @@ impl Gl {
     /// them (at least `min_short` on the short side), the picture at the
     /// device's pixels up to `max_dpr` a CSS pixel.
     pub fn fit(&mut self, min_short: f64, max_dpr: f64) {
-        let w = crate::window();
-        let css = (
-            w.inner_width()
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(800.0),
-            w.inner_height()
-                .ok()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(600.0),
-        );
-        let s = (css.0 / 960.0)
-            .ceil()
-            .min((css.0.min(css.1) / min_short).floor());
-        self.scale = s.clamp(1.0, 4.0);
-        self.css = css;
-        self.dpr = w.device_pixel_ratio().clamp(1.0, max_dpr.max(1.0));
-        self.size = (
-            (css.0 * self.dpr).round().max(1.0) as i32,
-            (css.1 * self.dpr).round().max(1.0) as i32,
-        );
-        self.canvas.set_width(self.size.0 as u32);
-        self.canvas.set_height(self.size.1 as u32);
-        self.hud.resize(
-            (css.0 / self.scale).ceil() as i32,
-            (css.1 / self.scale).ceil() as i32,
-        );
+        let f = measure(min_short, max_dpr);
+        (self.scale, self.dpr, self.css) = (f.scale, f.dpr, f.css);
+        self.size = (f.size.0 as i32, f.size.1 as i32);
+        self.canvas.set_width(f.size.0);
+        self.canvas.set_height(f.size.1);
+        self.hud.resize(f.hud.0, f.hud.1);
     }
 
     /// The text scale that reads the same size on any screen.
