@@ -10,7 +10,7 @@ use crate::combat::{Act, Action, Me};
 use crate::motion::{Body, Busy, Intent, Move, Verb};
 use crate::tiles::{rle, unrle, Tile};
 
-pub const PROTO: u16 = 2;
+pub const PROTO: u16 = 3;
 
 // Up.
 pub const JOIN: u8 = 1;

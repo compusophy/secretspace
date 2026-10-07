@@ -940,7 +940,10 @@ pub trait Room: Send {
 - `web/vercel.json`: the pkg path, and a no-cache rule for `version.txt`.
 - Check that `deploy.yml`'s RELAY injection covers the new page.
 
-### The wire (protocol 2)
+### The wire (protocol 3)
+
+*Protocol 3 (the wand) adds the Input's sprint bit (bit 5 of the verb byte), the body's winded and sprinting flags, and the Beam event (kind 4: shooter, aim, length in eighths of a tile, and whether it pierced).*
+
 
 *Protocol 2 (first person) adds the Input's jump bit (bit 4 of the verb byte), a Lumen's height (`Ent.z`, field bit 64) and the body's height and climb in your own state, and drops the drift fields. A Join older than the server's oldest gets a Welcome with no Lumen; the page then loads the newest build.*
 
