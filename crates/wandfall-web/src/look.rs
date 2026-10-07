@@ -371,7 +371,7 @@ impl Look {
         items.push(
             Item::new(
                 self.wall,
-                m4::place([centre[0], SEA - 6.0, centre[1]], 0.0, [r, 160.0, r]),
+                m4::place([centre[0], SEA - 6.0, centre[1]], 0.0, [r, 75.0, r]),
             )
             .tint([1.0; 3], 0.34)
             .glow(0.7)
