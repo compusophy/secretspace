@@ -20,6 +20,7 @@ Game #2, **Luciphon** (a persistent brawler-builder on a floating island of
 light, in first person and 3D), is specced in `docs/luciphon.md` and built
 from its §15 through Stage 2 and the first-person revision; its hub card
 stays hidden (`/?all=1` shows it) until the owner passes the FUN GATE.
+Next for it: `docs/webgpu.md`, the plan for UE5-class rendering on WebGPU.
 
 ## Rules
 
