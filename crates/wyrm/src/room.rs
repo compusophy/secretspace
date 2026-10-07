@@ -102,4 +102,8 @@ impl Room for Wyrm {
     fn people(&self) -> usize {
         self.viewers.len() - self.watchers.len()
     }
+
+    fn playing(&self) -> usize {
+        self.world.snakes.len()
+    }
 }

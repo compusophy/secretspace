@@ -47,7 +47,9 @@ enum Event {
 
 struct Game {
     id: &'static str,
+    /// People connected (watchers aside), and everyone in the game, bots too.
     people: AtomicUsize,
+    playing: AtomicUsize,
     events: Sender<Event>,
 }
 
@@ -60,16 +62,18 @@ struct Shared {
 
 impl Shared {
     fn stats(&self) -> Stats {
-        let games: Vec<(String, u32)> = self
-            .games
-            .iter()
-            .map(|g| (g.id.to_string(), g.people.load(Ordering::Relaxed) as u32))
-            .collect();
+        let load = |a: &AtomicUsize| a.load(Ordering::Relaxed) as u32;
+        // Online is people (bots are not online); a card shows everyone
+        // playing, bots too, as the game itself does.
+        let people: u32 = self.games.iter().map(|g| load(&g.people)).sum();
         Stats {
-            online: self.hub.load(Ordering::Relaxed) as u32
-                + games.iter().map(|g| g.1).sum::<u32>(),
+            online: load(&self.hub) + people,
             visits: self.visits.load(Ordering::Relaxed),
-            games,
+            games: self
+                .games
+                .iter()
+                .map(|g| (g.id.to_string(), load(&g.playing)))
+                .collect(),
         }
     }
 }
@@ -108,6 +112,7 @@ fn main() {
         let game = Arc::new(Game {
             id: room.id(),
             people: AtomicUsize::new(0),
+            playing: AtomicUsize::new(0),
             events,
         });
         let g = game.clone();
@@ -199,6 +204,7 @@ fn host(mut room: Box<dyn Room>, inbox: Receiver<Event>, game: &Game) {
             }
         }
         game.people.store(room.people(), Ordering::Relaxed);
+        game.playing.store(room.playing(), Ordering::Relaxed);
 
         next += tick;
         let now = Instant::now();

@@ -144,6 +144,7 @@ fn a_watcher_sees_the_game_but_cannot_play_and_is_not_counted() {
         1,
         "only the player is one of the people here"
     );
+    assert!(room.playing() > 1, "the bots are playing too");
     let frames: Vec<Down> = out
         .0
         .iter()

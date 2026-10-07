@@ -27,6 +27,11 @@ pub trait Room: Send {
     fn close(&mut self, conn: u32);
     /// One tick of the world.
     fn tick(&mut self, out: &mut Outbox);
-    /// People here now, watchers aside.
+    /// People here now, watchers aside: what "online" counts.
     fn people(&self) -> usize;
+    /// Everyone in the game now, bots too: what the hub's card says is
+    /// playing. A game without bots need not say.
+    fn playing(&self) -> usize {
+        self.people()
+    }
 }

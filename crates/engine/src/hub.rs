@@ -10,7 +10,7 @@ pub struct Stats {
     pub online: u32,
     /// Pages ever opened.
     pub visits: u64,
-    /// People in each game, by its id.
+    /// Playing each game (bots too), by its id.
     pub games: Vec<(String, u32)>,
 }
 
