@@ -32,6 +32,7 @@ fn hostile_bytes_never_panic() {
                 verb: Verb::None,
                 aim: 0,
                 jump: true,
+                sprint: true,
             },
         }
         .encode(),
@@ -102,6 +103,7 @@ fn the_browser_rebuilds_every_tile_and_body_exactly() {
             },
             aim: rng.below(65536) as u16,
             jump: t % 50 == 20,
+            sprint: t % 300 < 150,
         };
         let (it, _) = thumb.fit(raw);
         seq = seq.wrapping_add(1);
@@ -179,6 +181,7 @@ fn prediction_matches_the_server() {
             },
             aim: rng.below(65536) as u16,
             jump: rng.chance(1, 30),
+            sprint: rng.chance(1, 2),
         };
         let (it, _) = thumb.fit(raw);
         p.push(seq, it, &w.tiles, &w.laws);

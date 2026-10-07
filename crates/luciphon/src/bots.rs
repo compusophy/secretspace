@@ -1,5 +1,6 @@
 //! Residents, v0: eight sparring Lumens with no homes. They run, chase,
-//! strike, charge heavies and throw, dash aside with a fan of headings
+//! circle at range and fire their wands when the line is clear, charge
+//! great beams and throw, dash aside with a fan of headings
 //! clear of void, brambles and walls, and flee when they burn low. They
 //! see the world 250-400 ms late (the history ring, 8-12 ticks back), aim
 //! 6-12 degrees off, and act only through Intents a person could make: the
@@ -7,7 +8,7 @@
 
 use engine::fixed::{atan2, len, turn, unit, Fx};
 
-use crate::combat::Act;
+use crate::combat::{beam, Act};
 use crate::laws::deg;
 use crate::motion::{Intent, Move, Verb};
 use crate::tiles::obj;
@@ -156,7 +157,7 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
         let d = len(ox.sub(x), oy.sub(y));
         let engaged = me.engaged_with(o.id, tick);
         let d = if engaged { d.sub(Fx::int(3)) } else { d };
-        if d < Fx::int(8) && nearest.is_none_or(|n| d < n.1) {
+        if d < Fx::int(12) && nearest.is_none_or(|n| d < n.1) {
             nearest = Some((o.id, d, ox, oy));
         }
     }
@@ -168,11 +169,11 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
         }
         let (ox, oy) = o.pos();
         let d = len(ox.sub(x), oy.sub(y));
-        let winding = matches!(o.me.act.act, Act::Windup | Act::Charge);
-        let toward = turn(o.me.act.aim, atan2(y.sub(oy), x.sub(ox))).abs() < deg(40) as i32;
+        let winding = o.me.act.act == Act::Charge;
+        let toward = turn(o.me.act.aim, atan2(y.sub(oy), x.sub(ox))).abs() < deg(12) as i32;
         if winding
             && toward
-            && d < Fx::milli(1_700)
+            && d < Fx::int(10)
             && body.breath >= w.laws.dash_breath
             && roll < 120 + brain.nerve as u32
         {
@@ -189,35 +190,16 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
     // Burning low: run for the Sanctum.
     if low {
         let h = fan(w, x, y, atan2(y.neg(), x.neg()), 3);
-        return go(h, 255, h);
+        return Intent {
+            sprint: true,
+            ..go(h, 255, h)
+        };
     }
 
     if let Some((tid, d, ox, oy)) = nearest.filter(|_| brain.nerve as u32 * 4 > roll / 4) {
         mind(w, i).target = tid;
         let toward = atan2(oy.sub(y), ox.sub(x)).wrapping_add(brain.err as u16);
         let glim = w.lumens[i].glim;
-        // Close: strike, or charge a heavy, closing in.
-        if d < Fx::milli(1_150) {
-            let mut verb = Verb::None;
-            if roll < 25 + brain.nerve as u32 / 4 {
-                // Nearly half its heavies are let go in the perfect window.
-                let to = if roll2 < 450 {
-                    19 + roll2 % 3
-                } else {
-                    12 + roll2 % 20
-                };
-                verb = Verb::Hold { held_for: 0 };
-                let b = mind(w, i);
-                b.charge_to = to;
-                b.throw_range = 0;
-            } else if roll < 400 {
-                verb = Verb::Tap;
-            }
-            return Intent {
-                verb,
-                ..go(toward, 60, toward)
-            };
-        }
         // In range for a throw.
         if glim >= w.laws.throw_glim && d > Fx::int(4) && d < Fx::int(8) && roll < 12 {
             let span = (d.sub(Fx::int(4)).0 as i64 * 254 / Fx::int(5).0 as i64) as u8;
@@ -229,10 +211,48 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
                 ..go(toward, 0, toward)
             };
         }
+        // In range: keep a distance, circle, and shoot when the line is
+        // clear; now and then a great beam.
+        if d < Fx::int(11) {
+            let clear = beam(&w.tiles, x, y, toward, d).1.is_none();
+            let mut verb = Verb::None;
+            if clear && roll < 18 + brain.nerve as u32 / 6 {
+                // Nearly half its great beams are let go in the perfect window.
+                let to = if roll2 < 450 {
+                    19 + roll2 % 3
+                } else {
+                    12 + roll2 % 20
+                };
+                let b = mind(w, i);
+                b.charge_to = to;
+                b.throw_range = 0;
+                verb = Verb::Hold { held_for: 0 };
+            } else if clear && roll < 260 {
+                verb = Verb::Tap;
+            }
+            let side = if (tick / 45 + i as u32).is_multiple_of(2) {
+                16384u16
+            } else {
+                49152
+            };
+            let way = if d < Fx::int(4) {
+                toward.wrapping_add(32768)
+            } else if d > Fx::int(8) {
+                toward
+            } else {
+                toward.wrapping_add(side)
+            };
+            let h = fan(w, x, y, way, 2);
+            return Intent {
+                verb,
+                ..go(h, 200, toward)
+            };
+        }
         // Chase, hopping now and then.
         let h = fan(w, x, y, toward, 2);
         return Intent {
             jump: roll2 < 15,
+            sprint: d > Fx::int(4),
             ..go(h, 255, toward)
         };
     }

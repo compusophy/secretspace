@@ -86,8 +86,8 @@ pub fn keys(c: &mut Canvas, building: bool, u: i32) {
         &["1-6 pick a piece", "click: place   hold: remove", "b: done"]
     } else {
         &[
-            "wasd move   space jump   shift dash",
-            "click strike   hold heavy   right throw",
+            "wasd move   shift sprint   space jump   q dash",
+            "click wand   hold great beam   right throw",
             "e heart   b build   k kindle   r rekindle",
             "t recall   / hide this",
         ]

@@ -45,6 +45,8 @@ pub struct Intent {
     /// Where you look (world heading): strikes, charges and throws go here.
     pub aim: u16,
     pub jump: bool,
+    /// Run faster while breath lasts.
+    pub sprint: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -90,6 +92,10 @@ pub struct Body {
     pub rest: u32,
     /// Breath regeneration, thousandths (Rekindled raises it).
     pub regen: i32,
+    /// Breath ran out sprinting: no sprint until it is back to
+    /// `sprint_min`. Whether this tick was a sprint.
+    pub winded: bool,
+    pub sprinting: bool,
     pub cooldown: u32,
     pub iframes: u32,
     /// The wall-kick window, whether this wall was kicked, and a dash held
@@ -227,6 +233,7 @@ pub fn step(b: &mut Body, it: &Intent, t: &Tiles, l: &Laws) -> Moved {
         return m;
     }
     // 1. Timers and breath.
+    b.sprinting = false;
     for c in [&mut b.cooldown, &mut b.iframes, &mut b.kick] {
         *c = c.saturating_sub(1);
     }
@@ -283,8 +290,23 @@ pub fn step(b: &mut Body, it: &Intent, t: &Tiles, l: &Laws) -> Moved {
         Move::Free if b.busy == Busy::Lunging => {}
         Move::Free => {
             b.facing = it.aim;
+            // A sprint: faster, while breath lasts; run dry and you are
+            // winded until it comes back.
+            if b.winded && b.breath >= l.sprint_min {
+                b.winded = false;
+            }
+            b.sprinting = it.sprint && it.throttle == 255 && !b.winded && b.busy != Busy::Charging;
+            if b.sprinting {
+                b.breath -= l.sprint_breath;
+                b.rest = l.breath_rest;
+                if b.breath <= 0 {
+                    b.breath = 0;
+                    b.winded = true;
+                }
+            }
             let mut top = match it.throttle {
                 0 => Fx::ZERO,
+                255 if b.sprinting => l.sprint,
                 255 => l.run,
                 n => Fx((l.walk.0 as i64 * n as i64 / 254) as i32),
             };
@@ -468,6 +490,39 @@ mod tests {
             l,
         );
         assert_eq!(b.facing, 16384);
+    }
+
+    #[test]
+    fn a_sprint_is_faster_spends_breath_and_winds_you() {
+        let l = &LAWS;
+        let t = floor(60);
+        let mut b = Body::at(Fx::int(-50), Fx::ZERO, l);
+        let sprint = Intent {
+            sprint: true,
+            ..run(0)
+        };
+        for _ in 0..10 {
+            step(&mut b, &sprint, &t, l);
+        }
+        assert!(b.sprinting && b.speed() > l.run, "{}", b.speed().to_f32());
+        assert!(b.breath < l.breath);
+        // About four seconds of it, then winded: a run until breath is back.
+        let mut n = 10;
+        while !b.winded && n < 300 {
+            step(&mut b, &sprint, &t, l);
+            n += 1;
+        }
+        assert!((120..170).contains(&n), "{n} ticks of sprint");
+        for _ in 0..10 {
+            step(&mut b, &sprint, &t, l);
+        }
+        assert!(!b.sprinting && b.speed() <= l.run);
+        let mut again = false;
+        for _ in 0..90 {
+            step(&mut b, &sprint, &t, l);
+            again |= b.sprinting;
+        }
+        assert!(again, "breath back: a sprint again");
     }
 
     #[test]

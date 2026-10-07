@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use luciphon::combat::Swing;
 use luciphon::laws::{Laws, LAWS};
 use luciphon::mirror::Mirror;
 use luciphon::motion::Intent;
@@ -20,6 +21,20 @@ use crate::laws::FEEL;
 
 /// Where everyone was when a frame arrived (x, y, height).
 type Snap = (f64, HashMap<u16, [f32; 3]>);
+
+/// A beam of light to draw: from, to (x, height, y), when it was fired,
+/// whether it pierced, and its shooter's hue.
+#[derive(Clone, Copy, Debug)]
+pub struct Beam {
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    pub at: f64,
+    pub big: bool,
+    pub hue: u8,
+}
+
+/// How long a beam shows, ms.
+pub const BEAM_MS: f64 = 160.0;
 
 /// A thing to draw, where the page decided it is now.
 #[derive(Clone, Debug, Default)]
@@ -90,8 +105,9 @@ pub struct State {
     /// Chunks to (re)build, and chunks gone.
     pub stale: HashSet<(i32, i32)>,
     pub gone: Vec<(i32, i32)>,
-    /// When you last struck (for the reach drawn before you).
+    /// When you last fired (for the wand's kick), and beams in the air.
     pub struck_at: f64,
+    pub beams: Vec<Beam>,
     /// The server no longer speaks this page's protocol.
     pub outdated: bool,
 }
@@ -124,6 +140,7 @@ impl Default for State {
             stale: HashSet::new(),
             gone: Vec::new(),
             struck_at: 0.0,
+            beams: Vec::new(),
             outdated: false,
         }
     }
@@ -250,11 +267,43 @@ impl State {
         self.feel(&f.events, fx, now);
     }
 
-    /// Apply an Input now, as the server will.
-    pub fn push(&mut self, seq: u16, it: Intent, now: f64) {
+    /// Apply an Input now, as the server will; whether the wand fired,
+    /// and how (to draw at once).
+    pub fn push(&mut self, seq: u16, it: Intent, now: f64) -> Option<Swing> {
         self.prev = pos(&self.pred);
         self.pushed_at = now;
-        self.pred.push(seq, it, &self.mirror.tiles, &self.laws);
+        let s = self.pred.push(seq, it, &self.mirror.tiles, &self.laws);
+        if s.is_some() {
+            self.struck_at = now;
+        }
+        s
+    }
+
+    /// How far your own beam goes, along your aim from where you are: to
+    /// the first solid tile, or (unless it pierces) the first body.
+    pub fn own_beam(&self, now: f64, big: bool) -> f32 {
+        let b = &self.pred.me.body;
+        let aim = self.pred.me.act.aim;
+        let l = &self.laws;
+        let (end, _) = luciphon::combat::beam(&self.mirror.tiles, b.x, b.y, aim, l.beam_reach);
+        let mut end = end.to_f32();
+        if !big {
+            let (x, y) = (b.x.to_f32(), b.y.to_f32());
+            let a = aim as f32 / 65536.0 * std::f32::consts::TAU;
+            let (ux, uy) = (a.cos(), a.sin());
+            let width = l.beam_width.to_f32();
+            for t in self.things(now) {
+                if t.kind != kind::LUMEN || t.you {
+                    continue;
+                }
+                let (dx, dy) = (t.x - x, t.y - y);
+                let along = dx * ux + dy * uy;
+                if along > 0.0 && along < end && (dx * uy - dy * ux).abs() <= width {
+                    end = along;
+                }
+            }
+        }
+        end
     }
 
     /// Where something is now (x, y, height), as drawn.
@@ -272,16 +321,27 @@ impl State {
             let Some(p) = self.at(e.a, now) else { continue };
             let mine = e.a == self.you;
             match e.kind {
-                1 if mine => self.struck_at = now,
+                // Others' beams (your own were drawn when you fired).
+                4 if !mine => {
+                    let a = e.b as f32 / 65536.0 * std::f32::consts::TAU;
+                    let (ux, uy) = (a.cos(), a.sin());
+                    let len = (e.n & 127) as f32 / 8.0;
+                    let from = [p[0] + ux * 0.35, p[2] + 0.95, p[1] + uy * 0.35];
+                    let to = [p[0] + ux * len, p[2] + 0.95, p[1] + uy * len];
+                    let hue = self.mirror.ents.get(&e.a).map_or(0, |e| e.hue);
+                    self.beams.push(Beam {
+                        from,
+                        to,
+                        at: now,
+                        big: e.n & 128 != 0,
+                        hue,
+                    });
+                    fx.burst(to, 5, 2.0, RIM, now);
+                }
                 2 => {
                     let big = e.n & 128 != 0;
                     let t = self.at(e.b, now).unwrap_or(p);
-                    let mid = [
-                        (p[0] + t[0]) / 2.0,
-                        (p[1] + t[1]) / 2.0,
-                        (p[2] + t[2]) / 2.0,
-                    ];
-                    fx.hit(g(mid, 0.9), big, now);
+                    fx.hit(g(t, 0.9), big, now);
                     if mine {
                         self.felt.push(if big { 25 } else { 10 });
                     }
@@ -362,6 +422,8 @@ impl State {
 
     /// Ease the drawn self toward the prediction; record the path.
     pub fn age(&mut self, now: f64, dt: f64) {
+        self.beams
+            .retain(|b| now - b.at < BEAM_MS * if b.big { 2.0 } else { 1.0 });
         let k = (-dt / FEEL.blend_ms * 3.0).exp() as f32;
         for v in &mut self.offset {
             *v *= k;

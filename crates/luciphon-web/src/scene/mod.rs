@@ -65,6 +65,27 @@ pub struct Hand {
     pub perfect: bool,
 }
 
+/// Where your wand is held, and its tip, for the camera and where it is
+/// in its kick (1 just fired, -1 drawn back).
+pub fn wand(cam: &Camera, swing: f32) -> (V3, V3) {
+    let fwd = cam.forward();
+    let (_, right, up) = cam.matrices();
+    let kick = swing.max(0.0);
+    let at = |ahead: f32, side: f32, lift: f32| {
+        shapes::add(
+            cam.eye,
+            shapes::add(
+                scale(fwd, ahead),
+                shapes::add(scale(right, side), scale(up, lift)),
+            ),
+        )
+    };
+    let back = 0.07 * kick + 0.05 * (-swing).max(0.0);
+    let grip = at(0.36 - back, 0.2, -0.27);
+    let tip = at(0.7 - back, 0.16, -0.21 + 0.06 * kick);
+    (grip, tip)
+}
+
 /// Everything one frame draws.
 pub struct Frame<'a> {
     pub cam: Camera,
@@ -75,7 +96,8 @@ pub struct Frame<'a> {
     /// Rings on the ground: where, how wide, how bright.
     pub rings: Vec<(V3, f32, f32)>,
     /// A strike's reach before you: yaw, reach, how bright.
-    pub fan: Option<(V3, f32, f32, f32)>,
+    /// Beams of light in the air: from, to, how thick, colour and alpha.
+    pub beams: Vec<(V3, V3, f32, [f32; 4])>,
     pub sparks: &'a [f32],
     /// Your own light (hue, flame) where you are.
     pub you: Option<(V3, V3)>,
@@ -102,7 +124,7 @@ pub struct Scene {
     hand: Mesh,
     cube: Mesh,
     ring: Mesh,
-    fan: Mesh,
+    rod: Mesh,
     screen: Mesh,
     sparks: Mesh,
     pub vertices: usize,
@@ -138,7 +160,7 @@ impl Scene {
             hand: mesh(gl, &things::hand())?,
             cube: mesh(gl, &things::cube())?,
             ring: mesh(gl, &things::ring())?,
-            fan: mesh(gl, &things::fan(100f32.to_radians()))?,
+            rod: mesh(gl, &things::rod())?,
             screen: Mesh::of(gl, &[2], GL::TRIANGLES, &[-1.0, -1.0, 3.0, -1.0, -1.0, 3.0])
                 .ok_or("no mesh")?,
             sparks: Mesh::new(gl, &[3, 4, 1], GL::POINTS).ok_or("no mesh")?,
@@ -334,9 +356,13 @@ impl Scene {
             let m = m4::place([at[0], at[1] + 0.03, at[2]], 0.0, [r, 1.0, r]);
             self.put(gl, &self.ring, &m, [0.5, 0.88, 1.0, a], 1.0);
         }
-        if let Some((at, yaw, reach, a)) = f.fan {
-            let m = m4::place(at, yaw, [reach, 1.0, reach]);
-            self.put(gl, &self.fan, &m, [1.0, 0.95, 0.85, a], 1.0);
+        // Beams, added as light.
+        gl.blend_func(GL::SRC_ALPHA, GL::ONE);
+        for &(from, to, w, c) in &f.beams {
+            let along = shapes::sub(to, from);
+            let side = shapes::norm(shapes::cross(along, [0.0, 1.0, 0.0]));
+            let m = m4::basis(from, along, [0.0, w, 0.0], scale(side, w));
+            self.put(gl, &self.rod, &m, c, 1.0);
         }
 
         // Sparks, added as light.
@@ -358,19 +384,13 @@ impl Scene {
             gl.enable(GL::CULL_FACE);
             let w = &self.world;
             w.use_on(gl);
-            let k = h.swing;
-            let side = 0.24 - 0.3 * k.max(0.0) + 0.1 * (-k).max(0.0);
-            let ahead = 0.62 + 0.25 * k.max(0.0) - 0.12 * (-k).max(0.0);
-            let drop = 0.24 - 0.08 * k.abs() - 0.05 * h.charge;
-            let at = shapes::add(
-                f.cam.eye,
-                shapes::add(
-                    scale(fwd, ahead),
-                    shapes::add(scale(right, side), scale(up, -drop)),
-                ),
-            );
-            let size = 1.0 + 1.2 * h.charge;
-            let m = m4::basis(at, scale(fwd, size), scale(up, size), scale(right, size));
+            let (grip, tip) = wand(&f.cam, h.swing);
+            // The shaft, lit like the world; the light at its tip.
+            let along = shapes::sub(tip, grip);
+            let m = m4::basis(grip, along, scale(up, 0.014), scale(right, 0.014));
+            self.put(gl, &self.rod, &m, [0.5, 0.36, 0.24, 1.0], 0.12);
+            let size = 0.7 + 1.6 * h.charge + 0.5 * h.swing.max(0.0);
+            let m = m4::basis(tip, scale(fwd, size), scale(up, size), scale(right, size));
             let col = if h.perfect {
                 GOLD
             } else {

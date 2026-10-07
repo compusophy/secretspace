@@ -22,6 +22,8 @@ pub struct Feel {
     /// The phone's stick: nothing inside `walk_px`, a run from `stick_px`.
     pub walk_px: f64,
     pub stick_px: f64,
+    /// Pushed this far, a sprint.
+    pub sprint_px: f64,
     /// A look touch lifted sooner and stiller than this is a strike; held
     /// still this long, a charge.
     pub tap_ms: f64,
@@ -58,6 +60,7 @@ pub const FEEL: Feel = Feel {
     click_hold_ms: 220.0,
     walk_px: 8.0,
     stick_px: 44.0,
+    sprint_px: 60.0,
     tap_ms: 260.0,
     tap_px: 14.0,
     hold_ms: 320.0,

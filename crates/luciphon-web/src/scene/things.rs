@@ -505,19 +505,28 @@ pub fn ring() -> Geo {
     g
 }
 
-/// A strike's reach: a fan before you (along +x), `cone` radians wide.
-pub fn fan(cone: f32) -> Geo {
+/// A rod from the origin to +x (radius 1 across): a beam, or a wand's
+/// shaft, scaled to it.
+pub fn rod() -> Geo {
     let mut g = Geo::default();
-    let n = 14;
+    let n = 6;
     for k in 0..n {
-        let a0 = -cone / 2.0 + cone * k as f32 / n as f32;
-        let a1 = -cone / 2.0 + cone * (k + 1) as f32 / n as f32;
-        let p = |a: f32, r: f32| [a.cos() * r, 0.0, a.sin() * r];
-        g.quad(
-            p(a0, 0.35),
-            p(a1, 0.35),
+        let a0 = k as f32 / n as f32 * std::f32::consts::TAU;
+        let a1 = (k + 1) as f32 / n as f32 * std::f32::consts::TAU;
+        let p = |a: f32, x: f32| [x, a.cos(), a.sin()];
+        g.tri_out(
+            p(a0, 0.0),
+            p(a1, 0.0),
+            p(a1, 1.0),
+            [0.5, 0.0, 0.0],
+            [1.0; 3],
+            1.0,
+        );
+        g.tri_out(
+            p(a0, 0.0),
             p(a1, 1.0),
             p(a0, 1.0),
+            [0.5, 0.0, 0.0],
             [1.0; 3],
             1.0,
         );

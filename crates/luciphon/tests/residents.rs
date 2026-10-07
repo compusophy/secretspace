@@ -27,7 +27,7 @@ fn ten_minutes_of_residents_use_every_technique() {
     for t in [
         "dash",
         "jump",
-        "running strike",
+        "launcher",
         "landed strike",
         "heavy",
         "throw",

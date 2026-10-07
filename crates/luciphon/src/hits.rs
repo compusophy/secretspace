@@ -1,15 +1,19 @@
-//! Settling what Lumens swing at each other: who a strike picks, how hard
-//! it lands (closing speed, the skid's carry, the launcher, Flow), how far
-//! the target flies (the dimmer, the further), lances, heavies, thrown
-//! motes and the glim they leave. Targets are judged where the striker saw
-//! them: rewound by half its round trip and the 66 ms of interpolation, at
-//! most 3 ticks.
+//! Settling what Lumens' wands do: a bolt takes the first body on its
+//! line (a node close by gives instead), a lance and a great beam pierce
+//! everyone on theirs; how hard each lands (the launcher, Flow) and how far
+//! the target flies (the dimmer, the further); thrown motes and the glim
+//! they leave. Targets are judged where the shooter saw them: rewound by
+//! half its round trip and the 66 ms of interpolation, at most 3 ticks.
 
-use engine::fixed::{atan2, len, turn, unit, Fx};
+use engine::fixed::{atan2, len, unit, Fx};
 
-use crate::combat::{heavy, kb_mul, stun, throw, Act, Swing};
+use crate::combat::{beam, heavy, kb_mul, stun, throw, Swing};
 use crate::island::Ring;
 use crate::world::{Cause, Event, Mote, Pickup, World};
+
+/// A wand fired: where its beam stopped (and the solid tile that stopped
+/// it), and everyone on its line, nearest first.
+type Shot = (Fx, Option<(i32, i32)>, Vec<(usize, Fx)>);
 
 /// What kind of blow, for its numbers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,11 +28,6 @@ fn milli(v: Fx, m: i32) -> Fx {
     Fx((v.0 as i64 * m as i64 / 1000) as i32)
 }
 
-/// Tiles a tick as thousandths of tiles a second.
-fn per_second_milli(v: Fx) -> i64 {
-    v.0 as i64 * crate::laws::HZ as i64 * 1000 / 65536
-}
-
 impl World {
     /// Ticks to rewind targets for a striker with this round trip.
     fn rewind(&self, rtt: u32) -> usize {
@@ -36,13 +35,14 @@ impl World {
         ((ms * crate::laws::HZ + 500) / 1000).min(3) as usize
     }
 
-    /// Others a striker at (x, y) facing `h` could reach, as it saw them:
-    /// (index, distance, angle off its facing).
-    fn reachable(&self, i: usize, reach: Fx, half_cone: u16) -> Vec<(usize, Fx, i32)> {
+    /// Others on a beam from Lumen i along its aim, as it saw them, nearest
+    /// first: (index, distance along the beam), short of `end`.
+    fn on_beam(&self, i: usize, end: Fx) -> Vec<(usize, Fx)> {
         let me = &self.lumens[i];
         let (x, y) = me.pos();
-        let h = me.me.act.aim;
+        let (ux, uy) = unit(me.me.act.aim);
         let back = self.rewind(me.rtt);
+        let width = self.laws.beam_width;
         let mut out = Vec::new();
         for (j, o) in self.lumens.iter().enumerate() {
             if j == i || !o.alive() || o.me.body.mv == crate::motion::Move::Fallen {
@@ -50,113 +50,79 @@ impl World {
             }
             let (ox, oy) = self.was(o.id, back).unwrap_or(o.pos());
             let (dx, dy) = (ox.sub(x), oy.sub(y));
-            let d = len(dx, dy);
-            if d > reach.add(self.laws.body) {
-                continue;
-            }
-            let off = turn(h, atan2(dy, dx));
-            if off.abs() <= half_cone as i32 || d < self.laws.body {
-                out.push((j, d, off));
+            let along = dx.mul(ux).add(dy.mul(uy));
+            let across = dx.mul(uy).sub(dy.mul(ux)).abs();
+            if along > Fx::ZERO && along <= end.add(self.laws.body) && across <= width {
+                out.push((j, along));
             }
         }
+        out.sort_by_key(|o| o.1);
         out
+    }
+
+    /// Lumen i fires its wand: where the beam stops, and who it reaches.
+    fn fire(&mut self, i: usize, big: bool) -> Shot {
+        let me = &self.lumens[i];
+        let (x, y) = me.pos();
+        let aim = me.me.act.aim;
+        let (end, stop) = beam(&self.tiles, x, y, aim, self.laws.beam_reach);
+        let on = self.on_beam(i, end);
+        let id = me.id;
+        // Drawn to the first body it meets, unless it pierces.
+        let shown = if big {
+            end
+        } else {
+            on.first().map_or(end, |o| o.1)
+        };
+        self.events.push(Event::Beam {
+            id,
+            aim,
+            len: shown,
+            big,
+        });
+        (end, stop, on)
     }
 
     pub(crate) fn swing(&mut self, i: usize, s: Swing) {
         let id = self.lumens[i].id;
         match s {
-            Swing::Strike { carry } => {
-                self.events.push(Event::Strike { id });
-                let l = &self.laws;
-                let cands = self.reachable(i, l.reach, l.cone / 2);
-                let tick = self.tick;
-                let me = &self.lumens[i];
-                let inner = (l.inner_cone / 2) as i32;
-                let engaged = |c: &&(usize, Fx, i32)| {
-                    let o = &self.lumens[c.0];
-                    me.engaged_with(o.id, tick) || o.engaged_with(id, tick)
-                };
-                // First a Lumen you are fighting; then a node (or your own
-                // empty planter); then anyone in the inner cone.
-                let fighting = cands.iter().filter(engaged).min_by_key(|c| c.1).copied();
-                if fighting.is_none() {
-                    if let Some(idx) = self.node_in_reach(i) {
-                        self.strike_node(i, idx, false);
-                        return;
-                    }
-                    let b = self.lumens[i].me.body;
-                    let (gx, gy) = crate::build::ghost(b.x, b.y, b.facing);
-                    if let Some(idx) = crate::tiles::Tiles::index(gx, gy) {
-                        if self.plant(i, idx as u16) {
+            Swing::Strike => {
+                let (end, stop, on) = self.fire(i, false);
+                if let Some(&(j, _)) = on.first() {
+                    self.land(i, j, Blow::Strike, 0);
+                    return;
+                }
+                // A node it meets close enough gives; or your own planter.
+                if let Some((tx, ty)) = stop.filter(|_| end <= self.laws.gather_reach) {
+                    if let Some(idx) = crate::tiles::Tiles::index(tx, ty) {
+                        if self.strike_node(i, idx as u16, false) {
                             return;
                         }
                     }
                 }
-                let pick = fighting.or_else(|| {
-                    cands
-                        .iter()
-                        .filter(|c| c.2.abs() <= inner)
-                        .min_by_key(|c| c.1)
-                        .copied()
-                });
-                match pick {
-                    Some((j, _, off)) => {
-                        // Facing turns toward what it hits.
-                        let most = self.laws.face_turn as i32;
-                        let b = &mut self.lumens[i].me.body;
-                        b.facing = b.facing.wrapping_add(off.clamp(-most, most) as u16);
-                        self.land(i, j, Blow::Strike, carry, 0);
-                    }
-                    None => {
-                        self.events.push(Event::Whiff { id });
+                let b = self.lumens[i].me.body;
+                let (gx, gy) = crate::build::ghost(b.x, b.y, b.facing);
+                if let Some(idx) = crate::tiles::Tiles::index(gx, gy) {
+                    if self.plant(i, idx as u16) {
+                        return;
                     }
                 }
+                self.events.push(Event::Whiff { id });
             }
-            Swing::Lance => {
-                let l = &self.laws;
-                let reach = l.lance_reach;
-                let body2 = l.body.mul_int(2);
-                let me = &self.lumens[i];
-                let (x, y) = me.pos();
-                let (ux, uy) = unit(me.me.act.aim);
-                let back = self.rewind(me.rtt);
-                let mut best: Option<(usize, Fx)> = None;
-                for (j, o) in self.lumens.iter().enumerate() {
-                    if j == i || !o.alive() {
-                        continue;
-                    }
-                    let (ox, oy) = self.was(o.id, back).unwrap_or(o.pos());
-                    let (dx, dy) = (ox.sub(x), oy.sub(y));
-                    let along = dx.mul(ux).add(dy.mul(uy));
-                    let across = dx.mul(uy).sub(dy.mul(ux)).abs();
-                    if along >= Fx::ZERO
-                        && along <= reach
-                        && across <= body2
-                        && best.is_none_or(|b| along < b.1)
-                    {
-                        best = Some((j, along));
-                    }
+            Swing::Lance | Swing::Heavy { .. } => {
+                let (_, _, on) = self.fire(i, true);
+                let (blow, c) = match s {
+                    Swing::Heavy { c } => (Blow::Heavy, c),
+                    _ => (Blow::Lance, 0),
+                };
+                if blow == Blow::Lance {
+                    self.count("lance");
                 }
-                self.count("lance");
-                match best {
-                    Some((j, _)) => {
-                        self.land(i, j, Blow::Lance, Fx::ZERO, 0);
-                    }
-                    None => {
-                        self.events.push(Event::Whiff { id });
-                        let a = &mut self.lumens[i].me.act;
-                        a.act = Act::Recover;
-                        a.t = self.laws.lance_whiff;
-                    }
-                }
-            }
-            Swing::Heavy { c } => {
-                let cands = self.reachable(i, self.laws.reach, crate::laws::deg(30));
-                if let Some(&(j, _, _)) = cands.iter().min_by_key(|c| c.1) {
-                    self.lumens[i].me.act.landed = true;
-                    self.land(i, j, Blow::Heavy, Fx::ZERO, c);
-                } else if self.lumens[i].me.act.t <= 1 {
+                if on.is_empty() {
                     self.events.push(Event::Whiff { id });
+                }
+                for (j, _) in on {
+                    self.land(i, j, blow, c);
                 }
             }
             Swing::Throw { c, range } => {
@@ -187,7 +153,7 @@ impl World {
     }
 
     /// Lumen i's blow lands on j.
-    fn land(&mut self, i: usize, j: usize, blow: Blow, carry: Fx, c: u32) -> bool {
+    fn land(&mut self, i: usize, j: usize, blow: Blow, c: u32) -> bool {
         let tick = self.tick;
         let l = self.laws.clone();
         let (a_id, t_id) = (self.lumens[i].id, self.lumens[j].id);
@@ -208,20 +174,9 @@ impl World {
             atan2(ty.sub(ay), tx.sub(ax))
         };
         let (ux, uy) = unit(dir);
-        let a = &self.lumens[i];
-        // Speeds along the blow.
-        let va = carry.max(a.me.body.vx.mul(ux).add(a.me.body.vy.mul(uy)));
-        let vt = t.me.body.vx.mul(ux).add(t.me.body.vy.mul(uy));
         let (mut dmg, mut kb) = match blow {
-            Blow::Strike => {
-                let closing = va.sub(vt).max(Fx::ZERO);
-                let dmg = (l.strike_base as i64
-                    + per_second_milli(closing) * l.strike_closing as i64 / 1000)
-                    .min(l.strike_cap as i64) as i32;
-                let kb = l.strike_kb.add(milli(va.max(Fx::ZERO), l.strike_carry));
-                (dmg, kb)
-            }
-            Blow::Lance => (l.lance_damage, milli(l.strike_kb, l.lance_kb)),
+            Blow::Strike => (l.bolt, l.bolt_kb),
+            Blow::Lance => (l.lance_damage, milli(l.bolt_kb, l.lance_kb)),
             Blow::Heavy => {
                 let (d, kb, perfect) = heavy(c, &l);
                 if perfect {
@@ -250,9 +205,6 @@ impl World {
                 kb = milli(kb, l.launcher);
                 self.count("launcher");
             }
-            if carry > self.laws.walk {
-                self.count("running strike");
-            }
         }
         // Striking a Lumen ends your own ghost.
         self.lumens[i].ghost = 0;
@@ -277,9 +229,9 @@ impl World {
             (r, r == Ring::Sanctum)
         };
         if sanctum {
-            // Strikes only shove here.
+            // Bolts only shove here.
             dmg = 0;
-            kb = l.strike_kb;
+            kb = l.bolt_kb;
         } else {
             let t = &self.lumens[j];
             let spared =
@@ -357,7 +309,7 @@ impl World {
                 if let Some(i) = self.index(owner) {
                     // Aim the blow along the mote's flight.
                     self.lumens[i].me.act.aim = atan2(self.motes[k].vy, self.motes[k].vx);
-                    self.land(i, j, Blow::Mote, Fx::ZERO, dmg as u32);
+                    self.land(i, j, Blow::Mote, dmg as u32);
                 }
                 self.motes[k].hit.push(tid);
                 gone = !self.motes[k].pierce;

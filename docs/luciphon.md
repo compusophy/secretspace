@@ -60,17 +60,20 @@ Luciphon is a persistent island of light floating in the Dark, and you play it i
 
 ## 4. Controls
 
+**The wand (owner, revised again): no melee.** A bolt of light flies 15 tiles the moment you fire, stopped by anything solid, and takes the first body within half a tile of its line (7 damage, a light shove); one every 8 ticks. A node it meets within 3 tiles gives, as a strike did. A great beam (a charge let go, the old heavy's numbers and perfect window) and a lance (a bolt out of a dash) pierce everyone on their line. The page draws your own beams the moment you fire, from your wand's tip.
+
 **Decided (revised): standard first-person controls.** Direct and responsive: you go where you push at once and stop at once, with no drifting or skidding.
 
 | | Desktop | Phone |
 |---|---|---|
 | Look | The mouse, once the page has it (click to play; Esc gives it back) | Drag with the right thumb |
 | Move | WASD or the arrows, relative to where you look | The left thumb: a stick wherever it lands (walk inside 44 px, run beyond) |
-| Strike | Click | Tap with the right thumb |
-| Heavy | Hold the click (from 220 ms), let go | Hold the right thumb still (from 320 ms), let go |
+| Wand: a bolt | Click | Tap with the right thumb |
+| Wand: a great beam | Hold the click (from 220 ms), let go | Hold the right thumb still (from 320 ms), let go |
 | Throw | Hold the right button, let go; look up to throw further | The throw button, held and let go |
+| Sprint | Hold shift (spends breath) | Push the stick to its edge |
 | Jump | Space | The jump button |
-| Dash | Shift (the way you move, or the way you look standing still) | The dash button |
+| Dash | Q (the way you move, or the way you look standing still) | The dash button |
 | Heart | E opens the wheel, 1-8 picks; B build, K kindle, R rekindle, T recall, H chirp | The heart button opens the wheel; tap a slot |
 | Build | B, then 1-6 for a piece; click places, hold removes; B again is done | The wheel's build, then a piece; tap places, hold removes |
 
@@ -83,14 +86,14 @@ Luciphon is a persistent island of light floating in the Dark, and you play it i
 
 | Technique | Input | Result |
 |---|---|---|
-| Running strike | Strike at a run | The strike carries your speed: up to 16 damage |
-| Launcher | Third strike landed on one target within 1.2 s | Double knockback |
-| Lance | Strike during a dash, or just after | A 1.8-tile line, 14 damage, 1.5x knockback; a whiff costs 400 ms |
-| Dash cancel | Dash during strike recovery | Recovery skipped |
+| Launcher | Third bolt landed on one target within 1.2 s | Double knockback |
+| Lance | Fire during a dash, or just after | A piercing bolt: 10 damage, 1.3x knockback |
+| Dash cancel | Dash during the wand's recovery | Recovery skipped |
+| Sprint | Hold shift | 8.5 tiles/s for about 4.5 s of breath; run dry and you are winded until it is back to 35 |
 | Wall-kick | Dash into a wall, then dash within 10 ticks | A free rebound dash |
 | Jump | Over a gap, or over a low blow | You keep a third of your control in the air |
 | Feint | Start a charge, read their dash, let go early | Nothing spent; positional mind games |
-| Perfect release | Release a charge 0.60-0.73 s after the press | A 34-damage lunge, or a piercing throw |
+| Perfect release | Release a charge 0.60-0.73 s after the press | A 34-damage great beam, or a piercing throw |
 | Resonant gather | Strike a node on its ring | Double yield; every third in a row rings the node out |
 | Flow 1-3 | Chain techniques within 1.5 s of each other | +15% knockback, a full charge, and you become a beacon |
 
@@ -201,7 +204,7 @@ The Luciphon pulses on every in-game hour (every 37.5 s).
 
 | Law | Value |
 |---|---|
-| Walk / run top speed | 3.0 / 5.5 tiles/s (the stick's push sets a walk's share) |
+| Walk / run / sprint top speed | 3.0 / 5.5 / 8.5 tiles/s (the stick's push sets a walk's share; a sprint spends 22 breath a second) |
 | Acceleration / stopping | 45 tiles/s² each: up to a run in 4 ticks, stopped in 4 |
 | Air control | 30% of that |
 | Jump | 6.5 tiles/s up against 20 tiles/s² of gravity: about a tile high, 0.65 s in the air |

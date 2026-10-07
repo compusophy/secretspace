@@ -217,8 +217,12 @@ pub enum Event {
     Dream {
         id: u16,
     },
-    Strike {
+    /// A wand fired along `aim`, drawn `len` long; `big`: it pierces.
+    Beam {
         id: u16,
+        aim: u16,
+        len: Fx,
+        big: bool,
     },
     Hit {
         by: u16,

@@ -21,7 +21,7 @@ use kit::input::Hand;
 use kit::Net;
 use lucilook::palette;
 use luciphon::build::{act, slot};
-use luciphon::combat::Act;
+use luciphon::combat::{Act, Swing};
 use luciphon::proto::{Up, PROTO};
 use luciphon::tiles::{obj, Tiles};
 use pixels::{Rect, Rgba};
@@ -78,6 +78,8 @@ struct Page {
     taught: u8,
     /// Asked for the newest page, being too old.
     asked: bool,
+    /// The wand fired since the last frame (drawn at once).
+    shots: Vec<Swing>,
 }
 
 thread_local! {
@@ -384,7 +386,9 @@ fn hands(p: &mut Page, now: f64) {
             let hands = &p.hands;
             let (seq, it) = p.ctl.sample(&|k| hands.held(k), &FEEL);
             send(p, &Up::Input { seq, it });
-            p.st.push(seq, it, now);
+            if let Some(s) = p.st.push(seq, it, now) {
+                p.shots.push(s);
+            }
             p.ctl.next_at += TICK_MS;
         }
     }
@@ -494,14 +498,15 @@ fn draw(p: &mut Page, now: f64, dt: f64) {
     let hue = scene::chunk::hue(p.st.mirror.ents.get(&p.st.you).map_or(0, |e| e.hue));
     let flame = own.flame as f32 / l.flame.max(1) as f32;
 
-    // The hand: drawn back in a wind-up, across in a strike.
-    let target = match me.act.act {
-        Act::Windup => -0.7,
-        Act::Active | Act::Lunge => 1.0,
-        Act::Recover => 0.6 * me.act.t as f32 / l.recovery.max(1) as f32,
-        _ => 0.0,
+    // The wand: drawn back in a wind-up, kicking when it fires.
+    let target = if now - p.st.struck_at < 70.0 {
+        1.0
+    } else if me.act.act == Act::Windup {
+        -0.7
+    } else {
+        0.0
     };
-    let k = 1.0 - (-dt / 45.0).exp() as f32;
+    let k = 1.0 - (-dt / 40.0).exp() as f32;
     p.swing += (target - p.swing) * k;
     let charging = me.act.act == Act::Charge;
     let hand = alive.then_some(scene::Hand {
@@ -515,11 +520,39 @@ fn draw(p: &mut Page, now: f64, dt: f64) {
         },
         perfect: charging && (l.charge_full..=l.perfect_to).contains(&me.act.c),
     });
+    // Your own beams, from the wand's tip, as you fired them.
     let at = p.st.drawn_self(now);
-    let fan = (alive && (me.act.act == Act::Active || now - p.st.struck_at < 90.0)).then(|| {
+    for s in std::mem::take(&mut p.shots) {
+        if matches!(s, Swing::Throw { .. }) || !alive {
+            continue;
+        }
+        let big = s != Swing::Strike;
+        let len = p.st.own_beam(now, big);
         let a = me.act.aim as f32 / 65536.0 * std::f32::consts::TAU;
-        ([at[0], at[2] + 0.8, at[1]], a, l.reach.to_f32(), 0.16)
-    });
+        let h = (cam.eye[1] + cam.pitch.tan() * len).clamp(0.15, 4.0);
+        let to = [at[0] + a.cos() * len, h, at[1] + a.sin() * len];
+        let from = scene::wand(&cam, 1.0).1;
+        let hue = p.st.mirror.ents.get(&p.st.you).map_or(0, |e| e.hue);
+        p.st.beams.push(state::Beam {
+            from,
+            to,
+            at: now,
+            big,
+            hue,
+        });
+        p.fx.burst(to, 6, 2.5, palette::RIM, now);
+    }
+    let beams =
+        p.st.beams
+            .iter()
+            .map(|b| {
+                let life = state::BEAM_MS * if b.big { 2.0 } else { 1.0 };
+                let k = (1.0 - (now - b.at) / life).clamp(0.0, 1.0) as f32;
+                let c = shapes_mix(scene::chunk::hue(b.hue), b.big);
+                let w = if b.big { 0.1 } else { 0.035 } * (0.5 + 0.5 * k);
+                (b.from, b.to, w, [c[0], c[1], c[2], k])
+            })
+            .collect();
     let ghost = (alive && own.build != 0).then(|| {
         let b = &me.body;
         let (gx, gy) = luciphon::build::ghost(b.x, b.y, b.facing);
@@ -567,7 +600,7 @@ fn draw(p: &mut Page, now: f64, dt: f64) {
         hand,
         ghost,
         rings,
-        fan,
+        beams,
         sparks: &sparks,
         you: alive.then_some((hue, scene::flame(flame))),
         under,
@@ -731,6 +764,16 @@ fn overlay(
     }
 }
 
+/// A beam's colour: its shooter's hue, mostly white; a great beam gold.
+fn shapes_mix(hue: [f32; 3], big: bool) -> [f32; 3] {
+    let white = if big {
+        [1.0, 0.86, 0.55]
+    } else {
+        [1.0, 1.0, 1.0]
+    };
+    scene::shapes::mix(hue, white, 0.6)
+}
+
 fn no_webgl() {
     if let Some(b) = kit::document().body() {
         b.set_inner_html(
@@ -776,6 +819,7 @@ pub fn start() -> Result<(), JsValue> {
             ctl: Controls::default(),
             taught,
             asked: false,
+            shots: Vec::new(),
             hands,
             link,
             session,

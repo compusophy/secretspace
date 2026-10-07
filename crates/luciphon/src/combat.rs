@@ -1,8 +1,9 @@
-//! A Lumen's own actions, the part the page predicts: a tap's strike (wind
-//! up, land, recover), a lance out of a dash, a hold's charge and its
-//! release (a heavy lunge, or a throw). Every action points where you look.
-//! `control` turns one Intent into the action's next tick and the body's
-//! step; what it would hit is a `Swing` for the world to settle (`hits`).
+//! A Lumen's own actions with its wand, the part the page predicts: a tap's
+//! bolt (at once, then a moment to recover), a lance out of a dash, a
+//! hold's charge and its release (a great beam, or a thrown mote). Every
+//! action points where you look. `control` turns one Intent into the
+//! action's next tick and the body's step; what it would hit is a `Swing`
+//! for the world to settle (`hits`), along a beam that `beam` traces.
 
 use engine::fixed::{unit, Fx};
 
@@ -62,20 +63,14 @@ pub struct Action {
 /// What a Lumen's own tick would do to others, for the world to settle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Swing {
-    /// The strike's active tick.
-    Strike {
-        carry: Fx,
-    },
+    /// A bolt.
+    Strike,
+    /// A bolt out of a dash: it pierces.
     Lance,
-    /// A lunge tick, at this charge, until it lands.
-    Heavy {
-        c: u32,
-    },
+    /// A great beam at this charge: it pierces.
+    Heavy { c: u32 },
     /// A mote let go at this charge and range (1-255).
-    Throw {
-        c: u32,
-        range: u8,
-    },
+    Throw { c: u32, range: u8 },
 }
 
 /// Everything about a Lumen the page predicts.
@@ -120,10 +115,10 @@ pub fn control(
             a.aim = it.aim;
         }
         Verb::Tap if a.act == Act::Idle => {
-            a.act = Act::Windup;
-            a.t = l.windup;
+            swing = Some(Swing::Strike);
+            a.act = Act::Active;
+            a.t = l.active;
             a.aim = it.aim;
-            a.carry = b.speed();
         }
         Verb::Hold { held_for } if a.act == Act::Idle && b.mv != Move::Dash => {
             a.act = Act::Charge;
@@ -140,17 +135,17 @@ pub fn control(
             if c < l.charge_min {
                 a.act = Act::Idle;
             } else if c > l.charge_max {
+                // Held too long: the light gutters to a late, plain bolt.
                 a.act = Act::Windup;
                 a.t = l.windup;
-                a.carry = Fx::ZERO;
             } else if range > 0 && glim >= l.throw_glim {
                 swing = Some(Swing::Throw { c, range });
                 a.act = Act::Recover;
                 a.t = l.recovery;
             } else {
-                a.act = Act::Lunge;
-                a.t = l.lunge_ticks;
-                a.landed = false;
+                swing = Some(Swing::Heavy { c });
+                a.act = Act::Recover;
+                a.t = l.heavy_recovery;
             }
         }
         Verb::Cancel if a.act == Act::Charge => a.act = Act::Idle,
@@ -169,7 +164,7 @@ pub fn control(
             if a.t == 0 {
                 a.act = Act::Active;
                 a.t = l.active;
-                swing = Some(Swing::Strike { carry: a.carry });
+                swing = Some(Swing::Strike);
             }
         }
         Act::Active => {
@@ -179,25 +174,10 @@ pub fn control(
                 a.t = l.recovery;
             }
         }
-        Act::Recover => {
+        Act::Recover | Act::Lunge => {
             a.t = a.t.saturating_sub(1);
             if a.t == 0 {
                 a.act = Act::Idle;
-            }
-        }
-        Act::Lunge => {
-            if !a.landed && swing.is_none() {
-                swing = Some(Swing::Heavy { c: a.c });
-            }
-            let (ux, uy) = unit(a.aim);
-            let v = l.lunge.div_int(l.lunge_ticks.max(1) as i32);
-            b.vx = ux.mul(v);
-            b.vy = uy.mul(v);
-            b.facing = a.aim;
-            a.t = a.t.saturating_sub(1);
-            if a.t == 0 {
-                a.act = Act::Recover;
-                a.t = l.heavy_recovery;
             }
         }
     }
@@ -216,8 +196,25 @@ pub fn control(
     (moved, swing)
 }
 
-/// Damage in thousandths and knockback speed for a hit, before the
-/// target's own multiplier.
+/// Where a beam from (x, y) along `h` stops: at the first solid tile
+/// within `reach` (and which), or at `reach`. Traced in eighths of a tile.
+pub fn beam(t: &Tiles, x: Fx, y: Fx, h: u16, reach: Fx) -> (Fx, Option<(i32, i32)>) {
+    let (ux, uy) = unit(h);
+    let home = (x.floor(), y.floor());
+    let step = Fx::ratio(1, 8);
+    let mut d = Fx::ZERO;
+    while d < reach {
+        d = d.add(step).min(reach);
+        let (tx, ty) = (x.add(ux.mul(d)).floor(), y.add(uy.mul(d)).floor());
+        if (tx, ty) != home && t.get(tx, ty).solid() {
+            return (d, Some((tx, ty)));
+        }
+    }
+    (reach, None)
+}
+
+/// Damage in thousandths and knockback speed for a great beam, before
+/// the target's own multiplier.
 pub fn heavy(c: u32, l: &Laws) -> (i32, Fx, bool) {
     let perfect = (l.charge_full..=l.perfect_to).contains(&c);
     let k = (c.clamp(l.charge_min, l.charge_full) - l.charge_min) as i32;
@@ -292,26 +289,39 @@ mod tests {
     }
 
     #[test]
-    fn a_tap_winds_up_lands_and_recovers() {
+    fn a_tap_fires_at_once_and_the_wand_recovers() {
         let (l, t) = (&LAWS, floor());
         let mut me = Me {
             body: Body::at(Fx::ZERO, Fx::ZERO, l),
             ..Me::default()
         };
-        let mut swings = vec![];
         let (_, s) = control(&mut me, &verb(Verb::Tap, 0), 0, 0, &t, l);
-        swings.extend(s);
-        for _ in 0..20 {
-            let (_, s) = control(&mut me, &Intent::default(), 0, 0, &t, l);
-            swings.extend(s);
+        assert_eq!(s, Some(Swing::Strike), "a bolt the tick you tap");
+        // A tap while recovering is nothing; once recovered, a bolt again.
+        let mut swings = vec![];
+        for k in 0..l.active + l.recovery {
+            let tap = if k % 2 == 0 { Verb::Tap } else { Verb::None };
+            swings.extend(control(&mut me, &verb(tap, 0), 0, 0, &t, l).1);
         }
-        assert_eq!(swings.len(), 1);
-        assert!(matches!(swings[0], Swing::Strike { .. }));
-        assert_eq!(me.act.act, Act::Idle);
+        assert!(swings.is_empty());
+        let (_, s) = control(&mut me, &verb(Verb::Tap, 0), 0, 0, &t, l);
+        assert_eq!(s, Some(Swing::Strike));
     }
 
     #[test]
-    fn a_hold_released_in_time_lunges_and_early_does_nothing() {
+    fn a_beam_stops_at_the_first_solid_tile() {
+        let mut t = floor();
+        t.set(5, 0, Tile::new(ground::MEADOW, obj::ROCK));
+        let half = Fx::HALF;
+        let (d, at) = beam(&t, half, half, 0, Fx::int(15));
+        assert_eq!(at, Some((5, 0)));
+        assert!(d > Fx::int(4) && d <= Fx::int(5), "{}", d.to_f32());
+        let (d, at) = beam(&t, half, half, 16384, Fx::int(15));
+        assert_eq!((d, at), (Fx::int(15), None));
+    }
+
+    #[test]
+    fn a_hold_released_in_time_fires_a_great_beam_and_early_does_nothing() {
         let (l, t) = (&LAWS, floor());
         let mut me = Me {
             body: Body::at(Fx::ZERO, Fx::ZERO, l),
@@ -328,11 +338,6 @@ mod tests {
         }
         let (_, s) = control(&mut me, &verb(Verb::Release { range: 0 }, 0), 0, 0, &t, l);
         assert!(matches!(s, Some(Swing::Heavy { c: 19 })), "{s:?}");
-        let x0 = me.body.x;
-        for _ in 0..4 {
-            control(&mut me, &Intent::default(), 0, 0, &t, l);
-        }
-        assert!(me.body.x.sub(x0) > Fx::int(1), "a lunge carries forward");
         assert!(heavy(19, l).2, "c 19 is perfect");
         assert_eq!(heavy(12, l).0, l.heavy_low);
         // A throw needs glim; without, it is a heavy along the aim.

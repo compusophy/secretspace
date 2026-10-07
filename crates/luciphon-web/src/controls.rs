@@ -1,11 +1,12 @@
 //! Two hands to Inputs, 30 a second, in first person. On a desktop the
-//! mouse looks (once the page has it), WASD moves, space jumps, shift
-//! dashes, a click strikes, a held click charges a heavy and a held right
-//! button a throw (its range follows the look). On a phone the left thumb
-//! is a stick wherever it lands, the right thumb looks (a tap strikes, a
-//! still hold charges a heavy), and buttons jump, dash, throw and open
-//! the Heart. Looking turns at once, between ticks; every Input carries
-//! where you look.
+//! mouse looks (once the page has it), WASD moves, shift sprints, space
+//! jumps, Q dashes, a click fires the wand, a held click charges a great
+//! beam and a held right button a throw (its range follows the look). On
+//! a phone the left thumb is a stick wherever it lands (pushed to its
+//! edge, a sprint), the right thumb looks (a tap fires, a still hold
+//! charges a great beam), and buttons jump, dash, throw and open the
+//! Heart. Looking turns at once, between ticks; every Input carries where
+//! you look.
 
 use std::collections::VecDeque;
 use std::f32::consts::TAU;
@@ -97,7 +98,7 @@ pub struct Controls {
     /// A click while the page did not have the mouse (the page takes it).
     pub want_lock: bool,
     /// Done at least once, for the hints: moved 1, struck 2, dashed 4,
-    /// charged 8, jumped 16.
+    /// charged 8, jumped 16, sprinted 32.
     pub done: u8,
 }
 
@@ -256,7 +257,7 @@ impl Controls {
     pub fn key(&mut self, code: &str) {
         match code {
             "Space" => self.jump = true,
-            "ShiftLeft" | "ShiftRight" => self.verb(Verb::Flick),
+            "KeyQ" => self.verb(Verb::Flick),
             _ => {}
         }
     }
@@ -307,6 +308,7 @@ impl Controls {
         let ahead = key("KeyW", "ArrowUp") - key("KeyS", "ArrowDown");
         let right = key("KeyD", "ArrowRight") - key("KeyA", "ArrowLeft");
         let (mut way, mut throttle) = (right.atan2(ahead), 0u8);
+        let mut sprint = held("ShiftLeft") || held("ShiftRight");
         if ahead != 0.0 || right != 0.0 {
             throttle = 255;
         }
@@ -315,6 +317,8 @@ impl Controls {
             let d = dx.hypot(dy);
             if d > f.walk_px {
                 way = (dx as f32).atan2(-dy as f32);
+                // Pushed out to the edge: a sprint.
+                sprint |= d >= f.sprint_px;
                 throttle = if d >= f.stick_px {
                     255
                 } else {
@@ -331,7 +335,8 @@ impl Controls {
                 Verb::Hold { .. } => 8,
                 _ => 0,
             }
-            | (jump as u8) << 4;
+            | (jump as u8) << 4
+            | ((sprint && throttle == 255) as u8) << 5;
         self.seq = self.seq.wrapping_add(1);
         let it = Intent {
             heading: heading(self.yaw + way),
@@ -339,6 +344,7 @@ impl Controls {
             verb,
             aim: heading(self.yaw),
             jump,
+            sprint,
         };
         (self.seq, it)
     }
@@ -374,6 +380,10 @@ mod tests {
         assert_eq!(it.throttle, 0);
         c.key("Space");
         assert!(c.sample(&none, &FEEL).1.jump);
+        let run = |k: &str| k == "KeyW" || k == "ShiftLeft";
+        assert!(c.sample(&run, &FEEL).1.sprint);
+        c.key("KeyQ");
+        assert_eq!(c.sample(&none, &FEEL).1.verb, Verb::Flick);
         assert!(!c.sample(&none, &FEEL).1.jump);
     }
 
@@ -473,6 +483,7 @@ mod tests {
         c.feed(&finger(6, Kind::Down, dx, dy, 1000.0), false, CSS, &FEEL);
         let (_, it) = c.sample(&none, &FEEL);
         assert!(it.jump && it.verb == Verb::Flick);
-        assert_eq!(c.done, 31);
+        // Pushed to its edge, the stick sprinted too.
+        assert_eq!(c.done, 63);
     }
 }

@@ -140,7 +140,11 @@ fn mask(old: &Ent, new: &Ent) -> u8 {
 
 fn event(e: &Event) -> Ev {
     let (kind, a, b, n) = match *e {
-        Event::Strike { id } => (1, id, 0, 0),
+        Event::Beam { id, aim, len, big } => {
+            // Its length in eighths of a tile (up to 15.9), and the high bit.
+            let eighths = (len.0 >> 13).clamp(0, 127) as u8;
+            (4, id, aim, eighths | (big as u8) << 7)
+        }
         Event::Hit {
             by,
             on,

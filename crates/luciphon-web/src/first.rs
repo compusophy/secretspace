@@ -162,16 +162,16 @@ pub fn draw(c: &mut Canvas, l: &Look, now: f64) -> Spots {
             y += s.play.h + 12.0 * uf;
             let how = if l.touch {
                 [
-                    "left thumb: move",
-                    "right thumb: look, tap to strike",
-                    "hold still: a heavy",
+                    "left thumb: move (to the edge: sprint)",
+                    "right thumb: look, tap: your wand",
+                    "hold still: a great beam",
                     "buttons: jump, dash, throw",
                 ]
             } else {
                 [
                     "mouse: look   wasd: move",
-                    "click: strike   hold: a heavy",
-                    "space: jump   shift: dash",
+                    "click: your wand   hold: a great beam",
+                    "space: jump   shift: sprint   q: dash",
                     "hold right: throw (look up: further)",
                 ]
             };
@@ -242,18 +242,19 @@ pub fn draw(c: &mut Canvas, l: &Look, now: f64) -> Spots {
     s
 }
 
-/// The next thing you have not yet done, low on the screen: move, strike,
-/// dash, charge, jump.
+/// The next thing you have not yet done, low on the screen: move, fire,
+/// sprint, jump, dash, charge.
 pub fn hint(c: &mut Canvas, done: u8, touch: bool, u: i32, now: f64) {
     let pick = |a: &'static str, b: &'static str| if touch { a } else { b };
     let text = match () {
         _ if done & 1 == 0 => pick("left thumb to move", "wasd to move"),
-        _ if done & 2 == 0 => pick("tap on the right to strike", "click to strike"),
+        _ if done & 2 == 0 => pick("tap on the right: your wand", "click: your wand"),
+        _ if done & 32 == 0 => pick("push the stick to its edge: sprint", "hold shift: sprint"),
         _ if done & 16 == 0 => pick("jump", "space to jump"),
-        _ if done & 4 == 0 => pick("dash", "shift to dash"),
+        _ if done & 4 == 0 => pick("dash", "q to dash"),
         _ if done & 8 == 0 => pick(
-            "hold still on the right: a heavy",
-            "hold the click: a heavy",
+            "hold still on the right: a great beam",
+            "hold the click: a great beam",
         ),
         _ => return,
     };

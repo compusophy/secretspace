@@ -145,6 +145,11 @@ laws! {
     // Movement (§7): first person, quick to start and quick to stop.
     walk: Fx = tps(3_000),
     run: Fx = tps(5_500),
+    /// A sprint: this fast, spending breath a tick, and once breath runs
+    /// out, none until it is back to `sprint_min`.
+    sprint: Fx = tps(8_500),
+    sprint_breath: i32 = 22_000 / 30,
+    sprint_min: i32 = 35_000,
     accel: Fx = tps2(45_000),
     stop: Fx = tps2(45_000),
     /// Control in the air, thousandths.
@@ -192,36 +197,32 @@ laws! {
     flame_regen: i32 = 3_000 / 30,
     flame_rest: u32 = ms(6_000),
     flight_decay: Fx = tps2(12_000),
-    /// The strike (a tap).
-    reach: Fx = tiles(1_200),
-    cone: u16 = deg(100),
-    inner_cone: u16 = deg(40),
-    face_turn: u16 = deg(50),
+    /// The wand. A bolt (a tap) flies `beam_reach` at once, stopped by
+    /// anything solid, and takes the first body within `beam_width` of its
+    /// line; a node it meets within `gather_reach` gives. One every
+    /// `active + recovery` ticks.
+    beam_reach: Fx = tiles(15_000),
+    beam_width: Fx = tiles(500),
+    gather_reach: Fx = tiles(3_000),
     windup: u32 = 4,
-    active: u32 = 2,
-    recovery: u32 = 6,
-    strike_base: i32 = 8_000,
-    /// Damage a tile/s of closing speed adds, in thousandths, and its cap.
-    strike_closing: i32 = 750,
-    strike_cap: i32 = 16_000,
-    strike_kb: Fx = tps(3_500),
-    strike_carry: i32 = 500,
+    active: u32 = 1,
+    recovery: u32 = 7,
+    bolt: i32 = 7_000,
+    bolt_kb: Fx = tps(3_500),
     engaged: u32 = ms(10_000),
     launcher_within: u32 = 36,
     launcher: i32 = 2_000,
-    /// The lance: a tap in a dash, or this long after.
+    /// The lance: a bolt from a dash (or just after) pierces everyone on
+    /// its line.
     lance_late: u32 = 2,
-    lance_reach: Fx = tiles(1_800),
-    lance_damage: i32 = 14_000,
-    lance_kb: i32 = 1_500,
-    lance_whiff: u32 = 12,
-    /// The heavy and the throw: a hold, released at a charge in ticks.
+    lance_damage: i32 = 10_000,
+    lance_kb: i32 = 1_300,
+    /// The great beam and the throw: a hold, released at a charge in
+    /// ticks. A great beam pierces everyone on its line.
     charge_min: u32 = 12,
     charge_full: u32 = 18,
     perfect_to: u32 = 22,
     charge_max: u32 = 36,
-    lunge: Fx = tiles(1_500),
-    lunge_ticks: u32 = 4,
     heavy_recovery: u32 = 10,
     heavy_low: i32 = 12_000,
     heavy_full: i32 = 28_000,

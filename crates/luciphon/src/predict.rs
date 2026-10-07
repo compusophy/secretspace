@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 
 use engine::fixed::{len, Fx};
 
-use crate::combat::{control, Me};
+use crate::combat::{control, Me, Swing};
 use crate::laws::Laws;
 use crate::motion::Intent;
 use crate::proto::Own;
@@ -29,16 +29,17 @@ pub struct Predictor {
 }
 
 impl Predictor {
-    /// Apply an Input now, as the server will.
-    pub fn push(&mut self, seq: u16, it: Intent, t: &Tiles, l: &Laws) {
+    /// Apply an Input now, as the server will; what the wand did, to draw
+    /// at once.
+    pub fn push(&mut self, seq: u16, it: Intent, t: &Tiles, l: &Laws) -> Option<Swing> {
         if !self.ready {
-            return;
+            return None;
         }
         self.pending.push_back((seq, it));
         while self.pending.len() > 64 {
             self.pending.pop_front();
         }
-        control(&mut self.me, &it, self.glim, self.flow, t, l);
+        control(&mut self.me, &it, self.glim, self.flow, t, l).1
     }
 
     /// The server's word on the Lumen, as of the Input `ack`: start from

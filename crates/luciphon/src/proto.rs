@@ -67,7 +67,7 @@ impl Up {
                 let (code, arg) = verb_code(it.verb);
                 let mag = arg.unwrap_or(it.throttle);
                 let stick = ((it.throttle > 0) as u8) << 3;
-                let jump = (it.jump as u8) << 4;
+                let jump = (it.jump as u8) << 4 | (it.sprint as u8) << 5;
                 w.u8(INPUT)
                     .u16(*seq)
                     .u16(it.heading)
@@ -93,7 +93,7 @@ impl Up {
                 let v = r.u8()?;
                 let aim = r.u16()?;
                 let stick = v & 8 != 0;
-                if v >> 5 != 0 {
+                if v >> 6 != 0 {
                     return None;
                 }
                 let verb = match v & 7 {
@@ -118,6 +118,7 @@ impl Up {
                         verb,
                         aim,
                         jump: v & 16 != 0,
+                        sprint: v & 32 != 0,
                     },
                 }
             }
@@ -301,6 +302,7 @@ fn put_body(w: &mut Writer, b: &Body) {
         .i32(b.breath)
         .u32(b.rest);
     w.i32(b.regen).u32(b.cooldown).u32(b.iframes);
+    w.u8(b.winded as u8 | (b.sprinting as u8) << 1);
     w.u32(b.kick).u8(b.kicked as u8);
     w.u8(b.kick_held.is_some() as u8)
         .u16(b.kick_held.unwrap_or(0));
@@ -323,6 +325,7 @@ fn get_body(r: &mut Reader) -> Option<Body> {
     };
     let (t, breath, rest, regen) = (r.u32()?, r.i32()?, r.u32()?, r.i32()?);
     let (cooldown, iframes) = (r.u32()?, r.u32()?);
+    let wind = r.u8()?;
     let (kick, kicked) = (r.u32()?, r.u8()? != 0);
     let held = r.u8()? != 0;
     let held_h = r.u16()?;
@@ -349,6 +352,8 @@ fn get_body(r: &mut Reader) -> Option<Body> {
         breath,
         rest,
         regen,
+        winded: wind & 1 != 0,
+        sprinting: wind & 2 != 0,
         cooldown,
         iframes,
         kick,
@@ -728,6 +733,7 @@ mod tests {
                     verb: Verb::Flick,
                     aim: 999,
                     jump: true,
+                    sprint: true,
                 },
             },
             Up::Input {
@@ -738,6 +744,7 @@ mod tests {
                     verb: Verb::Hold { held_for: 9 },
                     aim: 5,
                     jump: false,
+                    sprint: false,
                 },
             },
             Up::Heart { act: 1, arg: 2 },

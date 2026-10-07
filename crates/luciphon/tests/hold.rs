@@ -38,7 +38,7 @@ impl Player {
         w.lumens[i].me.act.aim = facing;
     }
 
-    /// A tap with the stick up, then the strike's whole swing.
+    /// A tap, then the wand's whole recovery.
     fn tap(&mut self, w: &mut World) {
         self.go(w, Intent::default());
         self.go(
@@ -135,6 +135,7 @@ fn a_hearth_from_nothing_a_loop_a_harvest_a_fall_and_a_restart() {
     // The rest of a hearth's price, and glim to kindle with.
     let i = p.i(&w);
     w.lumens[i].stone = w.lumens[i].stone.max(20);
+    w.lumens[i].wood = w.lumens[i].wood.max(30);
     w.lumens[i].glim = 90;
 
     // A hearth, through build mode: a tap on the ghost, a channel.

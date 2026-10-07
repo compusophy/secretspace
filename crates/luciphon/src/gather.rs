@@ -73,7 +73,7 @@ impl World {
         let me = &self.lumens[i];
         let (x, y) = me.pos();
         let (ux, uy) = engine::fixed::unit(me.me.act.aim);
-        let reach = self.laws.reach.add(Fx::HALF);
+        let reach = self.laws.gather_reach;
         let mut best: Option<(Fx, u16)> = None;
         let (cx, cy) = (x.floor(), y.floor());
         for ty in cy - 2..=cy + 2 {
