@@ -16,6 +16,10 @@ a page that draws every pixel itself into one buffer. Its card on the hub
 is the real game, live: the hub watches the room (`?watch=1`, never one of
 the people counted) and draws it with the game's own look.
 
+Game #2, **Luciphon** (a persistent one-thumb brawler-builder on a floating
+island of light), is specced in `docs/luciphon.md`; build it from its §15,
+stage by stage, and do not start v0.2 before the owner passes the FUN GATE.
+
 ## Rules
 
 1. **No hand-written JavaScript or TypeScript.** Pages are a canvas and one
