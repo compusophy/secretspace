@@ -352,3 +352,37 @@ fn running_off_the_rim_falls_into_the_dark() {
     assert!(l.descent > 0, "into the Underlight");
     assert_eq!(w.tally.get("fell to the Dark"), Some(&1));
 }
+
+#[test]
+fn lumens_fight_lumens_only_in_the_dim_and_on_the_rim() {
+    let mut w = World::new(LAWS, 21);
+    let a = w.spawn("shooter", 31, None);
+    let b = w.spawn("target", 32, None);
+    let mut p = Player { id: a, seq: 0 };
+    for (glow, x) in [(true, 20), (false, 40)] {
+        // A clear row, the two four tiles apart.
+        for tx in x - 2..x + 8 {
+            w.tiles.set(
+                tx,
+                0,
+                luciphon::tiles::Tile::new(luciphon::tiles::ground::MEADOW, 0),
+            );
+        }
+        p.put(&mut w, x as f32 + 0.5, 0.5, 0);
+        let j = w.index(b).unwrap();
+        let t = &mut w.lumens[j];
+        t.me.body.x = Fx::int(x + 4).add(Fx::HALF);
+        t.me.body.y = Fx::HALF;
+        (t.ghost, t.played, t.sparks_off) = (0, LAWS.sparks_ticks, true);
+        t.flame = LAWS.flame;
+        let i = p.i(&w);
+        w.lumens[i].ghost = 0;
+        // Settle, so the shooter has seen the target where it stands.
+        for _ in 0..4 {
+            p.go(&mut w, Intent::default());
+        }
+        p.tap(&mut w);
+        let flame = w.find(b).unwrap().flame;
+        assert_eq!(flame == LAWS.flame, glow, "glow {glow}: flame {flame}");
+    }
+}

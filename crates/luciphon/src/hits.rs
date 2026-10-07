@@ -1,6 +1,6 @@
 //! Settling what Lumens' wands do: a bolt takes the first body on its
 //! line (a node close by gives instead), a lance and a great beam pierce
-//! everyone on theirs; how hard each lands (the launcher, Flow) and how far
+//! everyone on theirs; against each other only in the Dim and on the Rim; how hard each lands (the launcher, Flow) and how far
 //! the target flies (the dimmer, the further); thrown motes and the glim
 //! they leave. Targets are judged where the shooter saw them: rewound by
 //! half its round trip and the 66 ms of interpolation, at most 3 ticks.
@@ -264,11 +264,13 @@ impl World {
             let r = self.ring_at(tx, ty);
             (r, r == Ring::Sanctum)
         };
-        if sanctum {
-            // Bolts only shove here.
-            dmg = 0;
-            kb = l.bolt_kb;
-        } else {
+        // Lumens fight Lumens only in the Dim and on the Rim: in the Glow
+        // and the Sanctum the light is warded, and does nothing.
+        if matches!(ring, Ring::Sanctum | Ring::Glow) {
+            self.events.push(Event::Dodge { id: t_id });
+            return false;
+        }
+        {
             let t = &self.lumens[j];
             let spared =
                 ring == Ring::Glow && t.spared.iter().any(|&(o, until)| o == a_id && until > tick);

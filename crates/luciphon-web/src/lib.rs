@@ -85,6 +85,8 @@ struct Page {
     bag_open: bool,
     bag_pick: Option<usize>,
     bag_spots: Vec<(Rect, bag::Pick)>,
+    /// The ring you stand in, to tell you when you cross into another.
+    ring: Option<luciphon::island::Ring>,
 }
 
 thread_local! {
@@ -573,6 +575,22 @@ fn camera(p: &mut Page, now: f64) -> Camera {
 }
 
 fn draw(p: &mut Page, now: f64, dt: f64) {
+    // Crossing into another ring: whether it is safe there.
+    if p.st.pred.ready && p.st.descent == 0 {
+        use luciphon::island::{ring, Ring};
+        let b = &p.st.pred.me.body;
+        let r = ring(&p.st.laws, b.x.floor(), b.y.floor());
+        if p.ring.is_some_and(|was| was != r) {
+            let word = match r {
+                Ring::Sanctum => "the sanctum: safe",
+                Ring::Glow => "the glow: safe from everyone",
+                Ring::Dim => "the dim: monsters, and anyone may fight you",
+                Ring::Rim => "the rim: the wildest light",
+            };
+            p.st.toast = Some((word.into(), now));
+        }
+        p.ring = Some(r);
+    }
     let cam = camera(p, now);
     let alive = p.st.joined && p.st.descent == 0 && p.st.pred.ready && p.st.mirror.own.is_some();
     let things = p.st.things(now);
@@ -913,6 +931,7 @@ pub fn start() -> Result<(), JsValue> {
             bag_open: false,
             bag_pick: None,
             bag_spots: Vec::new(),
+            ring: None,
             hands,
             link,
             session,

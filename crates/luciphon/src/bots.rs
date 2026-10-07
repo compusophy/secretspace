@@ -9,6 +9,7 @@
 use engine::fixed::{atan2, len, turn, unit, Fx};
 
 use crate::combat::{beam, Act};
+use crate::island::Ring;
 use crate::laws::deg;
 use crate::motion::{Intent, Move, Verb};
 use crate::tiles::obj;
@@ -154,6 +155,10 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
         let Some((ox, oy)) = w.was(o.id, lag) else {
             continue;
         };
+        // Lumens fight Lumens only in the Dim and on the Rim.
+        if !matches!(w.ring_at(ox, oy), Ring::Dim | Ring::Rim) {
+            continue;
+        }
         let d = len(ox.sub(x), oy.sub(y));
         let engaged = me.engaged_with(o.id, tick);
         let d = if engaged { d.sub(Fx::int(3)) } else { d };
@@ -302,7 +307,11 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
     }
     let goal = w.lumens[i].bot.as_ref().map_or((x, y), |b| b.goal);
     let h = fan(w, x, y, atan2(goal.1.sub(y), goal.0.sub(x)), 3);
-    go(h, if roll < 300 { 160 } else { 255 }, h)
+    // Now and then a hop, for the joy of it.
+    Intent {
+        jump: roll2 < 5,
+        ..go(h, if roll < 300 { 160 } else { 255 }, h)
+    }
 }
 
 /// A resident's mind (every resident has one).
