@@ -282,9 +282,109 @@ laws! {
     rim_drop: i32 = 1_000,
     scatter: Fx = tiles(1_500),
 
-    // Newcomers.
-    sparks: bool = false,
-    join_glim: u32 = 30,
+    // Newcomers: Sparks, for the first half hour of play.
+    sparks: bool = true,
+    sparks_ticks: u32 = 30 * 60 * HZ,
+    join_glim: u32 = 0,
+
+    // Gathering (§8): per strike, strikes a node holds, its regrowth.
+    birch_yield: u32 = 3,
+    birch_strikes: u32 = 8,
+    birch_regrow: u32 = ms(240_000),
+    oak_yield: u32 = 4,
+    oak_strikes: u32 = 10,
+    oak_regrow: u32 = ms(360_000),
+    rock_yield: u32 = 2,
+    rock_strikes: u32 = 8,
+    rock_regrow: u32 = ms(300_000),
+    moss_yield: u32 = 1,
+    moss_strikes: u32 = 3,
+    moss_regrow: u32 = ms(180_000),
+    crystal_yield: u32 = 2,
+    crystal_strikes: u32 = 4,
+    crystal_regrow: u32 = ms(480_000),
+    /// Yields in the Dim and on the Rim, thousandths.
+    dim_mult: i32 = 1_600,
+    rim_mult: i32 = 2_500,
+    /// Nodes ring every `ring_every` ticks; a strike within `ring_window`
+    /// of a ring is resonant; three in a row ring the node out.
+    ring_every: u32 = 30,
+    ring_window: u32 = 2,
+    ring_out_material: u32 = 3,
+    ring_out_glim: u32 = 1,
+    ring_out_regrow: i32 = 750,
+    dwell_every: u32 = 30,
+    carry_max: u32 = 300,
+    glim_max: u32 = 500,
+    beacon: u32 = 150,
+
+    // Building.
+    hearth_wood: u32 = 30,
+    hearth_stone: u32 = 20,
+    hearth_glim: u32 = 10,
+    wall_wood: u32 = 4,
+    door_wood: u32 = 6,
+    thorns_wood: u32 = 3,
+    thorns_stone: u32 = 1,
+    lantern_glim: u32 = 2,
+    planter_wood: u32 = 4,
+    lantern_level: u32 = 5,
+    build_channel: u32 = 12,
+    build_idle: u32 = ms(8_000),
+    hearth_near: i32 = 16,
+    hearth_far: i32 = 48,
+    hearth_apart: i32 = 10,
+    no_build: i32 = 13,
+    claim_gap: i32 = 2,
+    refund: i32 = 500,
+    lamp: u32 = 30,
+
+    // Farming: Sunwheat.
+    wheat_ripe: u32 = ms(900_000),
+    wheat_full: u32 = ms(1_800_000),
+    wheat_harvest: u32 = 4,
+
+    // Kindling.
+    kindle_reach: i32 = 16,
+    wick_max: u32 = 48,
+    wick_life: u32 = ms(60_000),
+    fill_box: i32 = 64,
+    fill_max: u32 = 300,
+    cap_base: u32 = 64,
+    cap_per_hour: u32 = 32,
+    cap_max: u32 = 600,
+    snuff_damage: i32 = 20_000,
+    snuff_stun: u32 = ms(500),
+    /// Land: yield a tile an hour and the upkeep curve (0.03 n^1.4),
+    /// both in thousandths of glim; settled every `land_every`.
+    land_yield: i32 = 250,
+    upkeep: i32 = 30,
+    upkeep_power: i32 = 1_400,
+    land_every: u32 = ms(60_000),
+    fade_every: u32 = ms(120_000),
+    outline_days: u32 = 30,
+    cold_days: u32 = 30,
+
+    // Rekindle and Recall.
+    rekindle_glim: u32 = 10,
+    rekindle_flame: i32 = 25_000,
+    rekindle_ticks: u32 = ms(2_000),
+    recall_ticks: u32 = ms(8_000),
+
+    // Leaving and coming back.
+    idle_dream: u32 = ms(20_000),
+    linger: u32 = 300,
+    wake_ghost: u32 = ms(3_000),
+
+    // Skill XP for each thing done.
+    xp_material: u32 = 10,
+    xp_glim: u32 = 12,
+    xp_tile: u32 = 12,
+    xp_piece: u32 = 30,
+    xp_hearth: u32 = 120,
+    xp_crop: u32 = 40,
+    xp_valor: u32 = 2,
+    xp_way: u32 = 15,
 }
 
 #[cfg(test)]

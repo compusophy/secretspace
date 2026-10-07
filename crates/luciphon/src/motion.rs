@@ -194,7 +194,7 @@ fn underfoot(b: &Body, t: &Tiles, l: &Laws) -> Underfoot {
         }
         _ => {}
     }
-    if b.claim != 0 && tile.claim & 0x7fff == b.claim {
+    if tile.land_of(b.claim) {
         u.speed = u.speed * l.own_land / 1000;
     }
     u
@@ -463,7 +463,7 @@ fn slide(b: &mut Body, t: &Tiles, l: &Laws) -> bool {
         let lead = if b.vx.0 > 0 { nx.add(r) } else { nx.sub(r) };
         let col = lead.floor();
         let rows = b.y.sub(r).add(eps).floor()..=b.y.add(r).sub(eps).floor();
-        if rows.clone().any(|ty| t.solid(col, ty)) {
+        if rows.clone().any(|ty| t.get(col, ty).solid_for(b.claim)) {
             b.x = if b.vx.0 > 0 {
                 Fx::int(col).sub(r).sub(eps)
             } else {
@@ -481,7 +481,7 @@ fn slide(b: &mut Body, t: &Tiles, l: &Laws) -> bool {
         let lead = if b.vy.0 > 0 { ny.add(r) } else { ny.sub(r) };
         let row = lead.floor();
         let cols = b.x.sub(r).add(eps).floor()..=b.x.add(r).sub(eps).floor();
-        if cols.clone().any(|tx| t.solid(tx, row)) {
+        if cols.clone().any(|tx| t.get(tx, row).solid_for(b.claim)) {
             b.y = if b.vy.0 > 0 {
                 Fx::int(row).sub(r).sub(eps)
             } else {

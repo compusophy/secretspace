@@ -59,6 +59,8 @@ pub struct Action {
     pub stick: bool,
     /// Ticks left in which a tap after a dash is still a lance.
     pub late: u32,
+    /// In build mode, a tap places and a hold removes: no strikes.
+    pub build: bool,
 }
 
 /// What a Lumen's own tick would do to others, for the world to settle.
@@ -104,6 +106,7 @@ pub fn control(
         // Struck, or on the edge: whatever was under way is lost.
         *a = Action {
             stick: it.throttle > 0,
+            build: a.build,
             ..Action::default()
         };
     }
@@ -126,6 +129,7 @@ pub fn control(
     }
 
     match it.verb {
+        Verb::Tap | Verb::Hold { .. } if a.build => {}
         Verb::Tap if b.mv == Move::Dash || (a.late > 0 && a.act == Act::Idle) => {
             swing = Some(Swing::Lance);
             a.act = Act::Recover;

@@ -194,6 +194,10 @@ fn decide(w: &mut World, i: usize, tick: u32) -> Intent {
         if o.id == me.id || !o.alive() || o.ghost > 0 || o.down > 0 {
             continue;
         }
+        // Never start a fight with a newcomer under Sparks.
+        if o.spark(&w.laws) && !me.engaged_with(o.id, tick) {
+            continue;
+        }
         let Some((ox, oy)) = w.was(o.id, lag) else {
             continue;
         };

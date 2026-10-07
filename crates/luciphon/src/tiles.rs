@@ -30,7 +30,36 @@ pub mod obj {
     pub const PILLAR: u8 = 7;
     /// The bell-lantern at the centre (3x3).
     pub const LUCIPHON: u8 = 8;
+    // Pieces people build (v0.2), on their own claim.
+    pub const HEARTH: u8 = 9;
+    pub const WALL: u8 = 10;
+    pub const DOOR: u8 = 11;
+    pub const THORNS: u8 = 12;
+    pub const LANTERN: u8 = 13;
+    pub const PLANTER: u8 = 14;
+    /// A planter's Sunwheat: growing, ripe, and ripe too long.
+    pub const SPROUT: u8 = 15;
+    pub const RIPE: u8 = 16;
+    pub const WILTED: u8 = 17;
+    /// The high bit: a node struck bare, regrowing (a stump, rubble).
+    pub const BARE: u8 = 0x80;
+
+    /// Whether an object is a node that gives when struck.
+    pub fn node(o: u8) -> bool {
+        matches!(o, BIRCH | OAK | ROCK | GLOWMOSS | CRYSTAL)
+    }
+
+    /// Whether an object is a piece someone built.
+    pub fn piece(o: u8) -> bool {
+        matches!(
+            o,
+            HEARTH | WALL | DOOR | THORNS | LANTERN | PLANTER | SPROUT | RIPE | WILTED
+        )
+    }
 }
+
+/// The claim bits of a tile: whose it is, and the open-wick bit.
+pub const WICK: u16 = 0x8000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Tile {
@@ -70,12 +99,49 @@ impl Tile {
         self.kind() == ground::VOID
     }
 
-    /// Bodies stop at it.
+    /// Bodies stop at it (a door stops everyone here; see `solid_for`).
     pub fn solid(self) -> bool {
         matches!(
             self.obj,
-            obj::BIRCH | obj::OAK | obj::ROCK | obj::CRYSTAL | obj::PILLAR | obj::LUCIPHON
+            obj::BIRCH
+                | obj::OAK
+                | obj::ROCK
+                | obj::CRYSTAL
+                | obj::PILLAR
+                | obj::LUCIPHON
+                | obj::HEARTH
+                | obj::WALL
+                | obj::DOOR
+                | obj::LANTERN
+                | obj::PLANTER
+                | obj::SPROUT
+                | obj::RIPE
+                | obj::WILTED
         )
+    }
+
+    /// Whether it stops a body whose own land is `claim`: a door lets its
+    /// owner through.
+    pub fn solid_for(self, claim: u16) -> bool {
+        if self.obj == obj::DOOR {
+            return claim == 0 || self.owner() != claim;
+        }
+        self.solid()
+    }
+
+    /// The claim it belongs to (0: the commons), wick or not.
+    pub fn owner(self) -> u16 {
+        self.claim & !WICK
+    }
+
+    /// Whose open wick it is, if it is one.
+    pub fn wick(self) -> Option<u16> {
+        (self.claim & WICK != 0).then_some(self.claim & !WICK)
+    }
+
+    /// Kindled land (or a core) of this claim, not a wick.
+    pub fn land_of(self, claim: u16) -> bool {
+        claim != 0 && self.claim == claim
     }
 }
 

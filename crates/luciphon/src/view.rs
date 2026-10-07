@@ -147,6 +147,22 @@ fn event(e: &Event) -> Ev {
         Event::Down { id } => (11, id, 0, 0),
         Event::Gutter { id, by } => (12, id, by, 0),
         Event::Return { id } => (13, id, 0, 0),
+        Event::Gather {
+            id,
+            idx,
+            resonant,
+            out,
+        } => (14, id, idx, resonant as u8 | (out as u8) << 1),
+        Event::Banked { id } => (15, id, 0, 0),
+        Event::Loop { id, n } => (16, id, n, 0),
+        Event::Snuffed { id } => (17, id, 0, 0),
+        Event::Kindle { id, on } => (18, id, 0, on as u8),
+        Event::Emote { id, what } => (19, id, 0, what),
+        Event::Level { id, skill, level } => (20, id, level as u16, skill),
+        Event::Placed { id, idx, piece } => (21, id, idx, piece),
+        Event::Removed { id, idx } => (22, id, idx, 0),
+        Event::Refused { id } => (23, id, 0, 0),
+        Event::Dream { id } => (24, id, 0, 0),
     };
     Ev { kind, a, b, n }
 }
@@ -255,6 +271,16 @@ impl Viewer {
             self.known.remove(&id);
             f.gone.push(id);
         }
+        // Tiles that changed, in chunks this browser knows.
+        f.tiles = w
+            .dirty
+            .iter()
+            .filter(|&&i| {
+                let (x, y) = Tiles::at_index(i as usize);
+                self.chunks.contains(&Tiles::chunk_of(x, y))
+            })
+            .map(|&i| (i, w.tiles.t[i as usize]))
+            .collect();
         f.events = w
             .events
             .iter()

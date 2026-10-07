@@ -26,6 +26,16 @@ pub const CHUNK_GONE: u8 = 4;
 pub const BOARD: u8 = 6;
 pub const PONG: u8 = 7;
 pub const ELSEWHERE: u8 = 8;
+pub const CLAIMS: u8 = 9;
+
+/// A claim as pages know it: its id, hue, name, and hearth (if it has one).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimInfo {
+    pub id: u16,
+    pub hue: u8,
+    pub name: String,
+    pub hearth: Option<(i16, i16)>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Up {
@@ -240,6 +250,8 @@ pub enum Down {
         t: u32,
     },
     Elsewhere,
+    /// Every claim there is (sent at the start, and when one changes).
+    Claims(Vec<ClaimInfo>),
 }
 
 fn put_fx(w: &mut Writer, v: Fx) {
@@ -349,6 +361,7 @@ fn put_action(w: &mut Writer, a: &Action) {
         .u8(a.landed as u8);
     w.u8(a.lift.is_some() as u8);
     let (n, s) = a.lift.unwrap_or((0, Fx::ZERO));
+    w.u8(a.build as u8);
     w.u32(n)
         .i32(s.0)
         .i32(a.carry.0)
@@ -360,6 +373,7 @@ fn get_action(r: &mut Reader) -> Option<Action> {
     let act = Act::from_code(r.u8()?)?;
     let (t, c, aim, landed) = (r.u32()?, r.u32()?, r.u16()?, r.u8()? != 0);
     let lifted = r.u8()? != 0;
+    let build = r.u8()? != 0;
     let (n, s) = (r.u32()?, Fx(r.i32()?));
     let (carry, stick, late) = (Fx(r.i32()?), r.u8()? != 0, r.u32()?);
     Some(Action {
@@ -372,6 +386,7 @@ fn get_action(r: &mut Reader) -> Option<Action> {
         carry,
         stick,
         late,
+        build,
     })
 }
 
@@ -488,6 +503,18 @@ impl Down {
             Down::Elsewhere => {
                 w.u8(ELSEWHERE);
             }
+            Down::Claims(list) => {
+                w.u8(CLAIMS).u16(list.len() as u16);
+                for c in list {
+                    let (hx, hy) = c.hearth.unwrap_or((0, 0));
+                    w.u16(c.id)
+                        .u8(c.hue)
+                        .str(&c.name)
+                        .u8(c.hearth.is_some() as u8)
+                        .i16(hx)
+                        .i16(hy);
+                }
+            }
         }
         w.0
     }
@@ -533,6 +560,22 @@ impl Down {
             },
             PONG => Down::Pong { t: r.u32()? },
             ELSEWHERE => Down::Elsewhere,
+            CLAIMS => {
+                let n = r.u16()? as usize;
+                r.room(n, 9)?;
+                let mut list = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let (id, hue, name) = (r.u16()?, r.u8()?, r.str()?);
+                    let (has, hx, hy) = (r.u8()? != 0, r.i16()?, r.i16()?);
+                    list.push(ClaimInfo {
+                        id,
+                        hue,
+                        name,
+                        hearth: has.then_some((hx, hy)),
+                    });
+                }
+                Down::Claims(list)
+            }
             _ => return None,
         };
         r.done().then_some(d)

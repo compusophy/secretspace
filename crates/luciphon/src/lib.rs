@@ -5,12 +5,17 @@
 //! page can predict exactly what the server will do.
 
 pub mod bots;
+pub mod build;
 pub mod combat;
+pub mod gather;
 pub mod hits;
 pub mod island;
+pub mod land;
 pub mod laws;
+pub mod life;
 pub mod mirror;
 pub mod motion;
+pub mod persist;
 pub mod predict;
 pub mod proto;
 pub mod room;

@@ -148,7 +148,7 @@ fn prediction_matches_the_server() {
     let mut lost_at = 0u32;
     let (mut same, mut compared) = (0, 0);
     let mut heading = 0u16;
-    let mut regen = 1000;
+    let mut regen = (1000, 0, 0);
     for t in 0..10_000u32 {
         let seq = t as u16;
         // A thumb: runs with swings, drifts, dashes, strikes, holds.
@@ -200,8 +200,9 @@ fn prediction_matches_the_server() {
         }
         let l = w.find(id).unwrap();
         // Rekindled running out is the server's clock, not predicted.
-        if l.me.body.regen != regen {
-            regen = l.me.body.regen;
+        // So are a gathered bag's weight and a hearth's land.
+        if (l.me.body.regen, l.me.body.load, l.me.body.claim) != regen {
+            regen = (l.me.body.regen, l.me.body.load, l.me.body.claim);
             lost_at = t;
         }
         if l.ack == seq.wrapping_sub(3) && t > lost_at + 12 && l.alive() && l.ghost == 0 {

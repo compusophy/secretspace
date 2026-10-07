@@ -76,6 +76,49 @@ pub struct Lumen {
     pub ack: u16,
     pub repeats: u8,
     pub dropped: bool,
+    /// v0.2. Sunwheat carried; the claim it owns (0: none yet).
+    pub wheat: u32,
+    pub claim: u16,
+    /// Kindle mode, and the open wick: its tiles and since when.
+    pub kindle: bool,
+    pub wick: Vec<u16>,
+    pub wick_since: u32,
+    /// Build mode (a piece), and a placement or removal channelling:
+    /// the tile, the piece, ticks left, and whether it removes.
+    pub build: Option<u8>,
+    pub build_idle: u32,
+    pub channel: Option<(u16, u8, u32, bool)>,
+    /// Dwelling on a node: which, and when it is struck next.
+    pub dwell: Option<(u16, u32)>,
+    /// Gathered fractions, thousandths: wood, stone, glim.
+    pub frac: [i32; 3],
+    /// Resonant strikes in a row on one node.
+    pub rings: (u16, u8),
+    /// Skill XP: hewing, delving, kindling, tending, valor, wayfaring, voice.
+    pub xp: [u32; 7],
+    /// Ticks played, all told (Sparks, the claim cap).
+    pub played: u32,
+    pub sparks_off: bool,
+    /// Ticks with no input; ticks left Lingering after the page left.
+    pub idle: u32,
+    pub linger: u32,
+    /// A Rekindle (ticks left), a Recall (ticks left).
+    pub rekindle: u32,
+    pub recall: u32,
+    /// Return at the hearth (else at the Luciphon).
+    pub home: bool,
+}
+
+impl Lumen {
+    /// Wood, stone and Sunwheat together: what weighs.
+    pub fn materials(&self) -> u32 {
+        self.wood + self.stone + self.wheat
+    }
+
+    /// Whether Sparks still guard it (its first half hour).
+    pub fn spark(&self, l: &Laws) -> bool {
+        l.sparks && self.bot.is_none() && !self.sparks_off && self.played < l.sparks_ticks
+    }
 }
 
 impl Lumen {
@@ -115,17 +158,65 @@ pub struct Mote {
 }
 
 /// Glim on the ground, anyone's.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Pickup {
     pub id: u16,
     pub x: Fx,
     pub y: Fx,
     pub glim: u32,
+    /// Or materials: wood, stone, Sunwheat.
+    pub wood: u32,
+    pub stone: u32,
+    pub wheat: u32,
 }
 
 /// Something worth showing that happened this tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
+    Gather {
+        id: u16,
+        idx: u16,
+        resonant: bool,
+        out: bool,
+    },
+    Banked {
+        id: u16,
+    },
+    Loop {
+        id: u16,
+        n: u16,
+    },
+    Snuffed {
+        id: u16,
+    },
+    Kindle {
+        id: u16,
+        on: bool,
+    },
+    Emote {
+        id: u16,
+        what: u8,
+    },
+    Level {
+        id: u16,
+        skill: u8,
+        level: u8,
+    },
+    Placed {
+        id: u16,
+        idx: u16,
+        piece: u8,
+    },
+    Removed {
+        id: u16,
+        idx: u16,
+    },
+    Refused {
+        id: u16,
+    },
+    Dream {
+        id: u16,
+    },
     Strike {
         id: u16,
     },
@@ -188,6 +279,17 @@ pub struct World {
     pub tally: HashMap<&'static str, u64>,
     pub rng: Rng,
     next_id: u16,
+    /// v0.2: nodes struck since they were whole, crops, claims (hearths,
+    /// vaults and lodgings), faded land's outlines, sleepers.
+    pub nodes: HashMap<u16, crate::gather::Node>,
+    pub crops: HashMap<u16, crate::gather::Crop>,
+    pub claims: Vec<crate::land::Claim>,
+    pub outlines: HashMap<u16, (u16, u64)>,
+    pub dreamers: HashMap<u64, crate::life::Dreamer>,
+    /// Tiles changed this tick, for the views.
+    pub dirty: Vec<u16>,
+    /// Seconds since 1970, as the room last said (for days-long timers).
+    pub unix: u64,
 }
 
 pub const HISTORY: usize = 12;
@@ -209,6 +311,13 @@ impl World {
             tally: HashMap::new(),
             rng: Rng::new(seed ^ 0xc0ffee),
             next_id: 1,
+            nodes: HashMap::new(),
+            crops: HashMap::new(),
+            claims: Vec::new(),
+            outlines: HashMap::new(),
+            dreamers: HashMap::new(),
+            dirty: Vec::new(),
+            unix: 0,
         }
     }
 
@@ -262,6 +371,7 @@ impl World {
         let id = self.new_id();
         let (x, y) = self.spawn_spot();
         let l = &self.laws;
+        let resident = bot.is_some();
         let lumen = Lumen {
             id,
             soul,
@@ -273,8 +383,11 @@ impl World {
                 ..Me::default()
             },
             flame: l.flame,
-            glim: l.join_glim,
+            // A resident keeps a stash; a newcomer starts with nothing.
+            glim: if resident { 30 } else { l.join_glim },
             ghost: l.ghost,
+            home: true,
+            played: if resident { l.sparks_ticks } else { 0 },
             ..Lumen::default()
         };
         self.lumens.push(lumen);
@@ -301,11 +414,13 @@ impl World {
     pub fn step(&mut self) {
         self.tick = self.tick.wrapping_add(1);
         self.events.clear();
+        self.dirty.clear();
         crate::bots::think(self);
 
         // Every Lumen: one Intent, fitted to a thumb, then its control.
         let mut swings = Vec::new();
         let mut moves: Vec<(usize, Moved, bool)> = Vec::new();
+        let mut acts = Vec::new();
         for i in 0..self.lumens.len() {
             let l = &mut self.lumens[i];
             if !l.alive() {
@@ -327,9 +442,18 @@ impl World {
             };
             l.last = raw;
             let (mut it, _) = l.thumb.fit(raw);
-            if l.down > 0 {
+            if l.down > 0 || l.linger > 0 {
                 it = Intent::default();
             }
+            let active = it.throttle > 0 || it.verb != crate::motion::Verb::None;
+            l.idle = if active { 0 } else { l.idle.saturating_add(1) };
+            if active {
+                l.dwell = None;
+            }
+            if l.bot.is_none() {
+                l.played = l.played.saturating_add(1);
+            }
+            l.me.act.build = l.build.is_some();
             let flying = l.me.body.mv == Move::Stun;
             let recovering = l.me.act.act == crate::combat::Act::Recover;
             let (moved, swing) = control(&mut l.me, &it, l.glim, l.flow, &self.tiles, &self.laws);
@@ -343,6 +467,7 @@ impl World {
             if let Some(s) = swing {
                 swings.push((i, s));
             }
+            acts.push((i, it.verb, it.throttle > 0));
             moves.push((i, moved, flying));
         }
         for &(i, m, _) in &moves {
@@ -354,8 +479,22 @@ impl World {
         for (i, m, flying) in moves {
             self.hazards(i, m, flying);
         }
+        for (i, verb, stick) in acts {
+            if i < self.lumens.len() && self.lumens[i].alive() {
+                self.acts(i, verb, stick);
+                self.kindle(i);
+                self.bank(i);
+            }
+        }
+        self.snuff();
+        self.dwell();
+        if self.tick.is_multiple_of(crate::laws::HZ) {
+            self.grow();
+            self.tend_land();
+        }
         self.motes_and_pickups();
         self.vitals();
+        self.sleepers();
         self.push_apart();
         let now: Vec<(u16, Fx, Fx)> = self
             .lumens
@@ -421,6 +560,10 @@ impl World {
             self.events.push(Event::Save { id });
             self.technique(i, "ledge save");
         }
+        if m.sling > 0 || m.kicked || m.saved {
+            let xp = self.laws.xp_way;
+            self.gain(i, 5, xp);
+        }
     }
 
     /// Hazards after the move: walls hit in flight, thorns, the void.
@@ -448,7 +591,10 @@ impl World {
             ]
             .iter()
             .map(|&(dx, dy)| (x.add(dx).floor(), y.add(dy).floor()))
-            .find(|&(tx, ty)| self.tiles.get(tx, ty).obj == obj::BRAMBLE);
+            .find(|&(tx, ty)| {
+                let t = self.tiles.get(tx, ty);
+                t.obj == obj::BRAMBLE || (t.obj == obj::THORNS && t.owner() != lum.claim)
+            });
             if let Some((tx, ty)) = near {
                 let (cx, cy) = (Fx::int(tx).add(Fx::HALF), Fx::int(ty).add(Fx::HALF));
                 let mut h = engine::fixed::atan2(y.sub(cy), x.sub(cx));
@@ -525,54 +671,25 @@ impl World {
     /// glim taken by the Dark), and it returns in three seconds.
     pub fn gutter(&mut self, i: usize, by: u16, cause: Cause) {
         let tick = self.tick;
-        let l = &self.laws;
-        let lum = &self.lumens[i];
-        if !lum.alive() {
+        if !self.lumens[i].alive() {
             return;
         }
-        let (sx, sy) = lum.me.body.safe;
-        let share = match self.ring_at(sx, sy) {
-            Ring::Rim => l.rim_drop,
-            Ring::Dim => l.dim_drop,
-            _ => 0,
-        };
-        let dropped = (lum.glim as i64 * share as i64 / 1000) as u32;
-        let kept_by_dark = dropped / 2;
-        let scatter = l.scatter;
-        let mut left = dropped - kept_by_dark;
-        let id = lum.id;
-        {
-            let lum = &mut self.lumens[i];
-            lum.glim -= dropped;
-            lum.descent = self.laws.descent;
-            lum.cause = cause;
-            lum.killer = by;
-            lum.down = 0;
-            lum.me.body.vx = Fx::ZERO;
-            lum.me.body.vy = Fx::ZERO;
-            if dropped > 0 || cause != Cause::Dark {
-                lum.deaths.push(tick);
-            }
-        }
-        while left > 0 {
-            let g = left.min(5);
-            left -= g;
-            let h = self.rng.below(65536) as u16;
-            let r = Fx((scatter.0 as i64 * self.rng.below(1000) as i64 / 1000) as i32);
-            let (ux, uy) = engine::fixed::unit(h);
-            let (px, py) = (sx.add(ux.mul(r)), sy.add(uy.mul(r)));
-            let spot = if self.tiles.under(px, py).void() {
-                (sx, sy)
-            } else {
-                (px, py)
-            };
-            let pid = self.new_id();
-            self.pickups.push(Pickup {
-                id: pid,
-                x: spot.0,
-                y: spot.1,
-                glim: g,
-            });
+        self.drop_wick(i);
+        let dropped = self.drop_bag(i);
+        let id = self.lumens[i].id;
+        let lum = &mut self.lumens[i];
+        lum.descent = self.laws.descent;
+        lum.cause = cause;
+        lum.killer = by;
+        lum.down = 0;
+        lum.rekindle = 0;
+        lum.recall = 0;
+        lum.channel = None;
+        lum.dwell = None;
+        lum.me.body.vx = Fx::ZERO;
+        lum.me.body.vy = Fx::ZERO;
+        if dropped > 0 || cause != Cause::Dark {
+            lum.deaths.push(tick);
         }
         self.events.push(Event::Gutter { id, by });
         self.count(match cause {
@@ -592,12 +709,14 @@ impl World {
             if self.lumens[i].descent > 0 {
                 self.lumens[i].descent -= 1;
                 if self.lumens[i].descent == 0 {
-                    let (x, y) = self.spawn_spot();
+                    let (x, y) = self.return_spot(i);
                     let lum = &mut self.lumens[i];
                     lum.me = Me {
                         body: Body::at(x, y, &l),
                         ..Me::default()
                     };
+                    lum.me.body.claim = lum.claim;
+                    lum.me.body.load = lum.materials();
                     lum.flame = l.flame;
                     lum.ghost = l.ghost;
                     lum.flow = 0;

@@ -72,20 +72,33 @@ impl World {
                 let tick = self.tick;
                 let me = &self.lumens[i];
                 let inner = (l.inner_cone / 2) as i32;
-                let pick = cands
-                    .iter()
-                    .filter(|c| {
-                        let o = &self.lumens[c.0];
-                        me.engaged_with(o.id, tick)
-                            || o.engaged_with(id, tick)
-                            || c.2.abs() <= inner
-                    })
-                    .min_by_key(|c| {
-                        let o = &self.lumens[c.0];
-                        let engaged = me.engaged_with(o.id, tick) || o.engaged_with(id, tick);
-                        (!engaged, c.1)
-                    })
-                    .copied();
+                let engaged = |c: &&(usize, Fx, i32)| {
+                    let o = &self.lumens[c.0];
+                    me.engaged_with(o.id, tick) || o.engaged_with(id, tick)
+                };
+                // First a Lumen you are fighting; then a node (or your own
+                // empty planter); then anyone in the inner cone.
+                let fighting = cands.iter().filter(engaged).min_by_key(|c| c.1).copied();
+                if fighting.is_none() {
+                    if let Some(idx) = self.node_in_reach(i) {
+                        self.strike_node(i, idx, false);
+                        return;
+                    }
+                    let b = self.lumens[i].me.body;
+                    let (gx, gy) = crate::build::ghost(b.x, b.y, b.facing);
+                    if let Some(idx) = crate::tiles::Tiles::index(gx, gy) {
+                        if self.plant(i, idx as u16) {
+                            return;
+                        }
+                    }
+                }
+                let pick = fighting.or_else(|| {
+                    cands
+                        .iter()
+                        .filter(|c| c.2.abs() <= inner)
+                        .min_by_key(|c| c.1)
+                        .copied()
+                });
                 match pick {
                     Some((j, _, off)) => {
                         // Facing turns toward what it hits.
@@ -246,6 +259,22 @@ impl World {
         }
         // Striking a Lumen ends your own ghost.
         self.lumens[i].ghost = 0;
+        // Sparks: a newcomer outside the Sanctum and the Rim takes nothing
+        // from a Lumen; a newcomer who strikes outside the Sanctum gives
+        // its Sparks up, and that strike lands.
+        let ring_t = self.ring_at(tx, ty);
+        if self.lumens[i].spark(&l) && ring_t != Ring::Sanctum {
+            self.lumens[i].sparks_off = true;
+        }
+        if self.lumens[j].spark(&l) && !matches!(ring_t, Ring::Sanctum | Ring::Rim) {
+            self.events.push(Event::Hit {
+                by: a_id,
+                on: t_id,
+                damage: 0,
+                big: false,
+            });
+            return false;
+        }
         let (ring, sanctum) = {
             let r = self.ring_at(tx, ty);
             (r, r == Ring::Sanctum)
@@ -272,6 +301,8 @@ impl World {
             e.push((y, tick + l.engaged));
         }
         self.lumens[j].last_hit = (a_id, tick);
+        let valor = (dmg / 1000).max(0) as u32 * l.xp_valor;
+        self.gain(i, 4, valor);
         let cause = if blow == Blow::Mote {
             Cause::Mote
         } else {
@@ -358,21 +389,46 @@ impl World {
         for (x, y) in landed {
             let id = self.new_id();
             let glim = self.laws.throw_glim;
-            self.pickups.push(Pickup { id, x, y, glim });
+            self.pickups.push(Pickup {
+                id,
+                x,
+                y,
+                glim,
+                ..Pickup::default()
+            });
         }
-        // Pickups: the first Lumen within reach takes it.
+        // Pickups: the first Lumen within reach takes what it can carry.
         let reach = Fx::milli(600);
-        let mut taken = Vec::new();
-        for p in &self.pickups {
-            if let Some(i) = self.lumens.iter().position(|o| {
+        let (gmax, cmax) = (self.laws.glim_max, self.laws.carry_max);
+        for k in (0..self.pickups.len()).rev() {
+            let p = self.pickups[k].clone();
+            let Some(i) = self.lumens.iter().position(|o| {
                 o.alive() && o.down == 0 && len(o.me.body.x.sub(p.x), o.me.body.y.sub(p.y)) <= reach
-            }) {
-                taken.push((p.id, i, p.glim));
+            }) else {
+                continue;
+            };
+            let o = &mut self.lumens[i];
+            let g = p.glim.min(gmax.saturating_sub(o.glim));
+            o.glim += g;
+            let mut room = cmax.saturating_sub(o.materials());
+            let mut take = |v: u32| {
+                let t = v.min(room);
+                room -= t;
+                t
+            };
+            let (w, s, h) = (take(p.wood), take(p.stone), take(p.wheat));
+            o.wood += w;
+            o.stone += s;
+            o.wheat += h;
+            o.me.body.load = o.materials();
+            let left = &mut self.pickups[k];
+            left.glim -= g;
+            left.wood -= w;
+            left.stone -= s;
+            left.wheat -= h;
+            if left.glim + left.wood + left.stone + left.wheat == 0 {
+                self.pickups.remove(k);
             }
-        }
-        for (pid, i, g) in taken {
-            self.lumens[i].glim += g;
-            self.pickups.retain(|p| p.id != pid);
         }
     }
 }
