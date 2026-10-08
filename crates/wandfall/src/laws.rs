@@ -64,12 +64,14 @@ pub const HEALTH: i32 = 100;
 /// Seconds without being hurt before health returns, and how fast.
 pub const REGEN_AFTER: u32 = 6;
 pub const REGEN: i32 = 3;
-pub const BOLT_SPEED: f32 = 75.0;
-/// Ticks a bolt flies (a second: 75 m).
+pub const BOLT_SPEED: f32 = 80.0;
+/// Ticks a bolt flies (a second: 80 m).
 pub const BOLT_LIFE: u32 = 30;
-pub const BOLT_DAMAGE: i32 = 12;
+/// The wand is the heartbeat, spells the moments: a bolt is a quarter of
+/// a spell.
+pub const BOLT_DAMAGE: i32 = 8;
 /// Ticks between bolts.
-pub const BOLT_COOLDOWN: u32 = 11;
+pub const BOLT_COOLDOWN: u32 = 13;
 pub const BOLT_RADIUS: f32 = 0.2;
 
 // Bots.
@@ -106,15 +108,18 @@ pub const CHESTS: usize = 40;
 pub const CHEST_REACH: f32 = 1.7;
 pub const SCROLL_REACH: f32 = 1.4;
 pub const SCROLLS_A_CHEST: usize = 2;
-pub const MAX_RANK: u8 = 5;
+pub const MAX_RANK: u8 = 3;
 /// One scroll in this many from a chest is rank 2.
 pub const RARE_SCROLL: u64 = 5;
+/// Each rank above the first: this much more power (percent), and this
+/// much less cooldown.
+pub const RANK_POWER: i32 = 25;
+pub const RANK_COOLDOWN: u32 = 10;
 
 // Aiming down the wand (right click): slower, and the page zooms.
 pub const AIM_SLOW: f32 = 0.55;
-pub const HASTE: f32 = 1.5;
 
-/// Spells: two offensive slots (Q, E), two utility (R, F).
+/// Spells: two to hurt (Q, E), two to live (R, F).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Offense,
@@ -124,133 +129,128 @@ pub enum Kind {
 pub struct Spell {
     pub name: &'static str,
     pub kind: Kind,
-    /// Ticks between casts at rank 1 (each rank 6% less).
+    /// Ticks between casts at rank 1.
     pub cooldown: u32,
-    /// Damage, healing, shield or ticks at rank 1, and percent more a rank.
+    /// Damage, metres, shield, healing or push at rank 1.
     pub power: i32,
-    pub per_rank: i32,
+    /// What it does, what it beats, and what beats it.
     pub what: &'static str,
+    pub beats: &'static str,
+    pub beaten: &'static str,
 }
 
+/// Eight spells, one verb each. Every style has its answer: range beats
+/// the mender, close beats the sniper, Gust and Blink beat close, the sky
+/// beats the still, moving beats the sky.
 pub mod spell {
-    pub const LANCE: u8 = 0;
-    pub const COMET: u8 = 1;
-    pub const CHAIN: u8 = 2;
-    pub const STARFALL: u8 = 3;
-    pub const ROOT: u8 = 4;
-    pub const BLINK: u8 = 5;
-    pub const WARD: u8 = 6;
-    pub const MEND: u8 = 7;
-    pub const GUST: u8 = 8;
-    pub const HASTE: u8 = 9;
+    pub const FIREBALL: u8 = 0;
+    pub const LANCE: u8 = 1;
+    pub const FROST: u8 = 2;
+    pub const LIGHTNING: u8 = 3;
+    pub const BLINK: u8 = 4;
+    pub const WARD: u8 = 5;
+    pub const MEND: u8 = 6;
+    pub const GUST: u8 = 7;
+    pub const OFFENSE: [u8; 4] = [FIREBALL, LANCE, FROST, LIGHTNING];
+    pub const UTILITY: [u8; 4] = [BLINK, WARD, MEND, GUST];
 }
 
-pub const SPELLS: [Spell; 10] = [
+pub const SPELLS: [Spell; 8] = [
+    Spell {
+        name: "Fireball",
+        kind: Kind::Offense,
+        cooldown: 150,
+        power: 30,
+        what: "a ball of fire that bursts where it lands",
+        beats: "the splash finds them behind cover",
+        beaten: "a Ward; a sidestep, far off",
+    },
     Spell {
         name: "Lance",
         kind: Kind::Offense,
         cooldown: 180,
-        power: 30,
-        per_rank: 15,
-        what: "a piercing beam, fast and far",
+        power: 34,
+        what: "an instant beam of light, far",
+        beats: "the still, the far, the mending",
+        beaten: "cover, a Ward, a foe in your face",
     },
     Spell {
-        name: "Comet",
+        name: "Frost",
+        kind: Kind::Offense,
+        cooldown: 150,
+        power: 6,
+        what: "a fan of ice: deadly close, and it chills",
+        beats: "the runner, the sniper caught close",
+        beaten: "Gust, Blink, range",
+    },
+    Spell {
+        name: "Lightning",
         kind: Kind::Offense,
         cooldown: 240,
-        power: 30,
-        per_rank: 15,
-        what: "a slow orb that bursts where it lands",
-    },
-    Spell {
-        name: "Chain Spark",
-        kind: Kind::Offense,
-        cooldown: 210,
-        power: 18,
-        per_rank: 15,
-        what: "leaps to the wizards near the one it strikes",
-    },
-    Spell {
-        name: "Starfall",
-        kind: Kind::Offense,
-        cooldown: 360,
-        power: 40,
-        per_rank: 15,
-        what: "light falls where you look, after a breath",
-    },
-    Spell {
-        name: "Root",
-        kind: Kind::Utility,
-        cooldown: 360,
-        power: 36,
-        per_rank: 15,
-        what: "a bolt that holds its mark in place",
+        power: 42,
+        what: "strikes where you look, a breath later",
+        beats: "the still, the shielded, the hidden",
+        beaten: "anyone who moves",
     },
     Spell {
         name: "Blink",
         kind: Kind::Utility,
-        cooldown: 300,
-        power: 11,
-        per_rank: 12,
-        what: "step through the air to where you look",
+        cooldown: 240,
+        power: 12,
+        what: "step through the air; shakes off chill",
+        beats: "Lightning, Frost, a corner",
+        beaten: "the Lance (no dodging light)",
     },
     Spell {
         name: "Ward",
         kind: Kind::Utility,
-        cooldown: 480,
-        power: 35,
-        per_rank: 15,
-        what: "a shield that takes the hurt for you",
+        cooldown: 360,
+        power: 40,
+        what: "a brief shield that eats the next big hit",
+        beats: "a Lance, a Fireball",
+        beaten: "patience: it is brief",
     },
     Spell {
         name: "Mend",
         kind: Kind::Utility,
-        cooldown: 540,
-        power: 45,
-        per_rank: 15,
-        what: "heal, a little at a time",
+        cooldown: 420,
+        power: 40,
+        what: "heal, quickly",
+        beats: "the long fight, the storm",
+        beaten: "a burst; Lightning on the still",
     },
     Spell {
         name: "Gust",
         kind: Kind::Utility,
-        cooldown: 300,
-        power: 10,
-        per_rank: 15,
-        what: "throw back everyone near you",
-    },
-    Spell {
-        name: "Haste",
-        kind: Kind::Utility,
-        cooldown: 450,
-        power: 120,
-        per_rank: 12,
-        what: "run half again as fast, a while",
+        cooldown: 270,
+        power: 16,
+        what: "throw back all near you, and their bolts",
+        beats: "Frost, a rush, a ledge, the storm",
+        beaten: "anything from afar",
     },
 ];
 
 // The spells' shapes.
-pub const LANCE_SPEED: f32 = 160.0;
-pub const LANCE_LIFE: u32 = 18;
-pub const COMET_SPEED: f32 = 38.0;
-pub const COMET_LIFE: u32 = 60;
-pub const COMET_RADIUS: f32 = 4.5;
-pub const CHAIN_SPEED: f32 = 95.0;
-pub const CHAIN_LIFE: u32 = 25;
-pub const CHAIN_REACH: f32 = 10.0;
-/// Leaps: this many, one more every two ranks; each this share as strong.
-pub const CHAIN_LEAPS: u8 = 2;
-pub const CHAIN_FADE: i32 = 80;
-pub const STARFALL_RANGE: f32 = 45.0;
-pub const STARFALL_RADIUS: f32 = 5.0;
-pub const STARFALL_DELAY: u32 = 24;
-pub const ROOT_SPEED: f32 = 85.0;
-pub const ROOT_LIFE: u32 = 25;
-pub const ROOT_DAMAGE: i32 = 8;
-pub const WARD_TICKS: u32 = 150;
-pub const MEND_TICKS: u32 = 120;
-pub const GUST_RADIUS: f32 = 6.5;
-pub const GUST_PUSH: f32 = 15.0;
+pub const FIREBALL_SPEED: f32 = 48.0;
+pub const FIREBALL_LIFE: u32 = 45;
+pub const FIREBALL_RADIUS: f32 = 3.5;
+pub const LANCE_RANGE: f32 = 80.0;
+/// Frost: shards in a fan, this far apart (of 65536 a turn), how fast and
+/// how long they fly, and how long and how much they chill.
+pub const FROST_SHARDS: usize = 7;
+pub const FROST_SPREAD: i32 = 620;
+pub const FROST_SPEED: f32 = 55.0;
+pub const FROST_LIFE: u32 = 12;
+pub const CHILL_TICKS: u16 = 60;
+pub const CHILL_SLOW: f32 = 0.6;
+pub const LIGHTNING_RANGE: f32 = 50.0;
+pub const LIGHTNING_DELAY: u32 = 24;
+pub const LIGHTNING_RADIUS: f32 = 4.0;
+pub const WARD_TICKS: u32 = 120;
+pub const MEND_TICKS: u32 = 60;
+pub const GUST_RADIUS: f32 = 7.0;
 pub const GUST_LIFT: f32 = 7.0;
+pub const GUST_DAMAGE: i32 = 5;
 
 // The practice range: dummies about where you start (metres away,
 // degrees round, and how they behave: 1 stands, 2 strafes, 3 spars when

@@ -29,6 +29,7 @@ const TERRAIN: i32 = 1;
 const FOLIAGE: i32 = 2;
 const WATER: i32 = 3;
 const METAL: i32 = 4;
+const RIM: i32 = 5;
 
 @vertex
 fn world_vs(v: WorldIn) -> WorldOut {
@@ -125,6 +126,13 @@ fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
     let mat = i32(i.extra.z + 0.5);
     if (mat == WATER) {
         return sea(i.pos, i.tint.a);
+    }
+    if (mat == RIM) {
+        // Energy: bright where it is seen edge on, clear face on.
+        let v = normalize(g.eye.xyz - i.pos);
+        let edge = pow(1.0 - abs(dot(n, v)), 2.5);
+        let c = linear(i.col.rgb) * linear(i.tint.rgb) * (0.1 + edge * 2.5) * (1.0 + (i.col.a + i.extra.x) * 3.0);
+        return vec4<f32>(c, i.tint.a);
     }
     var base = linear(i.col.rgb) * linear(i.tint.rgb);
     var rough = i.extra.y;

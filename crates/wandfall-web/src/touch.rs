@@ -5,14 +5,13 @@
 //! lies underfoot).
 
 use kit::input::Kind;
-use pixels::{Canvas, Rgba};
+use pixels::{Canvas, Rect, Rgba};
 use wandfall::laws::TICK_HZ;
 use wandfall::loot::cooldown;
 use wandfall::motion::{cast, keys};
 use wandfall::proto::Own;
 
-use crate::bar::{icon, rgba, KEYS};
-use crate::fx::colour;
+use crate::bar::{icon, KEYS};
 
 /// Radians a CSS pixel of drag turns the view.
 const LOOK: f32 = 0.0065;
@@ -229,12 +228,13 @@ impl Touch {
                         label(c, KEYS[k]);
                         continue;
                     };
-                    let s = px(r * 1.2);
-                    icon(c, sp, px(x) - s / 2.0, px(y) - s / 2.0, s, rgba(colour(sp)));
+                    let s = px(r * 1.3);
+                    let tile = Rect::new(px(x) - s / 2.0, px(y) - s / 2.0, s, s);
+                    icon(c, sp, tile);
                     let cd = own.map_or(0, |o| o.cds[k]) as u32;
                     if cd > 0 {
-                        let left = cd as f32 / cooldown(sp, rank).max(1) as f32;
-                        c.circle(px(x), px(y), px(r) * left, Rgba(0, 0, 0, 140));
+                        let left = (cd as f32 / cooldown(sp, rank).max(1) as f32).min(1.0);
+                        c.sweep(tile, s * 0.2, 1.0 - left, 1.0, Rgba(4, 6, 12, 175));
                         c.text_centred(
                             px(x) as i32,
                             (px(y) - 3.0) as i32,

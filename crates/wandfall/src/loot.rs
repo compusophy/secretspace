@@ -36,13 +36,13 @@ pub fn level_scale(level: u8, v: i32) -> i32 {
 /// A spell's power at a rank.
 pub fn power(spell: u8, rank: u8) -> i32 {
     let s = &SPELLS[spell as usize % SPELLS.len()];
-    s.power * (100 + s.per_rank * (rank.max(1) as i32 - 1)) / 100
+    s.power * (100 + RANK_POWER * (rank.max(1) as i32 - 1)) / 100
 }
 
 /// A spell's cooldown at a rank (ticks).
 pub fn cooldown(spell: u8, rank: u8) -> u32 {
     let s = &SPELLS[spell as usize % SPELLS.len()];
-    s.cooldown * (100 - 6 * (rank.max(1) as u32 - 1)) / 100
+    s.cooldown * (100 - RANK_COOLDOWN * (rank.clamp(1, MAX_RANK) as u32 - 1)) / 100
 }
 
 /// The slots a kind of spell goes in.
@@ -254,7 +254,7 @@ mod tests {
         // Out of the lobby's practice set.
         p.slots = [None; 4];
         assert_eq!(take(p, spell::LANCE, 1, false), Some(None));
-        assert_eq!(take(p, spell::COMET, 1, false), Some(None));
+        assert_eq!(take(p, spell::FIREBALL, 1, false), Some(None));
         assert_eq!(take(p, spell::LANCE, 1, false), Some(None));
         assert_eq!(
             p.slots[0],
@@ -264,15 +264,15 @@ mod tests {
             })
         );
         assert_eq!(
-            take(p, spell::CHAIN, 1, false),
+            take(p, spell::FROST, 1, false),
             None,
             "both offensive slots are full"
         );
-        let old = take(p, spell::CHAIN, 1, true).unwrap();
+        let old = take(p, spell::FROST, 1, true).unwrap();
         assert_eq!(
             old,
             Some(Slot {
-                spell: spell::COMET,
+                spell: spell::FIREBALL,
                 rank: 1
             }),
             "the weaker goes"
@@ -296,7 +296,8 @@ mod tests {
         assert_eq!(max_hp(1), HEALTH);
         assert!(max_hp(20) > max_hp(10));
         assert!(level_scale(20, 100) > level_scale(1, 100));
-        assert!(power(spell::LANCE, 5) > power(spell::LANCE, 1));
-        assert!(cooldown(spell::LANCE, 5) < cooldown(spell::LANCE, 1));
+        assert!(power(spell::LANCE, MAX_RANK) > power(spell::LANCE, 1));
+        assert!(cooldown(spell::LANCE, MAX_RANK) < cooldown(spell::LANCE, 1));
+        assert_eq!(power(spell::WARD, 3), 60, "a rank is a quarter more");
     }
 }

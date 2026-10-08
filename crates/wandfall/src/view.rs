@@ -58,8 +58,7 @@ pub fn frame(w: &World, you: u16) -> Frame {
                 hp: p.hp.clamp(0, u16::MAX as i32) as u16,
                 level: p.level,
                 fx: if p.shield > 0 { fx::SHIELD } else { 0 }
-                    | if p.body.root > 0 { fx::ROOTED } else { 0 }
-                    | if p.body.haste > 0 { fx::HASTED } else { 0 }
+                    | if p.body.chill > 0 { fx::CHILLED } else { 0 }
                     | if p.mend > 0 { fx::MENDING } else { 0 }
                     | if p.last.keys & keys::AIM != 0 {
                         fx::AIM

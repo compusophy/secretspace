@@ -28,6 +28,8 @@ pub struct Slot {
 
 /// What a bolt is: the wand's, or a spell's.
 pub const WAND: u8 = 200;
+/// What hurt someone, when it was the storm.
+pub const STORM: u8 = 255;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -96,17 +98,18 @@ pub struct Bolt {
     pub p: [f32; 3],
     pub v: [f32; 3],
     pub life: u32,
-    /// Its damage, and ticks it holds its mark (Root).
+    /// Its damage.
     pub power: i32,
-    pub hold: u16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
+    /// `what` hurt: `WAND`, a spell, or `STORM`.
     Hit {
         by: u16,
         to: u16,
         amount: u16,
+        what: u8,
     },
     /// Someone is out: who, by whom (0: the storm), their place.
     Out {
@@ -120,17 +123,20 @@ pub enum Event {
     /// The fight began; the lobby began.
     Begin,
     Lobby,
-    /// A spell cast (stage 0) or landing (stage 1), at a point.
+    /// A spell: cast (stage 0, at the wand), landing (1), or marking
+    /// (2: Lightning's warning; a Ward breaking).
     Cast {
         by: u16,
         spell: u8,
         stage: u8,
         at: [f32; 3],
     },
-    /// A chain spark leaping from one wizard to another.
-    Link {
-        from: u16,
-        to: u16,
+    /// A beam of light from one point to another (the Lance).
+    Beam {
+        by: u16,
+        spell: u8,
+        from: [f32; 3],
+        to: [f32; 3],
     },
     Level {
         who: u16,
@@ -343,6 +349,12 @@ impl World {
             p.cool = 0;
             p.hurt_at = 0;
             fresh(p);
+            // Everyone drops with a spell to hurt with; the rest is loot.
+            let first = spell::OFFENSE[(self.rng.next_u64() % 4) as usize];
+            p.slots[0] = Some(Slot {
+                spell: first,
+                rank: 1,
+            });
         }
         self.storm = Storm::plan(&self.map, &mut self.rng);
         self.bolts.clear();
@@ -406,8 +418,8 @@ impl World {
         ev.push(Event::Out { who, by, place });
     }
 
-    /// `by` (0: the storm) hurts `to`: a ward takes it first.
-    pub(crate) fn hurt(&mut self, by: u16, to: u16, amount: i32, ev: &mut Vec<Event>) {
+    /// `by` (0: the storm) hurts `to` with `what`: a ward takes it first.
+    pub(crate) fn hurt(&mut self, by: u16, to: u16, amount: i32, what: u8, ev: &mut Vec<Event>) {
         if self.phase != Phase::Fight || amount <= 0 {
             return;
         }
@@ -428,15 +440,25 @@ impl World {
         // What was really taken (not past the last of it) earns XP.
         let dealt = amount.min(p.hp.max(0) + p.shield);
         let soaked = amount.min(p.shield);
+        let broke = soaked > 0 && soaked == p.shield;
         p.shield -= soaked;
         p.hp -= amount - soaked;
         p.hurt_at = tick;
         let dead = p.hp <= 0;
+        if broke {
+            ev.push(Event::Cast {
+                by: to,
+                spell: spell::WARD,
+                stage: 2,
+                at: [p.body.p[0], p.body.p[1] + 1.0, p.body.p[2]],
+            });
+        }
         if by != 0 {
             ev.push(Event::Hit {
                 by,
                 to,
                 amount: amount as u16,
+                what,
             });
             loot::gain(self, by, (dealt / XP_DAMAGE) as u32, ev);
         }
@@ -575,7 +597,6 @@ impl World {
                 v,
                 life: BOLT_LIFE,
                 power,
-                hold: 0,
             });
         }
         // Fallen off into the deep (should not happen): back on land.
@@ -627,8 +648,8 @@ impl World {
                     b.p = e;
                     keep.push(b);
                 }
-                // A comet bursts at the end of its flight too.
-                None if b.kind == spell::COMET => impacts.push((b, e, 0)),
+                // A fireball bursts at the end of its flight too.
+                None if b.kind == spell::FIREBALL => impacts.push((b, e, 0)),
                 None => {}
             }
         }
@@ -657,7 +678,7 @@ impl World {
             }
         }
         for id in burned {
-            self.hurt(0, id, storm.dps, ev);
+            self.hurt(0, id, storm.dps, STORM, ev);
         }
     }
 }
@@ -671,36 +692,18 @@ fn fresh(p: &mut Player) {
     p.shield = 0;
     p.mend = 0;
     p.hp = p.max_hp();
-    p.body.haste = 0;
-    p.body.root = 0;
+    p.body.chill = 0;
 }
 
 /// In the lobby, a spell of every slot to practise with (unhurt).
 pub(crate) fn warmup(p: &mut Player, rng: &mut Rng) {
-    let mut pick = |from: &[u8]| from[(rng.next_u64() % from.len() as u64) as usize];
-    let off = [spell::LANCE, spell::COMET, spell::CHAIN, spell::STARFALL];
-    let util = [
-        spell::ROOT,
-        spell::BLINK,
-        spell::WARD,
-        spell::MEND,
-        spell::GUST,
-        spell::HASTE,
-    ];
-    let a = pick(&off);
-    let b = loop {
-        let b = pick(&off);
-        if b != a {
-            break b;
-        }
+    let mut two = |from: [u8; 4]| {
+        let a = (rng.next_u64() % 4) as usize;
+        let b = (a + 1 + (rng.next_u64() % 3) as usize) % 4;
+        [from[a], from[b]]
     };
-    let c = pick(&util);
-    let d = loop {
-        let d = pick(&util);
-        if d != c {
-            break d;
-        }
-    };
+    let [a, b] = two(spell::OFFENSE);
+    let [c, d] = two(spell::UTILITY);
     p.slots = [a, b, c, d].map(|spell| Some(Slot { spell, rank: 1 }));
 }
 

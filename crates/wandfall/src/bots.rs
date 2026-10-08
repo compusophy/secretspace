@@ -158,9 +158,10 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
         } else {
             keys::LEFT
         };
-        if d > BOT_RANGE * 1.4 {
+        let want = range(me);
+        if d > want * 1.4 {
             keys |= keys::FWD;
-        } else if d < BOT_RANGE * 0.6 {
+        } else if d < want * 0.6 {
             keys |= keys::BACK;
         }
         if unit(m.seed, tick, 8) < 0.02 {
@@ -228,11 +229,26 @@ fn wants(me: &Player, spell: u8, rank: u8) -> bool {
             < rank
 }
 
-/// Which spells a bot casts now: at its mark when it has one, to save
-/// itself when hurt, to run when the storm comes.
+/// The distance a bot likes to fight at: close with Frost, far with the
+/// Lance.
+pub fn range(me: &Player) -> f32 {
+    let has = |sp| me.slots.iter().flatten().any(|s| s.spell == sp);
+    if has(spell::FROST) {
+        BOT_RANGE * 0.45
+    } else if has(spell::LANCE) {
+        BOT_RANGE * 1.5
+    } else {
+        BOT_RANGE
+    }
+}
+
+/// Which spells a bot casts now: at its mark when it has one (each from
+/// the distance it is good at), to save itself when hurt, to run when the
+/// storm comes or chill holds it.
 fn spells(me: &Player, mark: Option<f32>, flee: bool, tick: u32, seed: u64) -> u8 {
     let mut bits = 0;
     let hurt = me.hp * 100 / me.max_hp().max(1);
+    let struck = tick.saturating_sub(me.hurt_at) < 20;
     for (k, slot) in me.slots.iter().enumerate() {
         let Some(s) = slot else {
             continue;
@@ -241,12 +257,16 @@ fn spells(me: &Player, mark: Option<f32>, flee: bool, tick: u32, seed: u64) -> u
             continue;
         }
         let go = match (s.spell, mark) {
-            (spell::LANCE | spell::COMET | spell::CHAIN | spell::STARFALL, Some(d)) => d < 40.0,
-            (spell::ROOT, Some(d)) => d < 30.0,
-            (spell::GUST, Some(d)) => d < GUST_RADIUS * 0.8,
-            (spell::WARD, _) => tick.saturating_sub(me.hurt_at) < 20 && hurt < 75,
+            (spell::LANCE, Some(d)) => d < 50.0,
+            (spell::FIREBALL, Some(d)) => d < 32.0,
+            (spell::FROST, Some(d)) => d < 9.0,
+            (spell::LIGHTNING, Some(d)) => d > 6.0 && d < 40.0,
+            (spell::GUST, Some(d)) => d < GUST_RADIUS * 0.7,
+            (spell::WARD, _) => struck && hurt < 85,
             (spell::MEND, _) => hurt < 55,
-            (spell::HASTE | spell::BLINK, _) => flee || (hurt < 30 && mark.is_some()),
+            (spell::BLINK, _) => {
+                flee || (mark.is_some() && (me.body.chill > 0 || (struck && hurt < 30)))
+            }
             _ => false,
         };
         if go {

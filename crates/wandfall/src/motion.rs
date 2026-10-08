@@ -43,9 +43,8 @@ pub struct Body {
     pub ground: bool,
     /// Falling slowly from the drop until it lands.
     pub glide: bool,
-    /// Ticks left hasted, and held in place.
-    pub haste: u16,
-    pub root: u16,
+    /// Ticks left chilled (by Frost): slower.
+    pub chill: u16,
 }
 
 fn toward(v: f32, want: f32, step: f32) -> f32 {
@@ -59,8 +58,7 @@ fn toward(v: f32, want: f32, step: f32) -> f32 {
 /// One tick of a body under an input.
 pub fn step(b: &mut Body, i: &Input, map: &Map) {
     let (s, c) = trig::sin_cos(i.yaw);
-    let held = b.root > 0;
-    let has = |k| i.keys & k != 0 && !held;
+    let has = |k| i.keys & k != 0;
     let f = has(keys::FWD) as i32 as f32 - has(keys::BACK) as i32 as f32;
     let r = has(keys::RIGHT) as i32 as f32 - has(keys::LEFT) as i32 as f32;
     // Forward is (c, s) on the ground; right is (-s, c).
@@ -80,14 +78,13 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     } else {
         RUN
     };
-    if b.haste > 0 {
-        speed *= HASTE;
+    if b.chill > 0 {
+        speed *= CHILL_SLOW;
     }
     if i.keys & keys::AIM != 0 && !b.glide {
         speed *= AIM_SLOW;
     }
-    b.haste = b.haste.saturating_sub(1);
-    b.root = b.root.saturating_sub(1);
+    b.chill = b.chill.saturating_sub(1);
     let accel = if b.ground || b.glide {
         ACCEL_GROUND
     } else {
@@ -149,8 +146,8 @@ mod tests {
             ..Input::default()
         };
         let mut aim = b;
-        let mut fast = b;
-        fast.haste = 60;
+        let mut cold = b;
+        cold.chill = 30;
         for _ in 0..30 {
             step(&mut b, &run, &map);
         }
@@ -162,15 +159,11 @@ mod tests {
         };
         for _ in 0..30 {
             step(&mut aim, &aiming, &map);
-            step(&mut fast, &run, &map);
+            step(&mut cold, &run, &map);
         }
         assert!(aim.p[0] - start[0] < moved * 0.8, "aiming is slower");
-        assert!(fast.p[0] - start[0] > moved * 1.2, "haste is faster");
-        let mut held = stand(&map);
-        held.root = 30;
-        let p0 = held.p;
-        step(&mut held, &run, &map);
-        assert_eq!((held.p[0], held.p[2]), (p0[0], p0[2]), "rooted");
+        assert!(cold.p[0] - start[0] < moved * 0.8, "chilled is slower");
+        assert_eq!(cold.chill, 0, "and it wears off");
         let jump = Input {
             keys: keys::JUMP,
             ..Input::default()

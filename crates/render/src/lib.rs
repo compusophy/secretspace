@@ -52,6 +52,9 @@ pub enum Material {
     /// The sea (drawn by the engine from `Look::sea`).
     Water = 3,
     Metal = 4,
+    /// Energy (shields, shockwaves, beams): bright edge on, clear face
+    /// on, unlit. Drawn in the `Glow` or `Faint` pass.
+    Rim = 5,
 }
 
 /// One drawn thing: a mesh, where, its tint (alpha for `Faint`), how much

@@ -25,8 +25,9 @@ pub struct State {
     /// When your bolt last hit someone; when you were last hurt.
     pub hit_at: f64,
     pub hurt_at: f64,
-    /// Bursts of light where bolts struck someone: (when, who).
-    pub bursts: Vec<(f64, u16)>,
+    /// Bursts of light where something struck someone: (when, who,
+    /// what).
+    pub bursts: Vec<(f64, u16, u8)>,
     /// You are out: by whom, your place.
     pub out: Option<(u16, u16)>,
     pub joined: bool,
@@ -36,8 +37,13 @@ pub struct State {
     pub shows: Vec<(f64, Ev)>,
     /// When you last levelled, and to what.
     pub levelled: (f64, u8),
-    /// Your hits, to show their numbers: (when, on whom, how much).
-    pub numbers: Vec<(f64, u16, u16)>,
+    /// Your hits, to show their numbers: (when, on whom, how much, with
+    /// what).
+    pub numbers: Vec<(f64, u16, u16, u8)>,
+    /// When each of your spells was last ready again (a flash on the
+    /// bar), and its cooldown the frame before.
+    pub ready: [f64; 4],
+    cds: [u16; 4],
 }
 
 impl State {
@@ -63,6 +69,14 @@ impl State {
             Some(o) if (guess - o).abs() < 250.0 => o + (guess - o) * 0.05,
             _ => guess,
         });
+        if let Some(o) = &f.you {
+            for k in 0..4 {
+                if self.cds[k] > 0 && o.cds[k] == 0 {
+                    self.ready[k] = now;
+                }
+            }
+            self.cds = o.cds;
+        }
         self.snaps.push_back((f.tick, f.players.clone()));
         while self.snaps.len() > 12 {
             self.snaps.pop_front();
@@ -73,15 +87,20 @@ impl State {
     pub fn events(&mut self, list: Vec<Ev>, now: f64) {
         for e in list {
             match e {
-                Ev::Hit { by, to, amount } => {
+                Ev::Hit {
+                    by,
+                    to,
+                    amount,
+                    what,
+                } => {
                     if by == self.you {
                         self.hit_at = now;
-                        self.numbers.push((now, to, amount));
+                        self.numbers.push((now, to, amount, what));
                     }
                     if to == self.you {
                         self.hurt_at = now;
                     }
-                    self.bursts.push((now, to));
+                    self.bursts.push((now, to, what));
                 }
                 Ev::Out { who, by, place } => {
                     let line = if by == 0 {
@@ -110,14 +129,14 @@ impl State {
                     }
                     self.shows.push((now, e));
                 }
-                Ev::Cast { .. } | Ev::Link { .. } => self.shows.push((now, e)),
+                Ev::Cast { .. } | Ev::Beam { .. } => self.shows.push((now, e)),
             }
         }
         while self.feed.len() > 6 {
             self.feed.pop_front();
         }
         self.bursts.retain(|b| now - b.0 < 600.0);
-        self.shows.retain(|s| now - s.0 < 1600.0);
+        self.shows.retain(|s| now - s.0 < 4000.0);
         self.numbers.retain(|n| now - n.0 < 900.0);
     }
 

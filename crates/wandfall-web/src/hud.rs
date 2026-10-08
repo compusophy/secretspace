@@ -106,7 +106,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         }
     }
     // The numbers your hits do, rising off whom they struck.
-    for (k, &(at, to, amount)) in v.st.numbers.iter().enumerate() {
+    for (k, &(at, to, amount, what)) in v.st.numbers.iter().enumerate() {
         let Some(s) = v.others.iter().find(|s| s.id == to) else {
             continue;
         };
@@ -118,14 +118,12 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         }
         let sx = ((x / ww * 0.5 + 0.5) * w as f32) as i32;
         let sy = ((0.5 - y / ww * 0.5) * h as f32) as i32;
-        let big = if amount >= 30 { 3 } else { 2 };
-        c.text_centred(
-            sx,
-            sy,
-            &format!("{amount}"),
-            big * ui,
-            GOLD.fade(1.0 - age * age),
-        );
+        let big = if amount >= 25 { 3 } else { 2 };
+        let col = bar::rgba(crate::fx::colour(what)).mix(INK, 0.25);
+        let n = format!("{amount}");
+        let fade = 1.0 - age * age;
+        c.text_centred(sx + ui, sy + ui, &n, big * ui, SHADE.fade(fade));
+        c.text_centred(sx, sy, &n, big * ui, col.fade(fade));
     }
     // The crosshair, and a mark when your bolt lands.
     if v.me.is_some() {
@@ -209,19 +207,32 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     };
     let k = pixels::fit_scale(&top, w - 20 * ui, 2 * ui);
     c.text_shadowed(cx - pixels::text_width(&top, k) / 2, 8 * ui, &top, k, INK);
-    // Health (and a ward's shield over it), and the spell bar.
+    // Health (and a ward's shield after it), and the spell bar.
     if let Some(o) = v.own.filter(|_| v.me.is_some()) {
-        let (bw, bh) = (120 * ui, 8 * ui);
-        // On a touch screen the thumbs own the bottom: health goes on top.
-        let (x, y) = if v.touch {
-            (12 * ui, 40 * ui)
-        } else {
-            (12 * ui, h - 20 * ui)
-        };
+        // Warded: the screen's edge glows (you cannot see your own
+        // bubble from inside it).
+        if o.shield > 0 {
+            let ward = bar::rgba(crate::fx::colour(wandfall::laws::spell::WARD));
+            for k in 0..4 {
+                let inset = (k * 3 * ui) as f32;
+                let a = 0.32 - k as f32 * 0.07;
+                let r = Rect::new(inset, inset, w as f32 - 2.0 * inset, h as f32 - 2.0 * inset);
+                c.round_rect_line(r, 10.0 * ui as f32, 3.0 * ui as f32, ward.fade(a));
+            }
+        }
         let full = max_hp(o.level);
+        // Over the spell bar; on a touch screen the thumbs own the
+        // bottom, and health goes top left.
+        let (x, y, bw, bh) = if v.touch {
+            (12 * ui, 40 * ui, 120 * ui, 8 * ui)
+        } else {
+            let l = bar::layout(w, h, ui);
+            (l.x, l.y - 17 * ui, l.total, 9 * ui)
+        };
+        let u = ui as f32;
         c.round_rect(
             Rect::new(x as f32, y as f32, bw as f32, bh as f32),
-            2.0 * ui as f32,
+            2.0 * u,
             SHADE,
         );
         let k = (o.hp as i32 * bw / full).min(bw);
@@ -232,43 +243,36 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         };
         c.round_rect(
             Rect::new(x as f32, y as f32, k as f32, bh as f32),
-            2.0 * ui as f32,
+            2.0 * u,
             col,
         );
         if o.shield > 0 {
-            let sw = (o.shield as i32 * bw / full).min(bw);
+            let sw = (o.shield as i32 * bw / full).min(bw - k);
+            let ward = bar::rgba(crate::fx::colour(wandfall::laws::spell::WARD)).mix(INK, 0.3);
             c.round_rect(
-                Rect::new(x as f32, (y - 3 * ui) as f32, sw as f32, (2 * ui) as f32),
-                ui as f32,
-                Rgba::rgb(150, 214, 255),
+                Rect::new((x + k) as f32, y as f32, sw as f32, bh as f32),
+                2.0 * u,
+                ward,
             );
         }
+        let hp = format!("{} / {}", o.hp, full);
+        let ko = format!("knocked out {}", o.kills);
         if v.touch {
             // Stacked at the top left: health and level, XP, knockouts.
-            let line = format!("{} / {}   level {}", o.hp, full, o.level);
+            let line = format!("{hp}   level {}", o.level);
             c.text_shadowed(x, y - 12 * ui, &line, ui, INK);
-            c.text_shadowed(
-                x,
-                y + 16 * ui,
-                &format!("knocked out {}", o.kills),
-                ui,
-                GOLD,
-            );
+            c.text_shadowed(x, y + 16 * ui, &ko, ui, GOLD);
         } else {
-            c.text_shadowed(x, y - 12 * ui, &format!("{} / {}", o.hp, full), ui, INK);
-            let ko = format!("knocked out {}", o.kills);
-            c.text_shadowed(x + bw + 8 * ui, y, &ko, ui, GOLD);
+            c.text_centred(x + bw / 2, y + ui, &hp, ui, INK);
+            let s = (MINI * ui).min(w / 4).min(h / 4);
+            let kx = w - 10 * ui - pixels::text_width(&ko, ui);
+            c.text_shadowed(kx, 24 * ui + s + 6 * ui, &ko, ui, GOLD);
         }
-        if o.body.root > 0 {
-            c.text_centred(
-                cx,
-                h / 2 + 18 * ui,
-                "rooted!",
-                2 * ui,
-                Rgba::rgb(130, 220, 100),
-            );
+        if o.body.chill > 0 {
+            let cold = bar::rgba(crate::fx::colour(wandfall::laws::spell::FROST));
+            c.text_centred(cx, h / 2 + 18 * ui, "chilled", ui, cold);
         }
-        bar::draw(c, o, &v.st.loot, v.now, v.st.levelled, ui, !v.touch);
+        bar::draw(c, o, v.st, v.now, ui, !v.touch);
     }
     // The island, the storm's circles, and you.
     let s = (MINI * ui).min(w / 4).min(h / 4);

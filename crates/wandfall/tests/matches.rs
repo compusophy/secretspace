@@ -114,3 +114,46 @@ fn the_page_predicts_its_wizard_exactly() {
     }
     assert_eq!(worst, 0.0, "the prediction never moved");
 }
+
+/// Balance, as bots play it: over a few matches every spell lands, spells
+/// are the big moments (a fair share of the hurt), and none of them, nor
+/// the wand, does all the work.
+#[test]
+fn every_spell_has_its_place() {
+    let mut by_what = [0i64; 256];
+    for seed in [7u64, 8, 9] {
+        let mut w = World::new(seed);
+        w.join("tester", 0);
+        let mut lobby = false;
+        for _ in 0..TICK_HZ * 60 * 6 {
+            for e in w.step() {
+                match e {
+                    Event::Hit { amount, what, .. } => by_what[what as usize] += amount as i64,
+                    Event::Lobby => lobby = true,
+                    _ => {}
+                }
+            }
+            if lobby {
+                break;
+            }
+        }
+    }
+    let all: i64 = by_what.iter().sum();
+    let share = |k: usize| by_what[k] * 100 / all.max(1);
+    let wand = share(wandfall::world::WAND as usize);
+    let spells: i64 = (0..SPELLS.len()).map(|k| by_what[k]).sum::<i64>() * 100 / all.max(1);
+    for (k, s) in SPELLS.iter().enumerate() {
+        println!("{:>10} {:>3}%", s.name, share(k));
+    }
+    println!("{:>10} {wand:>3}%", "wand");
+    for &k in &spell::OFFENSE {
+        assert!(by_what[k as usize] > 0, "{} lands", SPELLS[k as usize].name);
+        assert!(
+            share(k as usize) < 35,
+            "{} does not rule",
+            SPELLS[k as usize].name
+        );
+    }
+    assert!(spells >= 25, "spells are the moments: {spells}%");
+    assert!(wand < 70, "the wand is not everything: {wand}%");
+}

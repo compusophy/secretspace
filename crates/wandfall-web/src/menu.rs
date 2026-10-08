@@ -7,7 +7,7 @@ use pixels::{Canvas, Rect, Rgba};
 use wandfall::laws::{Kind, MAX_LEVEL, MAX_RANK, SPELLS};
 use wandfall::proto::Own;
 
-use crate::bar::{icon, rgba, KEYS};
+use crate::bar::{icon, pips, rgba, KEYS};
 use crate::fx::colour;
 
 const INK: Rgba = Rgba::rgb(250, 246, 236);
@@ -183,9 +183,14 @@ pub fn book(
     rules: (bool, bool),
 ) {
     let (w, h) = (c.w, c.h);
+    // As large as fits: a short screen gets a smaller book, not a cut one.
+    let ui = (1..=ui)
+        .rev()
+        .find(|&k| 290 * k <= h - 8 && 300 * k <= w - 8)
+        .unwrap_or(1);
     let u = ui as f32;
-    let pw = (360.0 * u).min(w as f32 - 12.0 * u);
-    let ph = (300.0 * u).min(h as f32 - 12.0 * u);
+    let pw = (360.0 * u).min(w as f32 - 8.0 * u);
+    let ph = (290.0 * u).min(h as f32 - 8.0 * u);
     let panel = Rect::new((w as f32 - pw) / 2.0, (h as f32 - ph) / 2.0, pw, ph);
     c.round_rect(panel, 6.0 * u, PANEL);
     let x0 = panel.x + 10.0 * u;
@@ -207,23 +212,8 @@ pub fn book(
         let b = Rect::new(x0 + k as f32 * (s + 6.0 * u), y, s, s);
         c.round_rect(b, 4.0 * u, if k == sel { LIT } else { BUTTON });
         if let Some((sp, rank)) = own.slots[k] {
-            icon(
-                c,
-                sp,
-                b.x + 5.0 * u,
-                b.y + 4.0 * u,
-                s - 10.0 * u,
-                rgba(colour(sp)),
-            );
-            for r in 0..rank as i32 {
-                c.fill_rect(
-                    b.x as i32 + 3 * ui + r * 4 * ui,
-                    (b.y + s) as i32 - 4 * ui,
-                    3 * ui,
-                    2 * ui,
-                    GOLD,
-                );
-            }
+            icon(c, sp, b.grow(-4.0 * u));
+            pips(c, b.x + s / 2.0, b.y + s - 3.0 * u, rank, ui);
         }
         c.text_shadowed(
             b.x as i32 + 2 * ui,
@@ -272,10 +262,7 @@ pub fn book(
         icon(
             c,
             sp,
-            b.x + 3.0 * u,
-            b.y + 3.0 * u,
-            rh - 6.0 * u,
-            rgba(colour(sp)),
+            Rect::new(b.x + 3.0 * u, b.y + 3.0 * u, rh - 6.0 * u, rh - 6.0 * u),
         );
         c.text_shadowed(
             (b.x + rh + 2.0 * u) as i32,
@@ -288,11 +275,21 @@ pub fn book(
     }
     y += ((list.len() + 1) / cols) as f32 * (rh + 4.0 * u) + 6.0 * u;
     if let Some((sp, _)) = own.slots[sel] {
-        let what = SPELLS[sp as usize].what;
-        let k = pixels::fit_scale(what, pw as i32 - 20 * ui, ui);
-        c.text_shadowed(x0 as i32, y as i32, what, k, DIM);
+        let info = &SPELLS[sp as usize];
+        let col = rgba(colour(sp));
+        let beats = format!("beats {}", info.beats);
+        let beaten = format!("beaten by {}", info.beaten);
+        for (t, c2) in [
+            (info.what, col.mix(INK, 0.4)),
+            (&beats, DIM),
+            (&beaten, DIM),
+        ] {
+            let k = pixels::fit_scale(t, pw as i32 - 20 * ui, ui);
+            c.text_shadowed(x0 as i32, y as i32, t, k, c2);
+            y += 11.0 * u;
+        }
     }
-    y += 14.0 * u;
+    y += 6.0 * u;
     // Your level, and the rules.
     c.text_shadowed(
         x0 as i32,

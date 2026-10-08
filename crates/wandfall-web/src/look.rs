@@ -21,7 +21,11 @@ pub struct Look {
     pub wall: Mesh,
     pub chest: Mesh,
     pub lid: Mesh,
-    pub roots: Mesh,
+    /// A flat ring a metre across (marks, shockwaves); an ice shard a
+    /// metre each way along x; a beam a metre up y.
+    pub ring: Mesh,
+    pub shard: Mesh,
+    pub beam: Mesh,
     /// The island's own meshes (ground, trees, rocks, pillars).
     pub held: Vec<Mesh>,
 }
@@ -230,7 +234,8 @@ impl Look {
                     rgb(236, 196, 160),
                     0.0,
                 );
-                // The wand, held out front and right; its tip alight.
+                // The wand, held out front and right (its tip is drawn
+                // alight on its own).
                 g.lathe(
                     [0.12, 0.92, 0.3],
                     &[(0.03, 0.0), (0.024, 0.3), (0.018, 0.56)],
@@ -238,7 +243,6 @@ impl Look {
                     rgb(110, 76, 50),
                     0.0,
                 );
-                g.sphere([0.12, 1.5, 0.3], [0.06; 3], (1, 2, 0.0), GOLD, 1.0);
             }),
             glider: smooth(r, |g| {
                 g.sphere(
@@ -279,14 +283,25 @@ impl Look {
                 );
                 g.block([0.0, 0.6, 0.0], [0.1, 0.24, 0.81], 0.0, GOLD, GOLD, 0.3);
             }),
-            roots: one(r, |g| {
-                for k in 0..7 {
-                    let a = k as f32 / 7.0 * std::f32::consts::TAU;
-                    let (c, s) = (a.cos(), a.sin());
-                    let base = [c * 0.55, 0.0, s * 0.55];
-                    let tip = [c * 0.2, 1.1 + 0.2 * (k % 2) as f32, s * 0.2];
-                    g.spike(base, tip, 0.09, 5, rgb(86, 120, 50), 0.15);
+            ring: one(r, |g| {
+                let n = 48;
+                for k in 0..n {
+                    let at = |k: i32, r: f32| {
+                        let a = k as f32 / n as f32 * std::f32::consts::TAU;
+                        [a.cos() * r, 0.0, a.sin() * r]
+                    };
+                    let (a, b, c, d) = (at(k, 0.8), at(k + 1, 0.8), at(k, 1.0), at(k + 1, 1.0));
+                    g.tri(a, b, c, [1.0; 3], 1.0);
+                    g.tri(b, d, c, [1.0; 3], 1.0);
                 }
+            }),
+            shard: one(r, |g| {
+                let base = [-0.2, 0.0, 0.0];
+                g.spike(base, [1.0, 0.0, 0.0], 1.0, 4, [1.0; 3], 1.0);
+                g.spike(base, [-1.0, 0.0, 0.0], 1.0, 4, [1.0; 3], 1.0);
+            }),
+            beam: smooth(r, |g| {
+                g.lathe([0.0; 3], &[(1.0, 0.0), (1.0, 1.0)], 10, [1.0; 3], 1.0)
             }),
             wall: one(r, |g| {
                 g.column([0.0; 3], 64, (1.0, 1.0), 1.0, 0.0, STORM, 0.5, false);
@@ -306,7 +321,9 @@ impl Look {
             self.wall,
             self.chest,
             self.lid,
-            self.roots,
+            self.ring,
+            self.shard,
+            self.beam,
         ];
         for m in all.into_iter().chain(self.held) {
             r.free(m);
@@ -314,13 +331,45 @@ impl Look {
         r.statics(Vec::new());
     }
 
-    /// A wizard standing at `at`, facing `yaw` (radians).
-    pub fn wizard(&self, items: &mut Vec<Item>, id: u16, at: V3, yaw: f32, glide: bool) {
+    /// A wizard standing at `at`, facing `yaw` (radians), its wand's tip
+    /// alight in `tip` (a colour, and how bright: 1 just cast).
+    #[allow(clippy::too_many_arguments)]
+    pub fn wizard(
+        &self,
+        items: &mut Vec<Item>,
+        lights: &mut Vec<Light>,
+        id: u16,
+        at: V3,
+        yaw: f32,
+        glide: bool,
+        tip: (V3, f32),
+    ) {
         let m = m4::place(at, yaw, [1.0; 3]);
         let c = hue(id);
         items.push(Item::new(self.robe, m).tint(c, 1.0));
         items.push(Item::new(self.hat, m).tint(geo::scale(c, 0.7), 1.0));
         items.push(Item::new(self.body, m));
+        let (s, co) = yaw.sin_cos();
+        let (lx, lz) = (0.12, 0.3);
+        let p = [
+            at[0] + co * lx - s * lz,
+            at[1] + 1.5,
+            at[2] + s * lx + co * lz,
+        ];
+        let k = 0.06 + 0.07 * tip.1;
+        items.push(
+            Item::new(self.orb, m4::place(p, 0.0, [k; 3]))
+                .tint(tip.0, 1.0)
+                .glow(1.0)
+                .pass(Pass::Glow),
+        );
+        if tip.1 > 0.05 {
+            lights.push(Light {
+                p,
+                r: 3.0 + 5.0 * tip.1,
+                c: geo::scale(tip.0, 2.5 * tip.1),
+            });
+        }
         if glide {
             let top = [at[0], at[1] + 2.6, at[2]];
             items.push(
@@ -332,14 +381,15 @@ impl Look {
         }
     }
 
-    /// Light bursting where a bolt struck, `age` ms ago.
+    /// Light bursting where something struck, `age` ms ago, in the
+    /// colour of what struck.
     pub fn burst(
         &self,
         lights: &mut Vec<Light>,
         sparks: &mut Vec<Spark>,
         at: V3,
-        age: f32,
-        seed: u32,
+        (age, seed): (f32, u32),
+        c: V3,
     ) {
         let k = 1.0 - age / 600.0;
         if k <= 0.0 {
@@ -348,7 +398,7 @@ impl Look {
         lights.push(Light {
             p: at,
             r: 6.0,
-            c: geo::scale(GOLD, 2.0 * k),
+            c: geo::scale(c, 2.0 * k),
         });
         for n in 0..14 {
             let a = unit(hash(seed as i32, n, 3)) * std::f32::consts::TAU;
@@ -357,7 +407,7 @@ impl Look {
             sparks.push(Spark {
                 p: [at[0] + a.cos() * d, at[1] + up * d, at[2] + a.sin() * d],
                 size: 0.15,
-                c: [1.0, 0.85, 0.5, k],
+                c: [0.5 + c[0] * 0.5, 0.5 + c[1] * 0.5, 0.5 + c[2] * 0.5, k],
             });
         }
     }
@@ -386,6 +436,7 @@ impl Look {
         lights: &mut Vec<Light>,
         cam: &render::Camera,
         kick: f32,
+        c: V3,
     ) -> V3 {
         let fwd = cam.forward();
         let (_, right, up) = cam.matrices(cam.fov);
@@ -419,14 +470,14 @@ impl Look {
                     geo::scale(right, s),
                 ),
             )
-            .tint(GOLD, 1.0)
+            .tint(c, 1.0)
             .glow(1.0)
             .pass(Pass::View),
         );
         lights.push(Light {
             p: tip,
             r: 2.5 + 4.0 * kick,
-            c: geo::scale(GOLD, 0.6 + 1.6 * kick),
+            c: geo::scale(c, 0.6 + 1.6 * kick),
         });
         tip
     }

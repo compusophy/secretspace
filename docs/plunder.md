@@ -85,7 +85,7 @@ owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
 - [x] Levels 1-20 within a match (XP from chests, damage dealt and
       knockouts; more for a higher-level knockout): +8 health and +5% damage
       a level.
-- [x] Ten spells as loot, ranks 1-5 (a duplicate ranks one up; each rank
+- [x] (Replaced by the design pass below.) Ten spells as loot, ranks 1-5 (a duplicate ranks one up; each rank
       +12-15% power, 6% less cooldown): offensive (Q, E) Lance, Comet, Chain
       Spark, Starfall; utility (R, F) Root, Blink, Ward, Mend, Gust, Haste.
       Over a full set, hold G to swap out the weaker of that kind.
@@ -112,6 +112,52 @@ owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
       cooldowns, dummies that fight back. Damage numbers on every hit.
 - [x] Online: the lobby lists who is waiting; Esc (or the touch menu
       button) pauses, with leave to the title.
+
+### The design pass (October 2026)
+The owner: "a huge pass on the game design ... the icon design and spell
+effect design need major over passes and the spells possible need
+complete revamping ... simplicity is king! and so its beauty! and balance
+of combat styles and all varieties to counter all varieties".
+
+- [x] **Eight spells, one verb each** (the ten of Stage B are gone; ranks
+      1-3, each rank +25% power and 10% less cooldown):
+
+      | Q, E (to hurt) | what | beats | beaten by |
+      |---|---|---|---|
+      | Fireball | a ball that bursts where it lands (30, 3.5 m) | cover, groups | a Ward; a sidestep far off |
+      | Lance | an instant beam, 80 m (34) | the still, the far, the mending | cover, a Ward, a foe in your face |
+      | Frost | a fan of 7 shards (6 each), chills (60% speed, 2 s) | the runner, a sniper caught close | Gust, Blink, range |
+      | Lightning | strikes where you look 0.8 s later (42, 4 m) | the still, the shielded, the hidden | anyone who moves |
+
+      | R, F (to live) | what | beats | beaten by |
+      |---|---|---|---|
+      | Blink | 12 m through the air; shakes off chill | Lightning, Frost, a corner | the Lance |
+      | Ward | a 40 shield for 4 s; bursts when broken | a Lance, a Fireball | patience |
+      | Mend | 40 health in 2 s | the long fight, the storm | a burst; Lightning on the still |
+      | Gust | throws back all within 7 m, blows their bolts away | Frost, a rush, a ledge | anything from afar |
+- [x] **The wand is the heartbeat, spells the moments:** 8 a bolt every
+      0.43 s; everyone drops with one spell to hurt with. Bot matches deal
+      about half their damage with spells, spread over all four
+      (`every_spell_has_its_place`). Bots fight at the range their spells
+      like (close with Frost, far with the Lance).
+- [x] **One colour and one shape per spell**, the same in its icon, its
+      bolt, its landing and its marks: orange fire, a gold beam, ice-blue
+      shards, a violet ring closing before the bolt, pink sparks, a blue
+      bubble, green motes, a pale ring of wind. The engine's new `Rim`
+      material (energy: bright edge on) draws shells, shockwaves and beams.
+- [x] **Icons drawn shape by shape** (`pixels::poly`, `sweep`): a tile in
+      the spell's colour, its glyph (a flame, a spear of light, a
+      snowflake, a bolt, a step, a shield, a cross, the wind), rank pips,
+      a clock-sweep cooldown, a flash when ready. The spellbook says what
+      each beats and is beaten by.
+- [x] **Reading a fight:** damage numbers in the colour of what dealt them,
+      hits burst in it, every wizard's wand tip flares in the spell it just
+      cast, scrolls are crystals under a pillar of their colour (taller by
+      rank), your ward glows at the screen's edge, chill is shown.
+- [x] The HUD: health in one bar over the spell bar (no overlap on a small
+      screen); what lies underfoot on a card with its icon.
+- Hooks for looking (`crates/wandfall-web/src/lib.rs`): `?spells=`,
+  `?nocd`, `?spar`, `?hold=ms` (every effect held at that age).
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.

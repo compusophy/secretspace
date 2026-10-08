@@ -72,8 +72,10 @@ struct Page {
     /// Spells asked for since the last input (a bit a slot).
     asked: u8,
     pad: Touch,
-    /// When you last cast (ms), and inputs until you may again.
+    /// When you last cast (ms), and inputs until you may again; when you
+    /// last cast a spell, and which.
     cast_at: f64,
+    spell_at: (f64, u8),
     cool: u32,
     hands: Hands,
     mode: Mode,
@@ -107,6 +109,14 @@ fn query(k: &str) -> bool {
         .location()
         .search()
         .is_ok_and(|q| q.trim_start_matches('?').split('&').any(|kv| kv == k))
+}
+
+/// The value of `k=...` in the page's address, if there.
+fn query_value(k: &str) -> Option<String> {
+    let q = kit::window().location().search().ok()?;
+    q.trim_start_matches('?')
+        .split('&')
+        .find_map(|kv| kv.strip_prefix(k)?.strip_prefix('=').map(str::to_string))
 }
 
 fn say(text: &str) {
@@ -275,6 +285,24 @@ fn practise(p: &mut Page) {
     p.inbox.extend(out.0.into_iter().map(|m| m.1));
     p.mode = Mode::Practice(room);
     send(p, &Up::Join { proto: PROTO });
+    // `?spells=0,1,4,5` sets out the four slots; `?nocd` drops cooldowns;
+    // `?spar` has the dummies fight back.
+    if let Mode::Practice(room) = &mut p.mode {
+        let w = room.world();
+        let me = w.players.iter().find(|p| !p.bot).map_or(0, |p| p.id);
+        if let Some(list) = query_value("spells") {
+            if let Some(q) = w.find_mut(me) {
+                q.slots = [None; 4];
+            }
+            for (slot, sp) in list.split(',').filter_map(|v| v.parse().ok()).enumerate() {
+                practice::equip(w, me, slot, sp, 1);
+            }
+        }
+        if let Some(r) = w.practice.as_mut() {
+            r.no_cooldowns |= query("nocd");
+            r.sparring |= query("spar");
+        }
+    }
     if !p.touch {
         kit::input::lock(p.g.canvas());
     }
@@ -479,12 +507,24 @@ fn inputs(p: &mut Page, dt: f64) {
             continue;
         }
         p.seq = p.seq.wrapping_add(1);
+        let asked = std::mem::take(&mut p.asked);
+        let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
+        if let Some(sp) = own.and_then(|o| {
+            (0..4).find_map(|k| {
+                (asked & cast::SLOT[k] != 0 && o.cds[k] == 0)
+                    .then_some(o.slots[k])
+                    .flatten()
+                    .map(|s| s.0)
+            })
+        }) {
+            p.spell_at = (kit::now(), sp);
+        }
         let i = Input {
             seq: p.seq,
             yaw: trig::heading(p.yaw),
             pitch: trig::pitch(p.pitch),
             keys: k,
-            cast: std::mem::take(&mut p.asked) | take,
+            cast: asked | take,
         };
         p.prev = p.pred.body;
         p.pred.push(i, &island.map);
@@ -605,29 +645,39 @@ fn frame(p: &mut Page, now: f64) {
             if !(p.alive && s.id == p.st.you) {
                 i.look.wizard(
                     &mut d.items,
+                    &mut d.lights,
                     s.id,
                     s.p,
                     trig::radians(s.yaw),
                     s.flags & flag::GLIDE != 0,
+                    fx::tip(&p.st.shows, s.id, now),
                 );
             }
-            fx::on_wizard(&i.look, &mut d, s, t);
+            fx::on_wizard(&i.look, &mut d, s, t, p.alive && s.id == p.st.you);
         }
         for b in p.st.bolts(now) {
-            fx::bolt(&i.look, &mut d, &b, b.by == p.st.you);
+            fx::bolt(&i.look, &mut d, &b, b.by == p.st.you, t);
         }
-        for &(at, who) in &p.st.bursts {
+        for &(at, who, what) in &p.st.bursts {
             if let Some(s) = others.iter().find(|s| s.id == who) {
                 let pos = [s.p[0], s.p[1] + 1.2, s.p[2]];
                 i.look.burst(
                     &mut d.lights,
                     &mut d.sparks,
                     pos,
-                    (now - at) as f32,
-                    at as u32,
+                    ((now - at) as f32, at as u32),
+                    fx::colour(what),
                 );
             }
         }
+        // Your wand: kicked by a bolt, flaring in a spell's colour.
+        let tip = p.alive.then(|| {
+            let kick = (1.0 - (now - p.cast_at) / 180.0).clamp(0.0, 1.0) as f32;
+            let flare = (1.0 - (now - p.spell_at.0) / 320.0).clamp(0.0, 1.0) as f32;
+            let c = render::geo::mix(look::GOLD, fx::colour(p.spell_at.1), flare.min(1.0).sqrt());
+            i.look
+                .wand(&mut d.items, &mut d.lights, &cam, kick.max(flare * 1.4), c)
+        });
         let me = (p.st.you, p.pred.body.p, p.alive);
         let at_of = |id: u16| {
             if me.2 && id == me.0 {
@@ -635,7 +685,20 @@ fn frame(p: &mut Page, now: f64) {
             }
             others.iter().find(|s| s.id == id).map(|s| s.p)
         };
-        fx::shows(&i.look, &mut d, &p.st.shows, now, at_of);
+        // `?hold=ms` holds every effect at that age (to look at them).
+        let held: Vec<_>;
+        let shows = match query_value("hold").and_then(|v| v.parse::<f64>().ok()) {
+            Some(ms) => {
+                held =
+                    p.st.shows
+                        .iter()
+                        .map(|&(w, e)| (w.max(now - ms), e))
+                        .collect();
+                &held
+            }
+            None => &p.st.shows,
+        };
+        fx::shows(&i.look, &mut d, shows, now, (p.st.you, tip), at_of);
         if let Some(f) = &p.st.frame {
             if f.phase == 1 && !matches!(p.mode, Mode::Practice(_)) {
                 i.look.storm(&mut d.items, f.storm.0, f.storm.1);
@@ -644,10 +707,6 @@ fn frame(p: &mut Page, now: f64) {
                     && (e[0] - f.storm.0[0]).powi(2) + (e[2] - f.storm.0[1]).powi(2)
                         > f.storm.1 * f.storm.1;
             }
-        }
-        if p.alive {
-            let kick = (1.0 - (now - p.cast_at) / 180.0).clamp(0.0, 1.0) as f32;
-            i.look.wand(&mut d.items, &mut d.lights, &cam, kick);
         }
     }
     let scene = Frame {
@@ -801,6 +860,7 @@ pub fn start() {
                 asked: 0,
                 pad: Touch::default(),
                 cast_at: -1e9,
+                spell_at: (-1e9, 0),
                 cool: 0,
                 hands,
                 mode: Mode::Title,

@@ -9,7 +9,7 @@ use engine::wire::{Reader, Writer};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 2;
+pub const PROTO: u8 = 3;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -117,10 +117,9 @@ pub struct Seen {
 
 pub mod fx {
     pub const SHIELD: u8 = 1;
-    pub const ROOTED: u8 = 2;
-    pub const HASTED: u8 = 4;
-    pub const MENDING: u8 = 8;
-    pub const AIM: u8 = 16;
+    pub const CHILLED: u8 = 2;
+    pub const MENDING: u8 = 4;
+    pub const AIM: u8 = 8;
 }
 
 pub mod flag {
@@ -210,8 +209,7 @@ impl Frame {
                 f32s(&mut w, o.body.p);
                 f32s(&mut w, o.body.v);
                 w.u8(o.body.ground as u8 | (o.body.glide as u8) << 1)
-                    .u16(o.body.haste)
-                    .u16(o.body.root)
+                    .u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
                     .u8(o.kills)
@@ -281,8 +279,7 @@ impl Frame {
                     v,
                     ground: g & 1 != 0,
                     glide: g & 2 != 0,
-                    haste: r.u16()?,
-                    root: r.u16()?,
+                    chill: r.u16()?,
                 },
                 seq: r.u16()?,
                 hp: r.u16()?,
@@ -374,10 +371,12 @@ pub fn read_roster(b: &[u8]) -> Option<Vec<(u16, bool, String)>> {
 /// Events as the wire carries them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ev {
+    /// `what`: `world::WAND`, a spell, or `world::STORM`.
     Hit {
         by: u16,
         to: u16,
         amount: u16,
+        what: u8,
     },
     Out {
         who: u16,
@@ -395,9 +394,11 @@ pub enum Ev {
         stage: u8,
         at: [f32; 3],
     },
-    Link {
-        from: u16,
-        to: u16,
+    Beam {
+        by: u16,
+        spell: u8,
+        from: [f32; 3],
+        to: [f32; 3],
     },
     Level {
         who: u16,
@@ -411,7 +412,12 @@ pub fn events(list: &[Ev]) -> Vec<u8> {
     w.u8(tag::EVENTS).u8(n as u8);
     for e in &list[..n] {
         match *e {
-            Ev::Hit { by, to, amount } => w.u8(1).u16(by).u16(to).u16(amount),
+            Ev::Hit {
+                by,
+                to,
+                amount,
+                what,
+            } => w.u8(1).u16(by).u16(to).u16(amount).u8(what),
             Ev::Out { who, by, place } => w.u8(2).u16(who).u16(by).u16(place),
             Ev::Win { who } => w.u8(3).u16(who),
             Ev::Begin => w.u8(4),
@@ -429,7 +435,18 @@ pub fn events(list: &[Ev]) -> Vec<u8> {
                 .i16(q(at[0]))
                 .i16(q(at[1]))
                 .i16(q(at[2])),
-            Ev::Link { from, to } => w.u8(7).u16(from).u16(to),
+            Ev::Beam {
+                by,
+                spell,
+                from,
+                to,
+            } => {
+                w.u8(7).u16(by).u8(spell);
+                for x in from.into_iter().chain(to) {
+                    w.i16(q(x));
+                }
+                &mut w
+            }
             Ev::Level { who, level } => w.u8(8).u16(who).u8(level),
         };
     }
@@ -450,6 +467,7 @@ pub fn read_events(b: &[u8]) -> Option<Vec<Ev>> {
                 by: r.u16()?,
                 to: r.u16()?,
                 amount: r.u16()?,
+                what: r.u8()?,
             },
             2 => Ev::Out {
                 who: r.u16()?,
@@ -465,9 +483,11 @@ pub fn read_events(b: &[u8]) -> Option<Vec<Ev>> {
                 stage: r.u8()?,
                 at: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
             },
-            7 => Ev::Link {
-                from: r.u16()?,
-                to: r.u16()?,
+            7 => Ev::Beam {
+                by: r.u16()?,
+                spell: r.u8()?,
+                from: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
+                to: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
             },
             8 => Ev::Level {
                 who: r.u16()?,
@@ -580,8 +600,7 @@ mod tests {
                     v: [0.1, -9.8, 0.0],
                     ground: false,
                     glide: true,
-                    haste: 7,
-                    root: 0,
+                    chill: 7,
                 },
                 seq: 65535,
                 hp: 252,
@@ -590,7 +609,7 @@ mod tests {
                 level: 20,
                 xp: 99,
                 shield: 40,
-                slots: [Some((0, 5)), None, Some((9, 1)), None],
+                slots: [Some((0, 3)), None, Some((7, 1)), None],
                 cds: [0, 300, 12, 0],
             }),
             players: vec![Seen {
@@ -625,6 +644,13 @@ mod tests {
                 by: 1,
                 to: 2,
                 amount: 12,
+                what: 3,
+            },
+            Ev::Beam {
+                by: 1,
+                spell: 1,
+                from: [1.0, 2.0, 3.0],
+                to: [-4.0, 5.5, 60.25],
             },
             Ev::Win { who: 1 },
             Ev::Begin,

@@ -250,18 +250,57 @@ impl Canvas {
     /// A filled rectangle with rounded corners.
     pub fn round_rect(&mut self, b: Rect, r: f32, c: Rgba) {
         let Rect { x, y, w, h } = b;
-        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
-        let (ix0, iy0, ix1, iy1) = (x + r, y + r, x + w - r, y + h - r);
         self.shade(x - 1.0, y - 1.0, x + w + 1.0, y + h + 1.0, c, |px, py| {
-            let qx = (ix0 - px).max(px - ix1).max(0.0);
-            let qy = (iy0 - py).max(py - iy1).max(0.0);
-            let outside = (qx * qx + qy * qy).sqrt();
-            // Straight edges: coverage by distance to the box's own edge.
-            let edge = (px - x).min(x + w - px).min(py - y).min(y + h - py);
-            if qx > 0.0 && qy > 0.0 {
-                r - outside + 0.5
+            rounded(b, r, px, py)
+        });
+    }
+
+    /// Part of a rounded rectangle: what lies between `from` and `to`
+    /// turns about its centre (0 at the top, clockwise), as a clock's
+    /// hand sweeps it.
+    pub fn sweep(&mut self, b: Rect, r: f32, from: f32, to: f32, c: Rgba) {
+        let Rect { x, y, w, h } = b;
+        let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+        self.shade(x - 1.0, y - 1.0, x + w + 1.0, y + h + 1.0, c, |px, py| {
+            let t = (px - cx).atan2(cy - py) / std::f32::consts::TAU;
+            let t = if t < 0.0 { t + 1.0 } else { t };
+            if t < from || t > to {
+                return 0.0;
+            }
+            rounded(b, r, px, py)
+        });
+    }
+
+    /// A filled polygon (a simple outline, either way round) with soft
+    /// edges.
+    pub fn poly(&mut self, pts: &[(f32, f32)], c: Rgba) {
+        if pts.len() < 3 {
+            return;
+        }
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for &(x, y) in pts {
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+        }
+        let n = pts.len();
+        self.shade(x0 - 1.0, y0 - 1.0, x1 + 1.0, y1 + 1.0, c, |px, py| {
+            let mut inside = false;
+            let mut d2 = f32::MAX;
+            for i in 0..n {
+                let (ax, ay) = pts[i];
+                let (bx, by) = pts[(i + 1) % n];
+                if (ay > py) != (by > py) && px < ax + (py - ay) * (bx - ax) / (by - ay) {
+                    inside = !inside;
+                }
+                let (dx, dy) = (bx - ax, by - ay);
+                let t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy).max(1e-9))
+                    .clamp(0.0, 1.0);
+                d2 = d2.min((px - ax - t * dx).powi(2) + (py - ay - t * dy).powi(2));
+            }
+            let d = d2.sqrt();
+            if inside {
+                d + 0.5
             } else {
-                edge + 0.5
+                0.5 - d
             }
         });
     }
@@ -422,6 +461,22 @@ pub fn wrap(s: &str, width: i32, scale: i32) -> Vec<String> {
     lines
 }
 
+/// How much of the pixel centred at `(px, py)` a rounded rectangle covers.
+fn rounded(b: Rect, r: f32, px: f32, py: f32) -> f32 {
+    let Rect { x, y, w, h } = b;
+    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+    let (ix0, iy0, ix1, iy1) = (x + r, y + r, x + w - r, y + h - r);
+    let qx = (ix0 - px).max(px - ix1).max(0.0);
+    let qy = (iy0 - py).max(py - iy1).max(0.0);
+    // Straight edges: coverage by distance to the box's own edge.
+    let edge = (px - x).min(x + w - px).min(py - y).min(y + h - py);
+    if qx > 0.0 && qy > 0.0 {
+        r - (qx * qx + qy * qy).sqrt() + 0.5
+    } else {
+        edge + 0.5
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +530,35 @@ mod tests {
         assert_eq!(at(0, 0), 0);
         let edge = at(10, 2);
         assert!(edge > 0 && edge < 255, "{edge}");
+    }
+
+    #[test]
+    fn a_polygon_fills_inside_and_a_sweep_cuts_like_a_clock() {
+        let mut c = Canvas::new(20, 20);
+        c.clear(Rgba::rgb(0, 0, 0));
+        let tri = [(2.0, 2.0), (18.0, 2.0), (2.0, 18.0)];
+        c.poly(&tri, Rgba::rgb(255, 255, 255));
+        let at = |c: &Canvas, x: i32, y: i32| c.data[((y * 20 + x) * 4) as usize];
+        assert_eq!(at(&c, 5, 5), 255);
+        assert_eq!(at(&c, 16, 16), 0);
+        // Either way round, the same.
+        let mut d = Canvas::new(20, 20);
+        d.clear(Rgba::rgb(0, 0, 0));
+        d.poly(&[tri[2], tri[1], tri[0]], Rgba::rgb(255, 255, 255));
+        assert_eq!(c.data, d.data);
+        // The first quarter of a sweep: the top right, not the top left.
+        let mut s = Canvas::new(20, 20);
+        s.clear(Rgba::rgb(0, 0, 0));
+        s.sweep(
+            Rect::new(0.0, 0.0, 20.0, 20.0),
+            3.0,
+            0.0,
+            0.25,
+            Rgba::rgb(255, 0, 0),
+        );
+        assert_eq!(at(&s, 15, 4), 255);
+        assert_eq!(at(&s, 4, 4), 0);
+        assert_eq!(at(&s, 15, 15), 0);
     }
 
     #[test]

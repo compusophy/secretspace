@@ -51,7 +51,17 @@ impl Wandfall {
 
 fn wire(e: &Event) -> Ev {
     match *e {
-        Event::Hit { by, to, amount } => Ev::Hit { by, to, amount },
+        Event::Hit {
+            by,
+            to,
+            amount,
+            what,
+        } => Ev::Hit {
+            by,
+            to,
+            amount,
+            what,
+        },
         Event::Out { who, by, place } => Ev::Out { who, by, place },
         Event::Win { who } => Ev::Win { who },
         Event::Begin => Ev::Begin,
@@ -67,7 +77,17 @@ fn wire(e: &Event) -> Ev {
             stage,
             at,
         },
-        Event::Link { from, to } => Ev::Link { from, to },
+        Event::Beam {
+            by,
+            spell,
+            from,
+            to,
+        } => Ev::Beam {
+            by,
+            spell,
+            from,
+            to,
+        },
         Event::Level { who, level } => Ev::Level { who, level },
     }
 }

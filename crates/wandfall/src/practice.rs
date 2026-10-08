@@ -111,7 +111,7 @@ pub fn step(w: &mut World, ev: &mut Vec<Event>) {
             p.alive = true;
             p.hp = p.max_hp();
             p.shield = 0;
-            p.body.root = 0;
+            p.body.chill = 0;
             if !p.bot {
                 p.body.p = [spawn[0], w.map.height(spawn[0], spawn[1]), spawn[1]];
                 p.body.v = [0.0; 3];
@@ -183,6 +183,7 @@ pub fn set_level(w: &mut World, id: u16, level: u8) {
 mod tests {
     use super::*;
     use crate::motion::{keys, Input};
+    use crate::world::WAND;
 
     #[test]
     fn dummies_fall_and_stand_again_and_you_are_safe() {
@@ -192,7 +193,7 @@ mod tests {
         assert_eq!(w.players.iter().filter(|p| p.bot).count(), DUMMIES.len());
         let d = w.players.iter().find(|p| p.bot).unwrap().id;
         let mut ev = Vec::new();
-        w.hurt(me, d, 10_000, &mut ev);
+        w.hurt(me, d, 10_000, WAND, &mut ev);
         assert!(!w.find(d).unwrap().alive, "knocked out");
         assert_eq!(w.find(me).unwrap().kills, 1);
         for _ in 0..DUMMY_RESPAWN + 2 {
@@ -204,10 +205,10 @@ mod tests {
             w.find(me).unwrap().level < 5,
             "XP only for what was really taken"
         );
-        w.hurt(d, me, 50, &mut ev);
+        w.hurt(d, me, 50, WAND, &mut ev);
         assert_eq!(w.find(me).unwrap().hp, full, "not hurt when not sparring");
         w.practice.as_mut().unwrap().sparring = true;
-        w.hurt(d, me, 50, &mut ev);
+        w.hurt(d, me, 50, WAND, &mut ev);
         assert!(w.find(me).unwrap().hp < full, "hurt when sparring");
         // No storm, ever.
         for _ in 0..TICK_HZ * 300 {
@@ -228,17 +229,17 @@ mod tests {
         let mut w = World::new(5);
         setup(&mut w);
         let me = w.join("me", 0);
-        assert!(equip(&mut w, me, 0, spell::COMET, 5));
+        assert!(equip(&mut w, me, 0, spell::FIREBALL, 3));
         assert!(
             !equip(&mut w, me, 0, spell::WARD, 1),
             "a utility spell in an offensive slot"
         );
-        assert!(equip(&mut w, me, 1, spell::COMET, 2));
+        assert!(equip(&mut w, me, 1, spell::FIREBALL, 2));
         let p = w.find(me).unwrap();
         assert_eq!(
             p.slots[1],
             Some(Slot {
-                spell: spell::COMET,
+                spell: spell::FIREBALL,
                 rank: 2
             })
         );
