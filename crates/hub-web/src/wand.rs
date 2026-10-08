@@ -8,6 +8,7 @@
 use pixels::{Canvas, Rect, Rgba};
 use wandfall::laws::{MAP_HALF, SEA};
 use wandfall::map::Map;
+use wandfall::places::Place;
 use wandfall::proto::{self, flag, Ev, Frame};
 
 /// The spells' colours (as the game draws them).
@@ -139,6 +140,24 @@ impl WandWatch {
                         Rgba::rgb(64, 116, 58).mix(Rgba::rgb(136, 148, 88), k)
                     };
                     c.pixel(i, j, col);
+                }
+            }
+            // The places: the Spire, the circle, the rift, the grove.
+            let k = s as f32 / 96.0;
+            let px = |v: f32| (v + MAP_HALF) / (2.0 * MAP_HALF) * s as f32;
+            for p in &map.pois {
+                let (x, y) = (px(p.x), px(p.z));
+                match p.place {
+                    Place::Spire => {
+                        c.circle(x, y, 4.0 * k, Rgba::rgb(196, 188, 176));
+                        c.circle(x, y, 1.8 * k, Rgba::rgb(120, 80, 220));
+                    }
+                    Place::Circle => c.ring(x, y, 3.0 * k, 1.2 * k, Rgba::rgb(120, 225, 255)),
+                    Place::Rift => {
+                        c.circle(x, y, 3.6 * k, Rgba::rgb(40, 22, 22));
+                        c.circle(x, y, 1.6 * k, Rgba::rgb(255, 110, 40));
+                    }
+                    Place::Grove => c.circle(x, y, 2.6 * k, Rgba::rgb(170, 120, 255)),
                 }
             }
             self.island = Some(c);

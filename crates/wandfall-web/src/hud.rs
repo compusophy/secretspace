@@ -8,6 +8,7 @@ use render::{m4, M4};
 use wandfall::laws::{MAP_HALF, MATCH_SIZE, SEA};
 use wandfall::loot::max_hp;
 use wandfall::map::Map;
+use wandfall::places::Place;
 use wandfall::proto::{flag, Frame, Own, Seen};
 
 use crate::bar;
@@ -38,6 +39,23 @@ pub fn island(map: &Map) -> Canvas {
                 Rgba::rgb(70, 120, 60).mix(Rgba::rgb(140, 150, 90), k)
             };
             c.pixel(i, j, col);
+        }
+    }
+    // The places: the Spire's plaza and tower, the circle, the rift, the grove.
+    let px = |v: f32| (v + MAP_HALF) / (2.0 * MAP_HALF) * MINI as f32;
+    for p in &map.pois {
+        let (x, y) = (px(p.x), px(p.z));
+        match p.place {
+            Place::Spire => {
+                c.circle(x, y, 4.0, Rgba::rgb(196, 188, 176));
+                c.circle(x, y, 1.8, Rgba::rgb(120, 80, 220));
+            }
+            Place::Circle => c.ring(x, y, 3.0, 1.2, Rgba::rgb(120, 225, 255)),
+            Place::Rift => {
+                c.circle(x, y, 3.6, Rgba::rgb(40, 22, 22));
+                c.circle(x, y, 1.6, Rgba::rgb(255, 110, 40));
+            }
+            Place::Grove => c.circle(x, y, 2.6, Rgba::rgb(170, 120, 255)),
         }
     }
     c
