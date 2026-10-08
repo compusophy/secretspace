@@ -4,7 +4,7 @@
 //! the engine's shapes; everything that never moves is a static.
 
 use render::geo::{self, hash, mix, rgb, unit, Geo, V3};
-use render::{m4, Item, Light, Look, Mesh, Pass, Renderer, Spark};
+use render::{m4, Item, Light, Look, Material, Mesh, Pass, Renderer, Spark};
 
 /// Metres from the centre to the edge of the ground.
 pub const HALF: f32 = 110.0;
@@ -30,7 +30,6 @@ pub const WATER: f32 = -0.6;
 
 struct Meshes {
     ground: Mesh,
-    water: Mesh,
     trunk: Mesh,
     crowns: [Mesh; 2],
     rocks: [Mesh; 3],
@@ -45,35 +44,6 @@ pub struct Scene {
     m: Meshes,
     /// Lights that never move: crystals, the bell.
     still: Vec<Light>,
-}
-
-fn ground() -> Geo {
-    let mut g = Geo::default();
-    let step = 2.0;
-    let n = (HALF * 2.0 / step) as i32;
-    for i in 0..n {
-        for j in 0..n {
-            let (x0, z0) = (-HALF + i as f32 * step, -HALF + j as f32 * step);
-            let (x1, z1) = (x0 + step, z0 + step);
-            let p = |x: f32, z: f32| [x, height(x, z), z];
-            let k = unit(hash(i, j, 3));
-            let h = height(x0, z0);
-            let grass = mix(rgb(62, 92, 48), rgb(88, 112, 58), k);
-            let col = if h < WATER + 0.3 {
-                mix(
-                    rgb(120, 110, 86),
-                    grass,
-                    ((h - WATER) / 0.3).clamp(0.0, 1.0),
-                )
-            } else if (x0 * x0 + z0 * z0).sqrt() < 10.0 {
-                mix(rgb(150, 146, 138), rgb(170, 166, 156), k)
-            } else {
-                grass
-            };
-            g.quad(p(x0, z0), p(x0, z1), p(x1, z1), p(x1, z0), col, 0.0);
-        }
-    }
-    g
 }
 
 fn shrine() -> Geo {
@@ -96,28 +66,37 @@ fn shrine() -> Geo {
 fn tree_crown(seed: u32) -> Geo {
     let mut g = Geo::default();
     let c = mix(
-        rgb(40, 82, 46),
-        rgb(70, 110, 52),
+        rgb(52, 96, 40),
+        rgb(88, 124, 52),
         unit(hash(seed as i32, 1, 7)),
     );
-    g.blob([0.0, 3.6, 0.0], [1.9, 1.6, 1.9], seed, c, 0.0);
-    g.blob(
-        [0.4, 4.9, -0.2],
-        [1.3, 1.2, 1.3],
-        seed + 1,
-        mix(c, rgb(110, 140, 70), 0.3),
+    g.sphere([0.0, 3.7, 0.0], [2.0, 1.7, 2.0], (2, seed, 0.25), c, 0.0);
+    g.sphere(
+        [0.5, 5.0, -0.3],
+        [1.4, 1.3, 1.4],
+        (2, seed + 1, 0.25),
+        mix(c, rgb(120, 150, 70), 0.3),
         0.0,
     );
+    g.sphere(
+        [-0.6, 4.4, 0.6],
+        [1.2, 1.1, 1.2],
+        (2, seed + 2, 0.25),
+        c,
+        0.0,
+    );
+    g.smooth();
     g
 }
 
 impl Scene {
     pub fn new(r: &mut Renderer) -> Scene {
         let m = Meshes {
-            ground: r.mesh(&ground()),
-            water: one(r, |g| {
-                g.floor((-14.0, -14.0), (14.0, 14.0), 0.0, rgb(70, 120, 150), 0.15)
-            }),
+            ground: {
+                let t = render::Terrain::sample([-HALF, -HALF], HALF * 2.0, 1.0, height);
+                r.terrain(&t);
+                r.mesh(&t.mesh(-50.0, |_, _, _| [1.0; 3]))
+            },
             trunk: one(r, |g| {
                 g.column(
                     [0.0; 3],
@@ -133,7 +112,14 @@ impl Scene {
             crowns: [r.mesh(&tree_crown(11)), r.mesh(&tree_crown(29))],
             rocks: [5u32, 17, 23].map(|s| {
                 let mut g = Geo::default();
-                g.blob([0.0, 0.3, 0.0], [1.0, 0.7, 0.9], s, rgb(128, 124, 120), 0.0);
+                g.sphere(
+                    [0.0, 0.3, 0.0],
+                    [1.0, 0.7, 0.9],
+                    (3, s, 0.3),
+                    rgb(128, 124, 120),
+                    0.0,
+                );
+                g.smooth();
                 r.mesh(&g)
             }),
             crystal: one(r, |g| {
@@ -179,7 +165,7 @@ impl Scene {
             }),
         };
         let mut statics = vec![
-            Item::new(m.ground, m4::ID),
+            Item::new(m.ground, m4::ID).material(Material::Terrain),
             Item::new(m.shrine, m4::ID),
             Item::new(m.bell, m4::place([0.0, 4.6, 0.0], 0.0, [1.0; 3])).glow(0.3),
         ];
@@ -201,14 +187,19 @@ impl Scene {
             let s = 0.8 + 0.6 * unit(hash(k, 3, 1));
             if k % 5 == 0 {
                 let rock = m.rocks[(k as usize / 5) % 3];
-                statics.push(Item::new(rock, m4::place(at, yaw, [s * 1.3, s, s * 1.2])));
+                statics.push(
+                    Item::new(rock, m4::place(at, yaw, [s * 1.3, s, s * 1.2]))
+                        .detail(0.5)
+                        .rough(0.85),
+                );
                 continue;
             }
             statics.push(Item::new(m.trunk, m4::place(at, yaw, [s; 3])));
-            statics.push(Item::new(
-                m.crowns[k as usize % 2],
-                m4::place(at, yaw, [s; 3]),
-            ));
+            statics.push(
+                Item::new(m.crowns[k as usize % 2], m4::place(at, yaw, [s; 3]))
+                    .material(Material::Foliage)
+                    .rough(0.7),
+            );
         }
         // Crystals in a ring, each a light.
         for k in 0..40 {
@@ -217,7 +208,11 @@ impl Scene {
             let (x, z) = (a.cos() * d, a.sin() * d);
             let at = [x, height(x, z), z];
             let hue = mix(rgb(120, 200, 255), rgb(200, 140, 255), unit(hash(k, 6, 2)));
-            statics.push(Item::new(m.crystal, m4::place(at, a, [1.0; 3])).tint(hue, 1.0));
+            statics.push(
+                Item::new(m.crystal, m4::place(at, a, [1.0; 3]))
+                    .tint(hue, 1.0)
+                    .rough(0.15),
+            );
             still.push(Light {
                 p: [x, at[1] + 1.2, z],
                 r: 7.0,
@@ -228,31 +223,35 @@ impl Scene {
         Scene { m, still }
     }
 
-    /// The look at dusk.
+    /// The look at dusk: a low orange sun, a violet sky, the first stars.
     pub fn look() -> Look {
         Look {
-            fog: rgb(64, 58, 92),
-            fog_range: (35.0, 160.0),
-            sky: rgb(70, 76, 120),
-            low: rgb(34, 30, 38),
-            sun_dir: geo::norm([-0.6, 0.12, -0.5]),
-            sun: rgb(150, 100, 80),
+            sun_dir: geo::norm([-0.6, 0.16, -0.5]),
+            sun: [2.6, 1.35, 0.7],
             sun_size: 0.05,
-            zenith: rgb(18, 22, 52),
-            deep: rgb(20, 18, 30),
-            stars: 0.6,
+            sky: [0.10, 0.10, 0.20],
+            low: [0.05, 0.04, 0.05],
+            zenith: [0.03, 0.05, 0.18],
+            horizon: [0.62, 0.34, 0.36],
+            deep: [0.04, 0.04, 0.07],
+            fog: 0.004,
+            fog_falloff: 0.03,
+            clouds: 0.5,
+            stars: 0.4,
+            exposure: 1.25,
+            bloom: 0.08,
+            vignette: 0.3,
+            sea: Some(WATER),
+            water: rgb(10, 40, 60),
+            waves: 0.3,
+            wind: [0.6, 0.3],
         }
     }
 
     /// What moves this frame (at `t` seconds), seen by this camera: items,
     /// lights and sparks.
     pub fn frame(&self, t: f32, cam: &render::Camera) -> (Vec<Item>, Vec<Light>, Vec<Spark>) {
-        let mut items = vec![Item::new(
-            self.m.water,
-            m4::place([24.0, WATER + 0.02 * (t * 1.3).sin(), -18.0], 0.0, [1.0; 3]),
-        )
-        .tint(rgb(150, 190, 220), 0.55)
-        .pass(Pass::Faint)];
+        let mut items = Vec::new();
         let mut lights = self.still.clone();
         let mut sparks = Vec::with_capacity(FLIES + 64);
         for k in 0..FLIES as i32 {

@@ -48,7 +48,12 @@ thread_local! {
 
 impl OnGpu {
     fn new(g: gpu::Gpu) -> OnGpu {
-        let mut r = render::Renderer::new(&g.device, &g.queue, g.format());
+        let q = if g.caps.software {
+            render::Quality::LOW
+        } else {
+            render::Quality::HIGH
+        };
+        let mut r = render::Renderer::new(&g.device, &g.queue, g.format(), q);
         let scene = Scene::new(&mut r);
         OnGpu { g, r, scene }
     }

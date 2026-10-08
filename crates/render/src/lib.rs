@@ -11,12 +11,17 @@ pub mod geo;
 pub mod grid;
 pub mod laws;
 pub mod shaders;
+pub mod shadow;
+pub mod terrain;
 
+mod buffers;
 mod draw;
+mod post;
 
 pub use draw::{Renderer, Stats};
 pub use geo::{rgb, V3};
 pub use kit::gl::{m4, M4};
+pub use terrain::Terrain;
 
 /// A mesh the renderer holds (from `Renderer::mesh`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -36,8 +41,21 @@ pub enum Pass {
     View,
 }
 
-/// One drawn thing: a mesh, where, its tint (alpha for `Faint`), and how
-/// much it lights itself.
+/// What a surface is made of (the world shader's choice).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Material {
+    Plain = 0,
+    /// The ground: grass, dry grass, rock and sand by slope and height.
+    Terrain = 1,
+    /// Leaves: sway in the wind, let light through.
+    Foliage = 2,
+    /// The sea (drawn by the engine from `Look::sea`).
+    Water = 3,
+    Metal = 4,
+}
+
+/// One drawn thing: a mesh, where, its tint (alpha for `Faint`), how much
+/// it lights itself, how rough it is, its material, and how bumpy.
 #[derive(Clone, Copy, Debug)]
 pub struct Item {
     pub mesh: Mesh,
@@ -45,6 +63,9 @@ pub struct Item {
     pub tint: [f32; 4],
     pub glow: f32,
     pub pass: Pass,
+    pub rough: f32,
+    pub material: Material,
+    pub detail: f32,
 }
 
 impl Item {
@@ -55,7 +76,23 @@ impl Item {
             tint: [1.0; 4],
             glow: 0.0,
             pass: Pass::Opaque,
+            rough: 0.8,
+            material: Material::Plain,
+            detail: 0.0,
         }
+    }
+
+    pub fn rough(self, rough: f32) -> Item {
+        Item { rough, ..self }
+    }
+
+    pub fn material(self, material: Material) -> Item {
+        Item { material, ..self }
+    }
+
+    /// Small bumps on the surface (0 none, 0.5 a rock's).
+    pub fn detail(self, detail: f32) -> Item {
+        Item { detail, ..self }
     }
 
     pub fn tint(self, c: V3, a: f32) -> Item {
@@ -142,43 +179,105 @@ pub fn perspective(fov: f32, aspect: f32) -> M4 {
     m
 }
 
-/// How the world looks: the game's colours and air.
+/// How the world looks: the sun, the sky, the air, the sea. Colours are
+/// as people pick them (sRGB); the sun's and the sky's light are linear
+/// and may be brighter than 1 (the picture is HDR, tone mapped at the end).
 #[derive(Clone, Copy, Debug)]
 pub struct Look {
-    /// The air far off, and the horizon.
-    pub fog: V3,
-    /// Where fog starts and where it is whole (metres).
-    pub fog_range: (f32, f32),
-    /// The light from above and from below on every surface.
-    pub sky: V3,
-    pub low: V3,
-    /// The sun (or moon): toward it, its light, and its disc's size
-    /// (radians across).
+    /// Toward the sun (or moon), its light, its disc's size (radians).
     pub sun_dir: V3,
     pub sun: V3,
     pub sun_size: f32,
-    /// The sky straight up, and straight down.
+    /// The light from the sky above and from the ground below.
+    pub sky: V3,
+    pub low: V3,
+    /// The sky straight up, at the horizon, and below it.
     pub zenith: V3,
+    pub horizon: V3,
     pub deep: V3,
-    /// How bright the stars are (0: none, by day).
+    /// The air: density a metre at sea level, and how fast it thins
+    /// with height.
+    pub fog: f32,
+    pub fog_falloff: f32,
+    /// Cloud cover 0 (clear) to 1 (overcast); stars (0 by day).
+    pub clouds: f32,
     pub stars: f32,
+    /// Exposure, bloom (0..0.2), the vignette (0..1).
+    pub exposure: f32,
+    pub bloom: f32,
+    pub vignette: f32,
+    /// The sea's level, if there is one, and its deep colour; how high
+    /// its waves read.
+    pub sea: Option<f32>,
+    pub water: V3,
+    pub waves: f32,
+    /// The wind over the ground (direction and strength).
+    pub wind: [f32; 2],
 }
 
 impl Default for Look {
     fn default() -> Look {
         Look {
-            fog: rgb(170, 190, 215),
-            fog_range: (60.0, 400.0),
-            sky: rgb(150, 165, 190),
-            low: rgb(70, 62, 55),
-            sun_dir: geo::norm([0.4, 0.75, 0.3]),
-            sun: rgb(255, 238, 210),
-            sun_size: 0.04,
-            zenith: rgb(70, 120, 200),
-            deep: rgb(40, 45, 55),
+            sun_dir: geo::norm([0.45, 0.55, 0.3]),
+            sun: [3.4, 3.1, 2.7],
+            sun_size: 0.03,
+            sky: [0.42, 0.52, 0.72],
+            low: [0.16, 0.14, 0.11],
+            zenith: [0.10, 0.24, 0.62],
+            horizon: [0.62, 0.72, 0.86],
+            deep: [0.10, 0.14, 0.20],
+            fog: 0.0012,
+            fog_falloff: 0.012,
+            clouds: 0.45,
             stars: 0.0,
+            exposure: 1.0,
+            bloom: 0.05,
+            vignette: 0.25,
+            sea: None,
+            water: [0.02, 0.10, 0.16],
+            waves: 0.35,
+            wind: [0.8, 0.4],
         }
     }
+}
+
+/// How much the renderer does: anti-aliasing samples, the sun's shadow
+/// (cascades and their size), grass (spacing and reach), bloom's depth.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Quality {
+    pub msaa: u32,
+    pub cascades: u32,
+    pub shadow_size: u32,
+    pub grass_spacing: f32,
+    pub grass_reach: f32,
+    pub bloom_levels: u32,
+}
+
+impl Quality {
+    pub const HIGH: Quality = Quality {
+        msaa: 4,
+        cascades: 3,
+        shadow_size: 2048,
+        grass_spacing: 0.24,
+        grass_reach: 42.0,
+        bloom_levels: 6,
+    };
+    pub const MEDIUM: Quality = Quality {
+        msaa: 4,
+        cascades: 2,
+        shadow_size: 1536,
+        grass_spacing: 0.34,
+        grass_reach: 28.0,
+        bloom_levels: 5,
+    };
+    pub const LOW: Quality = Quality {
+        msaa: 1,
+        cascades: 1,
+        shadow_size: 1024,
+        grass_spacing: 0.0,
+        grass_reach: 0.0,
+        bloom_levels: 4,
+    };
 }
 
 /// Everything one frame draws besides the statics.

@@ -4,7 +4,7 @@
 //! light, bursts where they strike, the storm's wall, and your own wand.
 
 use render::geo::{self, hash, mix, rgb, unit, Geo, V3};
-use render::{m4, Item, Light, Mesh, Pass, Renderer, Spark};
+use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark, Terrain};
 use wandfall::laws::{MAP_HALF, SEA};
 use wandfall::map::{Kind, Map};
 
@@ -12,7 +12,6 @@ pub const GOLD: V3 = rgb(255, 214, 128);
 const STORM: V3 = rgb(150, 70, 230);
 
 pub struct Look {
-    pub sea: Mesh,
     pub robe: Mesh,
     pub hat: Mesh,
     pub body: Mesh,
@@ -42,151 +41,148 @@ pub fn hue(id: u16) -> V3 {
     HUES[id as usize % HUES.len()]
 }
 
-fn ground(map: &Map) -> Geo {
-    let step = 2.0;
-    let n = (MAP_HALF * 2.0 / step) as usize;
-    let at = |i: usize| -MAP_HALF + i as f32 * step;
-    let h: Vec<f32> = (0..=n)
-        .flat_map(|j| (0..=n).map(move |i| (i, j)))
-        .map(|(i, j)| map.height(at(i), at(j)))
-        .collect();
-    let hh = |i: usize, j: usize| h[j * (n + 1) + i];
-    let mut g = Geo::default();
-    for j in 0..n {
-        for i in 0..n {
-            let (x0, z0, x1, z1) = (at(i), at(j), at(i + 1), at(j + 1));
-            let c = [hh(i, j), hh(i, j + 1), hh(i + 1, j + 1), hh(i + 1, j)];
-            let top = c.iter().cloned().fold(f32::MIN, f32::max);
-            if top < SEA - 3.5 {
-                continue;
-            }
-            let low = c.iter().cloned().fold(f32::MAX, f32::min);
-            let k = unit(hash(i as i32, j as i32, 1));
-            let grass = mix(rgb(86, 128, 58), rgb(112, 146, 66), k);
-            let col = if low < SEA + 0.4 {
-                mix(rgb(196, 178, 128), rgb(180, 160, 110), k)
-            } else if top - low > 1.4 {
-                mix(rgb(120, 116, 108), rgb(140, 134, 122), k)
-            } else if low > 6.0 {
-                mix(grass, rgb(134, 150, 84), 0.4)
-            } else {
-                grass
-            };
-            g.quad(
-                [x0, c[0], z0],
-                [x0, c[1], z1],
-                [x1, c[2], z1],
-                [x1, c[3], z0],
-                col,
-                0.0,
-            );
-        }
-    }
-    g
-}
-
 fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
     let mut g = Geo::default();
     f(&mut g);
     r.mesh(&g)
 }
 
+/// A mesh whose shared vertices are shaded smooth.
+fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
+    let mut g = Geo::default();
+    f(&mut g);
+    g.smooth();
+    r.mesh(&g)
+}
+
+/// Metres between the ground's samples.
+const TERRAIN_CELL: f32 = 1.25;
+
 impl Look {
     /// Build the island's meshes and set it down as statics.
     pub fn new(r: &mut Renderer, map: &Map) -> Look {
-        let ground = r.mesh(&ground(map));
-        let trunk = one(r, |g| {
-            g.column(
-                [0.0; 3],
-                6,
-                (0.35, 0.22),
-                3.2,
-                0.0,
-                rgb(96, 72, 50),
-                0.0,
-                false,
-            )
+        let t = Terrain::sample(
+            [-MAP_HALF, -MAP_HALF],
+            MAP_HALF * 2.0,
+            TERRAIN_CELL,
+            |x, z| map.height(x, z),
+        );
+        r.terrain(&t);
+        let ground = r.mesh(&t.mesh(SEA - 4.0, |_, _, _| [1.0; 3]));
+        let bark = rgb(96, 74, 56);
+        let trunk = smooth(r, |g| {
+            let profile = [
+                (0.46, -0.3),
+                (0.36, 0.4),
+                (0.27, 1.6),
+                (0.2, 3.2),
+                (0.1, 4.4),
+            ];
+            g.lathe([0.0; 3], &profile, 9, bark, 0.0);
         });
-        let crowns = [11u32, 29].map(|s| {
-            one(r, |g| {
+        let crowns = [11u32, 29, 47].map(|s| {
+            smooth(r, |g| {
                 let c = mix(
-                    rgb(46, 92, 44),
-                    rgb(76, 118, 52),
+                    rgb(60, 104, 42),
+                    rgb(98, 132, 54),
                     unit(hash(s as i32, 1, 7)),
                 );
-                g.blob([0.0, 3.6, 0.0], [2.0, 1.7, 2.0], s, c, 0.0);
-                g.blob(
-                    [0.4, 5.0, -0.2],
-                    [1.4, 1.3, 1.4],
-                    s + 1,
-                    mix(c, rgb(120, 150, 70), 0.3),
+                let dark = mix(c, rgb(38, 76, 34), 0.45);
+                g.sphere([0.0, 3.9, 0.0], [2.1, 1.8, 2.1], (2, s, 0.3), c, 0.0);
+                g.sphere(
+                    [0.6, 5.1, -0.3],
+                    [1.5, 1.3, 1.5],
+                    (2, s + 1, 0.3),
+                    mix(c, rgb(136, 160, 72), 0.3),
                     0.0,
                 );
+                g.sphere([-0.8, 4.6, 0.6], [1.3, 1.1, 1.3], (2, s + 2, 0.3), c, 0.0);
+                g.sphere([0.3, 3.3, 1.1], [1.2, 1.0, 1.2], (2, s + 3, 0.3), dark, 0.0);
             })
         });
-        let pines = one(r, |g| {
-            for (k, (y, w)) in [(2.0, 1.9), (3.4, 1.5), (4.6, 1.0)].into_iter().enumerate() {
-                g.column(
+        let pines = smooth(r, |g| {
+            for (y, w, h) in [
+                (1.5, 2.3, 2.5),
+                (2.9, 1.85, 2.3),
+                (4.1, 1.4, 2.1),
+                (5.2, 0.95, 1.9),
+            ] {
+                g.lathe(
                     [0.0, y, 0.0],
-                    7,
-                    (w, 0.0),
-                    2.0,
-                    k as f32,
-                    rgb(40, 84, 52),
+                    &[(w, 0.0), (w * 0.5, h * 0.45), (0.0, h)],
+                    12,
+                    rgb(36, 80, 52),
                     0.0,
-                    false,
                 );
             }
         });
         let rocks = [5u32, 17, 23].map(|s| {
-            one(r, |g| {
-                g.blob([0.0, 0.4, 0.0], [1.0, 0.9, 1.0], s, rgb(132, 128, 122), 0.0)
+            smooth(r, |g| {
+                g.sphere(
+                    [0.0, 0.35, 0.0],
+                    [1.0, 0.85, 1.0],
+                    (3, s, 0.34),
+                    rgb(130, 126, 120),
+                    0.0,
+                )
             })
         });
-        let pillar = one(r, |g| {
-            g.column(
-                [0.0; 3],
-                8,
-                (0.55, 0.48),
-                1.0,
-                0.0,
-                rgb(206, 200, 186),
-                0.0,
-                true,
-            );
+        let stone = rgb(208, 200, 184);
+        let pillar = smooth(r, |g| {
+            let profile = [
+                (0.66, 0.0),
+                (0.66, 0.06),
+                (0.54, 0.12),
+                (0.5, 0.5),
+                (0.47, 0.94),
+                (0.53, 0.97),
+                (0.53, 1.0),
+            ];
+            g.lathe([0.0; 3], &profile, 16, stone, 0.0);
         });
         let cap = one(r, |g| {
             g.block(
                 [0.0; 3],
-                [1.3, 0.3, 1.3],
+                [1.35, 0.32, 1.35],
                 0.0,
-                rgb(206, 200, 186),
-                rgb(170, 164, 152),
+                stone,
+                rgb(176, 168, 154),
                 0.0,
             )
         });
-        let mut statics = vec![Item::new(ground, m4::ID)];
+        let mut statics = vec![Item::new(ground, m4::ID).material(Material::Terrain)];
         for (k, p) in map.props.iter().enumerate() {
             let at = [p.x, p.y, p.z];
             match p.kind {
                 Kind::Tree => {
                     let s = p.scale;
-                    statics.push(Item::new(trunk, m4::place(at, p.yaw, [s; 3])));
-                    let crown = if k % 3 == 0 { pines } else { crowns[k % 2] };
-                    statics.push(Item::new(crown, m4::place(at, p.yaw, [s; 3])));
+                    statics.push(
+                        Item::new(trunk, m4::place(at, p.yaw, [s; 3]))
+                            .rough(0.9)
+                            .detail(0.4),
+                    );
+                    let crown = if k % 3 == 0 { pines } else { crowns[k % 3] };
+                    statics.push(
+                        Item::new(crown, m4::place(at, p.yaw, [s; 3]))
+                            .material(Material::Foliage)
+                            .rough(0.7),
+                    );
                 }
                 Kind::Rock => {
                     let s = p.scale;
-                    statics.push(Item::new(
-                        rocks[k % 3],
-                        m4::place(at, p.yaw, [s * 1.2, s * 1.4, s * 1.1]),
-                    ));
+                    let m = m4::place(at, p.yaw, [s * 1.2, s * 1.4, s * 1.1]);
+                    statics.push(Item::new(rocks[k % 3], m).rough(0.85).detail(0.6));
                 }
                 Kind::Pillar => {
-                    statics.push(Item::new(pillar, m4::place(at, p.yaw, [1.0, p.h, 1.0])));
+                    let m = m4::place(at, p.yaw, [1.0, p.h, 1.0]);
+                    statics.push(Item::new(pillar, m).rough(0.7).detail(0.3));
                     if k % 2 == 0 {
                         let top = [p.x, p.y + p.h, p.z];
-                        statics.push(Item::new(cap, m4::place(top, p.yaw, [1.0; 3])));
+                        statics.push(
+                            Item::new(cap, m4::place(top, p.yaw, [1.0; 3]))
+                                .rough(0.75)
+                                .detail(0.3),
+                        );
                     }
                 }
             }
@@ -197,81 +193,72 @@ impl Look {
         held.extend(rocks);
         Look {
             held,
-            sea: one(r, |g| {
-                g.floor((-1.0, -1.0), (1.0, 1.0), 0.0, rgb(60, 120, 160), 0.15)
-            }),
-            robe: one(r, |g| {
-                g.column([0.0; 3], 8, (0.46, 0.2), 1.38, 0.0, [1.0; 3], 0.0, true);
-                g.column(
+            robe: smooth(r, |g| {
+                let profile = [
+                    (0.5, 0.0),
+                    (0.45, 0.25),
+                    (0.33, 0.85),
+                    (0.25, 1.2),
+                    (0.2, 1.38),
+                    (0.0, 1.42),
+                ];
+                g.lathe([0.0; 3], &profile, 16, [1.0; 3], 0.0);
+                g.lathe(
                     [0.0, 1.0, 0.0],
-                    8,
-                    (0.24, 0.24),
-                    0.2,
+                    &[(0.27, 0.0), (0.29, 0.1), (0.25, 0.2)],
+                    16,
+                    rgb(230, 218, 196),
                     0.0,
-                    rgb(230, 220, 200),
-                    0.0,
-                    false,
                 );
             }),
-            hat: one(r, |g| {
-                g.column(
-                    [0.0, 1.66, 0.0],
-                    12,
-                    (0.42, 0.42),
-                    0.04,
-                    0.0,
-                    [0.8; 3],
-                    0.0,
-                    true,
-                );
-                g.column(
-                    [0.0, 1.7, 0.0],
-                    8,
-                    (0.24, 0.0),
-                    0.6,
-                    0.3,
-                    [1.0; 3],
-                    0.0,
-                    false,
-                );
+            hat: smooth(r, |g| {
+                let profile = [
+                    (0.46, 0.0),
+                    (0.46, 0.04),
+                    (0.26, 0.07),
+                    (0.18, 0.3),
+                    (0.08, 0.58),
+                    (0.0, 0.74),
+                ];
+                g.lathe([0.0, 1.64, 0.0], &profile, 16, [1.0; 3], 0.0);
             }),
-            body: one(r, |g| {
-                g.blob(
+            body: smooth(r, |g| {
+                g.sphere(
                     [0.0, 1.5, 0.0],
-                    [0.19, 0.2, 0.19],
-                    4,
+                    [0.19, 0.21, 0.19],
+                    (2, 4, 0.02),
                     rgb(236, 196, 160),
                     0.0,
                 );
                 // The wand, held out front and right; its tip alight.
-                g.column(
+                g.lathe(
                     [0.12, 0.92, 0.3],
-                    5,
-                    (0.03, 0.02),
-                    0.55,
-                    0.0,
+                    &[(0.03, 0.0), (0.024, 0.3), (0.018, 0.56)],
+                    8,
                     rgb(110, 76, 50),
                     0.0,
-                    true,
                 );
-                g.blob([0.12, 1.5, 0.3], [0.06, 0.06, 0.06], 2, GOLD, 1.0);
+                g.sphere([0.12, 1.5, 0.3], [0.06; 3], (1, 2, 0.0), GOLD, 1.0);
             }),
-            glider: one(r, |g| {
-                g.blob([0.0; 3], [1.0, 0.12, 1.0], 6, rgb(200, 230, 255), 0.6)
-            }),
-            orb: one(r, |g| {
-                g.blob([0.0; 3], [1.0; 3], 9, rgb(255, 246, 225), 1.0)
-            }),
-            rod: one(r, |g| {
-                g.column(
+            glider: smooth(r, |g| {
+                g.sphere(
                     [0.0; 3],
-                    6,
-                    (1.0, 0.8),
-                    1.0,
-                    0.0,
+                    [1.0, 0.12, 1.0],
+                    (2, 6, 0.05),
+                    rgb(200, 230, 255),
+                    0.6,
+                )
+            }),
+            orb: smooth(r, |g| {
+                g.sphere([0.0; 3], [1.0; 3], (2, 9, 0.0), rgb(255, 246, 225), 1.0)
+            }),
+            rod: smooth(r, |g| {
+                g.lathe(
+                    [0.0; 3],
+                    &[(1.0, 0.0), (0.9, 0.5), (0.8, 1.0)],
+                    8,
                     rgb(110, 78, 52),
                     0.0,
-                    true,
                 )
             }),
             chest: one(r, |g| {
@@ -310,7 +297,6 @@ impl Look {
     /// Let every mesh go (another island takes this one's place).
     pub fn free(self, r: &mut Renderer) {
         let all = [
-            self.sea,
             self.robe,
             self.hat,
             self.body,
@@ -326,15 +312,6 @@ impl Look {
             r.free(m);
         }
         r.statics(Vec::new());
-    }
-
-    pub fn sea(&self, items: &mut Vec<Item>, t: f32) {
-        let y = SEA + 0.05 * (t * 0.8).sin();
-        items.push(
-            Item::new(self.sea, m4::place([0.0, y, 0.0], 0.0, [700.0, 1.0, 700.0]))
-                .tint(rgb(120, 180, 220), 0.72)
-                .pass(Pass::Faint),
-        );
     }
 
     /// A wizard standing at `at`, facing `yaw` (radians).
@@ -455,28 +432,40 @@ impl Look {
     }
 }
 
-/// The sky by day; violet and close when you stand in the storm.
+/// The sky by day, a little after noon; violet and close when you stand
+/// in the storm.
 pub fn sky(in_storm: bool) -> render::Look {
     let day = render::Look {
-        fog: rgb(178, 198, 222),
-        fog_range: (90.0, 460.0),
-        sky: rgb(118, 128, 150),
-        low: rgb(62, 56, 50),
-        sun_dir: geo::norm([0.45, 0.7, 0.3]),
-        sun: rgb(225, 210, 186),
-        sun_size: 0.045,
-        zenith: rgb(66, 118, 205),
-        deep: rgb(40, 60, 80),
+        sun_dir: geo::norm([0.5, 0.62, 0.32]),
+        sun: [3.3, 3.0, 2.6],
+        sun_size: 0.035,
+        sky: [0.36, 0.46, 0.66],
+        low: [0.14, 0.13, 0.10],
+        zenith: [0.09, 0.22, 0.58],
+        horizon: [0.58, 0.68, 0.82],
+        deep: [0.08, 0.12, 0.18],
+        fog: 0.0016,
+        fog_falloff: 0.015,
+        clouds: 0.5,
         stars: 0.0,
+        exposure: 1.0,
+        bloom: 0.05,
+        vignette: 0.28,
+        sea: Some(SEA),
+        water: rgb(10, 52, 74),
+        waves: 0.4,
+        wind: [0.9, 0.35],
     };
     if !in_storm {
         return day;
     }
     render::Look {
-        fog: rgb(96, 50, 140),
-        fog_range: (4.0, 60.0),
-        sky: rgb(120, 90, 160),
-        zenith: rgb(60, 30, 100),
+        sky: [0.30, 0.18, 0.44],
+        zenith: [0.14, 0.05, 0.26],
+        horizon: [0.42, 0.20, 0.58],
+        fog: 0.05,
+        fog_falloff: 0.002,
+        clouds: 0.9,
         ..day
     }
 }

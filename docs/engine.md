@@ -217,6 +217,28 @@ r.draw(&Camera { eye, yaw, pitch, fov }, &Viewmodel { .. }, &hud_canvas, now);
 
 ## 3. Phases (renderer)
 
+**Progress (October 2026, cloud session).** Luciphon is frozen (legacy), so
+its adapter is dropped; Wandfall and the showcase are the engine's users.
+Done, across phases, in `crates/render`:
+- Phase 1: the retained scene (meshes, now indexed; statics; moving items;
+  materials: plain, terrain, foliage, water, metal), the light grid, sky,
+  air, the see-through and glowing passes, sparks, the viewmodel layer.
+  Geometry: smooth spheres (icosahedral, bumped), lathed shapes, smoothing.
+- Phase 2: HDR (rgba16float) with 4x MSAA, bloom (a 13-tap halving chain
+  and tent upsampling), ACES, a vignette, sRGB; GGX specular with a sky
+  reflection for ambient sheen; procedural surface detail (noise bumps)
+  instead of textures; the terrain material (grass, dry grass, rock by
+  slope, sand and wet sand by the sea). Not yet: auto exposure, DoF, IBL.
+- Phase 3: the sun's cascaded shadows (3 x 2048 on High, PCF 3x3, snapped
+  to texels). Not yet: static caster caching, point shadows, froxels.
+- Phase 4 (part): the sea (waves, fresnel sky, shallows from the terrain's
+  heights, glints, foam). Phase 5 (part): the sky (gradient, sun glow,
+  disc, drifting clouds) and height fog that takes the sky's colour.
+- Phase 6 (part): GPU grass (100k+ blades about the eye, wind, rooted on
+  the heights texture, none on sand, rock or steep ground).
+- Tiers: `Quality::{HIGH, MEDIUM, LOW}`; `?q=` forces one; software
+  adapters get Low, touch screens Medium.
+
 Every phase:
 1. Keep all gates green (`CLAUDE.md` § Commands).
 2. Run the parallel sweep (§4) before pushing.

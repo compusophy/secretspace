@@ -569,7 +569,6 @@ fn frame(p: &mut Page, now: f64) {
     let mut d = Draw::default();
     let mut in_storm = false;
     if let Some(i) = &p.island {
-        i.look.sea(&mut d.items, t);
         fx::loot(&i.look, &mut d, &p.st.loot, t, cam.eye);
         for s in &others {
             if s.flags & flag::ALIVE == 0 {
@@ -749,7 +748,15 @@ pub fn start() {
                 return;
             }
         };
-        let r = Renderer::new(&g.device, &g.queue, g.format());
+        let q = match kit::window().location().search().unwrap_or_default() {
+            s if s.contains("q=low") => render::Quality::LOW,
+            s if s.contains("q=medium") => render::Quality::MEDIUM,
+            s if s.contains("q=high") => render::Quality::HIGH,
+            _ if g.caps.software => render::Quality::LOW,
+            _ if kit::touch() => render::Quality::MEDIUM,
+            _ => render::Quality::HIGH,
+        };
+        let r = Renderer::new(&g.device, &g.queue, g.format(), q);
         let session = kit::Session::load();
         let hands = Hands::attach(g.canvas());
         PAGE.with(|p| {

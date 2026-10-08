@@ -9,3 +9,10 @@ pub const MAX_PER_CELL: u32 = 48;
 pub const NEAR: f32 = 0.05;
 /// A spark's size on screen, in pixels, at most.
 pub const SPARK_MAX_PX: f32 = 48.0;
+
+/// Where each of the sun's shadow cascades ends (metres ahead of the eye).
+pub const CASCADES: [f32; 3] = [14.0, 48.0, 150.0];
+/// How dark the sun's shadow is (1 fully).
+pub const SHADOW_STRENGTH: f32 = 1.0;
+/// The picture's own format before tone mapping.
+pub const HDR: &str = "rgba16float";

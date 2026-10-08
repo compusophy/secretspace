@@ -62,7 +62,8 @@ crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   first), Session (the key), Pointer, Version, Socket,
                   TextField, storage
 crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
-crates/render     the engine: retained scene, geo, light grid, passes;
+crates/render     the engine: retained scene, geo, terrain, sun shadows,
+                  HDR + bloom + ACES, grass, sea, light grid;
                   crates/showcase-web is its test page (/showcase/)
 crates/hub-web    the front page (cards, live counts, scroll, footer) and
                   watch (wyrm's card: the live game, as a watcher)
