@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use engine::room::{Outbox, Room, Who};
+use engine::room::{Outbox, Room};
 use engine::who::{Seen as Named, Status};
 use kit::input::{Hand, Hands};
 use kit::link::Net;
@@ -10,7 +10,6 @@ use render::{Camera, Frame, Renderer};
 use wandfall::laws::{BOLT_COOLDOWN, EYE, TICK_HZ};
 use wandfall::map::Map;
 use wandfall::motion::{cast, keys, Body, Input};
-use wandfall::practice;
 use wandfall::predict::Predict;
 use wandfall::proto::{self, flag, Up, PROTO};
 use wandfall::room::Wandfall;
@@ -24,6 +23,9 @@ use crate::menu::{self, Act, Spots};
 use crate::sound::Sounds;
 use crate::state::State;
 use crate::touch::Touch;
+
+mod range;
+use range::{act, practise};
 
 const MIN_SHORT: f64 = 352.0;
 const MAX_DPR: f64 = 1.5;
@@ -100,6 +102,10 @@ struct Page {
     perf: bool,
     touch: bool,
     sounds: Sounds,
+    /// How far you have walked (in steps' worth of a sine), for the bob.
+    stride: f32,
+    /// `?hold=ms`: every effect held at that age.
+    hold: Option<f64>,
     /// Where sound is heard from (the camera) and which way it faces.
     ear: ([f32; 3], f32),
 }
@@ -274,117 +280,6 @@ fn online(p: &mut Page) {
     p.mode = Mode::Online(link);
     if !p.touch {
         kit::input::lock(p.g.canvas());
-    }
-}
-
-fn practise(p: &mut Page) {
-    leave(p);
-    let mut room = Box::new(Wandfall::practice(PRACTICE_SEED));
-    let name = Some(p.session.name())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "you".to_string());
-    let who = Who {
-        name,
-        ..Who::default()
-    };
-    let mut out = Outbox::default();
-    room.open(ME, &who, &mut out);
-    p.inbox.extend(out.0.into_iter().map(|m| m.1));
-    p.mode = Mode::Practice(room);
-    send(p, &Up::Join { proto: PROTO });
-    // `?spells=0,1,4,5` sets out the four slots; `?nocd` drops cooldowns;
-    // `?spar` has the dummies fight back.
-    if let Mode::Practice(room) = &mut p.mode {
-        let w = room.world();
-        let me = w.players.iter().find(|p| !p.bot).map_or(0, |p| p.id);
-        if let Some(list) = query_value("spells") {
-            if let Some(q) = w.find_mut(me) {
-                q.slots = [None; 4];
-            }
-            for (slot, sp) in list.split(',').filter_map(|v| v.parse().ok()).enumerate() {
-                practice::equip(w, me, slot, sp, 1);
-            }
-        }
-        if let Some(r) = w.practice.as_mut() {
-            r.no_cooldowns |= query("nocd");
-            r.sparring |= query("spar");
-        }
-    }
-    // `?look=yaw,pitch` (degrees) faces you a way to start.
-    if let Some(v) = query_value("look") {
-        let mut it = v.split(',').filter_map(|x| x.parse::<f32>().ok());
-        p.yaw = it.next().unwrap_or(0.0).to_radians();
-        p.pitch = it.next().unwrap_or(0.0).to_radians();
-    }
-    if !p.touch {
-        kit::input::lock(p.g.canvas());
-    }
-}
-
-/// A menu button pressed.
-fn act(p: &mut Page, a: Act) {
-    let you = p.st.you;
-    let own = p.st.frame.as_ref().and_then(|f| f.you);
-    match a {
-        Act::Online => online(p),
-        Act::Practice => practise(p),
-        Act::Leave => leave(p),
-        Act::Resume => {
-            p.paused = false;
-            if !p.touch {
-                kit::input::lock(p.g.canvas());
-            }
-        }
-        Act::Book => {
-            p.book = true;
-            p.paused = false;
-            kit::input::unlock();
-        }
-        Act::CloseBook => {
-            p.book = false;
-            if !p.touch {
-                kit::input::lock(p.g.canvas());
-            }
-        }
-        Act::Slot(k) => p.book_slot = k,
-        _ => {
-            let Mode::Practice(room) = &mut p.mode else {
-                return;
-            };
-            let w = room.world();
-            let slot = p.book_slot;
-            let held = own.and_then(|o| o.slots[slot]);
-            match a {
-                Act::Spell(sp) => {
-                    practice::equip(w, you, slot, sp, held.map_or(1, |h| h.1));
-                }
-                Act::Rank(r) => {
-                    if let Some((sp, _)) = held {
-                        practice::equip(w, you, slot, sp, r);
-                    }
-                }
-                Act::Level(d) => {
-                    let level = own.map_or(1, |o| o.level) as i8;
-                    let to = if d == 20 {
-                        20
-                    } else {
-                        (level + d).clamp(1, 20)
-                    };
-                    practice::set_level(w, you, to as u8);
-                }
-                Act::NoCooldowns => {
-                    if let Some(r) = w.practice.as_mut() {
-                        r.no_cooldowns = !r.no_cooldowns;
-                    }
-                }
-                Act::Sparring => {
-                    if let Some(r) = w.practice.as_mut() {
-                        r.sparring = !r.sparring;
-                    }
-                }
-                _ => {}
-            }
-        }
     }
 }
 
@@ -627,10 +522,19 @@ fn frame(p: &mut Page, now: f64) {
     let mut watching = None;
     let cam = if p.alive {
         let at = body(p.prev.p, p.pred.body.p);
+        // A step's bob as you walk; a shake when you are hurt.
+        let v = p.pred.body.v;
+        let speed = (v[0] * v[0] + v[2] * v[2]).sqrt();
+        if p.pred.body.ground {
+            p.stride += speed * dt as f32 / 1000.0 * 1.7;
+        }
+        let bob = p.stride.sin().abs() * 0.035 * (speed / 7.0).min(1.0);
+        let hurt = (1.0 - (now - p.st.hurt_at) / 220.0).max(0.0) as f32;
+        let shake = |k: f32| (now as f32 * k).sin() * 0.012 * hurt;
         Camera {
-            eye: [at[0], at[1] + EYE, at[2]],
-            yaw: p.yaw,
-            pitch: p.pitch,
+            eye: [at[0], at[1] + EYE - 0.02 + bob, at[2]],
+            yaw: p.yaw + shake(0.09),
+            pitch: p.pitch + shake(0.13),
             fov: p.fov,
             aspect,
         }
@@ -681,8 +585,15 @@ fn frame(p: &mut Page, now: f64) {
                 let speed = (p.st.speed(s.id) / 7.0).min(1.0);
                 let ground = s.flags & flag::GROUND != 0;
                 let step = ((now / 1000.0) as f32 * 9.0 + s.id as f32).sin().abs();
+                let hit =
+                    p.st.bursts
+                        .iter()
+                        .filter(|b| b.1 == s.id)
+                        .map(|b| now - b.0)
+                        .fold(1e9, f64::min);
                 let pose = look::Pose {
                     bob: if ground { step * 0.06 * speed } else { 0.0 },
+                    flash: (1.0 - hit / 160.0).max(0.0) as f32,
                     arm: (tip.1 * 2.0)
                         .max((1.0 - fired as f32 / 450.0) * 1.5)
                         .min(1.0),
@@ -731,7 +642,7 @@ fn frame(p: &mut Page, now: f64) {
             others.iter().find(|s| s.id == id).map(|s| s.p)
         };
         // `?hold=ms` holds every effect at that age (to look at them).
-        let hold = query_value("hold").and_then(|v| v.parse::<f64>().ok());
+        let hold = p.hold;
         let held: Vec<_>;
         let shows = match hold {
             Some(ms) => {
@@ -932,6 +843,8 @@ pub fn start() {
                 perf: query("perf=1"),
                 touch: kit::touch(),
                 sounds: Sounds::new(),
+                stride: 0.0,
+                hold: query_value("hold").and_then(|v| v.parse().ok()),
                 ear: ([0.0; 3], 0.0),
             })
         });

@@ -13,11 +13,14 @@ use wandfall::map::{Kind, Map};
 pub const GOLD: V3 = rgb(255, 214, 128);
 const STORM: V3 = rgb(150, 70, 230);
 
-/// How a wizard stands this frame: bobbing as it walks, its arm raised
+/// How a wizard stands this frame: bobbing as it walks, flashing when
+/// hit, its arm raised
 /// to cast (0 at rest, 1 along its aim, `aim` radians up), its wand's tip
 /// alight (a colour, and how bright: 1 just cast), gliding down.
 pub struct Pose {
     pub bob: f32,
+    /// Just hit: 1 flashes it white.
+    pub flash: f32,
     pub arm: f32,
     pub aim: f32,
     pub tip: (V3, f32),
@@ -427,8 +430,13 @@ impl Look {
         let at = [at[0], at[1] + pose.bob, at[2]];
         let m = m4::place(at, yaw, [1.0; 3]);
         let c = hue(id);
-        d.items
-            .push(Item::new(self.robe, m).tint(c, 1.0).rough(0.85));
+        let flash = geo::mix(c, [1.0; 3], 0.7 * pose.flash);
+        d.items.push(
+            Item::new(self.robe, m)
+                .tint(flash, 1.0)
+                .glow(0.6 * pose.flash)
+                .rough(0.85),
+        );
         d.items.push(
             Item::new(self.hat, m)
                 .tint(geo::scale(c, 0.62), 1.0)
