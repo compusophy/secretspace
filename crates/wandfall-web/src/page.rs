@@ -21,6 +21,7 @@ use crate::fx::{self, Draw};
 use crate::hud;
 use crate::look::{self, Look};
 use crate::menu::{self, Act, Spots};
+use crate::sound::Sounds;
 use crate::state::State;
 use crate::touch::Touch;
 
@@ -98,6 +99,9 @@ struct Page {
     fixed: bool,
     perf: bool,
     touch: bool,
+    sounds: Sounds,
+    /// Where sound is heard from (the camera) and which way it faces.
+    ear: ([f32; 3], f32),
 }
 
 thread_local! {
@@ -200,14 +204,17 @@ fn receive(p: &mut Page, b: &[u8], now: f64) {
         return;
     }
     if let Some(list) = proto::read_events(b) {
+        p.sounds.events(&list, p.st.you, p.alive, p.ear);
         p.st.events(list, now);
         return;
     }
     if let Some(l) = proto::Loot::decode(b) {
+        p.sounds.loot(&p.st.loot, &l, p.ear);
         p.st.loot = l;
         return;
     }
     if let Some(f) = proto::Frame::decode(b) {
+        p.sounds.frame(p.st.frame.as_ref(), &f, p.st.you, p.ear);
         match (&f.you, &p.island) {
             (Some(own), Some(i)) => {
                 if !p.alive {
@@ -383,6 +390,17 @@ fn in_menu(p: &Page) -> bool {
 fn hands(p: &mut Page) {
     let locked = kit::input::locked();
     for h in p.hands.drain() {
+        // A browser lets sound play once a person acts.
+        if matches!(
+            h,
+            Hand::Button { down: true, .. }
+                | Hand::Finger {
+                    kind: kit::input::Kind::Down,
+                    ..
+                }
+        ) {
+            p.sounds.audio.wake();
+        }
         match h {
             Hand::Mouse { dx, dy, .. } if locked => {
                 // Slower when zoomed, so the aim holds.
@@ -444,6 +462,12 @@ fn hands(p: &mut Page) {
         p.paused = !p.paused;
     }
     for code in p.hands.pressed() {
+        p.sounds.audio.wake();
+        if code == "KeyM" {
+            let on = !p.sounds.audio.muted;
+            p.sounds.mute(on);
+            continue;
+        }
         if code == "KeyB" && matches!(p.mode, Mode::Practice(_)) {
             act(p, if p.book { Act::CloseBook } else { Act::Book });
             continue;
@@ -518,6 +542,7 @@ fn inputs(p: &mut Page, dt: f64) {
             })
         }) {
             p.spell_at = (kit::now(), sp);
+            p.sounds.cast(sp, None, p.ear);
         }
         let i = Input {
             seq: p.seq,
@@ -532,6 +557,7 @@ fn inputs(p: &mut Page, dt: f64) {
         if k & keys::FIRE != 0 && p.cool == 0 && !p.pred.body.glide {
             p.cool = BOLT_COOLDOWN;
             p.cast_at = kit::now();
+            p.sounds.wand(None, p.ear, (p.seq % 5) as f32 / 5.0);
         }
         p.outbox.push(i);
     }
@@ -709,6 +735,7 @@ fn frame(p: &mut Page, now: f64) {
             }
         }
     }
+    p.ear = (cam.eye, cam.yaw);
     let scene = Frame {
         cam,
         look: look::sky(in_storm),
@@ -878,6 +905,8 @@ pub fn start() {
                 fixed: query("q=low") || query("q=medium") || query("q=high"),
                 perf: query("perf=1"),
                 touch: kit::touch(),
+                sounds: Sounds::new(),
+                ear: ([0.0; 3], 0.0),
             })
         });
         PAGE.with(|p| {

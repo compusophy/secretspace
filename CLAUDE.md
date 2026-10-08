@@ -54,13 +54,14 @@ engine's first consumer.
 ```
 crates/engine     wire rng room (the Room trait) hub (Stats) who (Hello, Seen,
                   Still, names) words snap (save files) fixed (Q16.16) sha1
+                  synth (sounds from numbers)
 crates/pixels     Canvas (RGBA buffer, AA shapes, glow, blend), font (5x7),
                   wrap, fit_scale; examples/sheet.rs draws a test sheet
 crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   ui text scale), gl (WebGL2 + a pixel layer), input (keys,
                   fingers, mouse, pointer lock), Link (reconnects, Hello
                   first), Session (the key), Pointer, Version, Socket,
-                  TextField, storage
+                  TextField, storage, audio
 crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
 crates/render     the engine: retained scene, geo, terrain, sun shadows,
                   HDR + bloom + ACES, grass, sea, light grid;

@@ -12,6 +12,7 @@ pub mod fx;
 pub mod hud;
 pub mod look;
 pub mod menu;
+pub mod sound;
 pub mod state;
 pub mod touch;
 

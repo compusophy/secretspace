@@ -4,9 +4,10 @@
 //! `Link` to its room (or a plain `Socket`), the `Session` that says who
 //! this is, one `Pointer` at a time (or every hand at once, `input`), the
 //! page's `version`, an invisible `TextField` (so a phone still offers its
-//! keyboard), storage, and a frame loop. Rust only: the page's one line of
-//! script just starts the wasm.
+//! keyboard), storage, `audio`, and a frame loop. Rust only: the page's
+//! one line of script just starts the wasm.
 
+pub mod audio;
 pub mod gl;
 pub mod input;
 pub mod link;
