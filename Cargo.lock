@@ -406,6 +406,7 @@ dependencies = [
  "secretspace-luciphon",
  "secretspace-luciphon-look",
  "secretspace-pixels",
+ "secretspace-wandfall",
  "secretspace-wyrm",
  "secretspace-wyrm-look",
  "wasm-bindgen",

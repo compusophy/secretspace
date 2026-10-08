@@ -66,8 +66,8 @@ crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
 crates/render     the engine: retained scene, geo, terrain, sun shadows,
                   HDR + bloom + ACES, grass, sea, light grid;
                   crates/showcase-web is its test page (/showcase/)
-crates/hub-web    the front page (cards, live counts, scroll, footer) and
-                  watch (wyrm's card: the live game, as a watcher)
+crates/hub-web    the front page (cards, live counts, scroll, footer), watch
+                  (wyrm's card, live, as a watcher), wand (Wandfall's)
 crates/wyrm       the game: laws world bots grid proto view mirror room
 crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu

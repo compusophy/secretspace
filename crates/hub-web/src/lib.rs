@@ -1,7 +1,8 @@
 //! The front page: a card for every game, each showing how many people
 //! are in it right now, and along the bottom how many are online anywhere
 //! and how many visits there have ever been. The numbers come live from
-//! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`).
+//! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`),
+//! and Wandfall's its match while one is on (`wand`).
 //! Every pixel is drawn here, in Rust.
 
 mod luci;
@@ -84,6 +85,8 @@ struct Hub {
     watch: watch::Watch,
     /// Luciphon, live, while its card is shown (`?all=1` for now).
     luci: Option<luci::LuciWatch>,
+    /// Wandfall, live while a match is on, for its card.
+    wand: wand::WandWatch,
     /// The cards on the shelf, by index into CARDS.
     shown: Vec<usize>,
     /// How far the page is scrolled, and the most it can be.
@@ -294,7 +297,7 @@ fn draw(h: &mut Hub, now: f64) {
         } else if let (Some(l), "luciphon") = (h.luci.as_mut(), card.id) {
             l.draw(c, pv, 6.0 * uf, u, now);
         } else if card.id == "wandfall" {
-            wand::draw(c, pv, t, uf);
+            h.wand.draw(c, pv, t, u, now);
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }
@@ -416,6 +419,7 @@ pub fn start() -> Result<(), JsValue> {
             hits: Vec::new(),
             watch: watch::Watch::new(),
             luci: all.then(luci::LuciWatch::new),
+            wand: wand::WandWatch::new(),
             shown,
             scroll: 0.0,
             max_scroll: 0.0,

@@ -167,13 +167,16 @@ of combat styles and all varieties to counter all varieties".
 - [x] **Reading the end:** a burst where a wizard falls; the feed shows
       the icon of what dealt the knockout; a card when you are out or win
       (your place, who took you and with what, knockouts, level).
-- [x] **The hub card** (from Stage C): the island from above, the storm
-      closing, wizards duelling in the spells' colours; players counted.
+- [x] **The hub card** (from Stage C): while a match is on, the hub
+      watches it (a watcher, not counted) and draws it from above: the
+      island, the storm's circles, every wizard, bolts and beams in their
+      spells' colours, falls, "LIVE n left"; between matches, the idea of
+      one (the storm closing, wizards duelling).
 - Hooks for looking (`crates/wandfall-web/src/lib.rs`): `?spells=`,
   `?nocd`, `?spar`, `?look=yaw,pitch`, `?hold=ms` (every effect held at
   that age).
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.
-- A live hub preview (the hub watching a match), a season of names.
+- A season of names.
 - Netcode at scale (`docs/engine.md` §9): 40-60 people, lag-compensated hits.
