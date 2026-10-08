@@ -401,6 +401,45 @@ pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
     }
 }
 
+/// What a look from `eye` along `dir` meets within `range`, as the page
+/// sees it: the point, and the wizard there (not `me`), if one.
+pub fn sight(
+    map: &wandfall::map::Map,
+    others: &[Seen],
+    me: u16,
+    (eye, dir): (V3, V3),
+    range: f32,
+) -> (V3, Option<u16>) {
+    let end = geo::add(eye, geo::scale(dir, range));
+    let mut first = (map.strikes(eye, end).unwrap_or(1.0), None);
+    for s in others
+        .iter()
+        .filter(|s| s.id != me && s.flags & wandfall::proto::flag::ALIVE != 0)
+    {
+        if let Some(t) = wandfall::world::through(eye, end, s.p) {
+            if t < first.0 {
+                first = (t, Some(s.id));
+            }
+        }
+    }
+    (geo::add(eye, geo::scale(dir, range * first.0)), first.1)
+}
+
+/// Where Lightning would strike: a faint ring, while you aim with it ready.
+pub fn aim_ring(look: &Look, d: &mut Draw, at: V3, t: f32) {
+    let c = colour(spell::LIGHTNING);
+    let pulse = 0.35 + 0.15 * (t * 6.0).sin();
+    ring(
+        look,
+        d,
+        [at[0], at[1] + 0.08, at[2]],
+        LIGHTNING_RADIUS,
+        c,
+        pulse,
+        t * 0.5,
+    );
+}
+
 /// Where a cast came from and which way it went (the caster's eyes to
 /// its wand), if the caster is known.
 fn aim(by: u16, at: V3, at_of: &impl Fn(u16) -> Option<V3>) -> V3 {

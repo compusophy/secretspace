@@ -7,7 +7,7 @@ use engine::who::{Seen as Named, Status};
 use kit::input::{Hand, Hands};
 use kit::link::Net;
 use render::{Camera, Frame, Renderer};
-use wandfall::laws::{BOLT_COOLDOWN, EYE, TICK_HZ};
+use wandfall::laws::{spell, BOLT_COOLDOWN, EYE, LANCE_RANGE, LIGHTNING_RANGE, SEA, TICK_HZ};
 use wandfall::map::Map;
 use wandfall::motion::{cast, keys, Body, Input};
 use wandfall::predict::Predict;
@@ -673,6 +673,22 @@ fn frame(p: &mut Page, now: f64) {
         }
     }
     p.ear = (cam.eye, cam.yaw);
+    // What the crosshair is on; where Lightning would strike, aiming.
+    let mut on_target = false;
+    if let (Some(i), true) = (&p.island, p.alive) {
+        let ray = (cam.eye, cam.forward());
+        let (_, who) = fx::sight(&i.map, &others, p.st.you, ray, LANCE_RANGE);
+        on_target = who.is_some();
+        let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
+        let ready = own.is_some_and(|o| {
+            (0..4).any(|k| o.slots[k].is_some_and(|s| s.0 == spell::LIGHTNING) && o.cds[k] == 0)
+        });
+        if p.aiming && ready {
+            let (at, _) = fx::sight(&i.map, &others, p.st.you, ray, LIGHTNING_RANGE);
+            let ground = [at[0], i.map.height(at[0], at[2]).max(SEA), at[2]];
+            fx::aim_ring(&i.look, &mut d, ground, t);
+        }
+    }
     let scene = Frame {
         cam,
         look: look::sky(in_storm),
@@ -731,6 +747,7 @@ fn frame(p: &mut Page, now: f64) {
                 perf: perf.clone(),
                 touch: p.touch,
                 practice,
+                on_target,
             };
             hud::draw(&mut p.g.hud, &i.mini, &view);
             let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());

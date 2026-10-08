@@ -61,6 +61,8 @@ pub struct View<'a> {
     pub touch: bool,
     /// On the practice range (no match, no storm).
     pub practice: bool,
+    /// A wizard under the crosshair, in reach of the Lance.
+    pub on_target: bool,
 }
 
 fn clock(secs: u16) -> String {
@@ -130,6 +132,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         let cy = h / 2;
         let g = 3 * ui;
         let l = 4 * ui;
+        let col = if v.on_target { RED } else { INK.fade(0.85) };
         for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
             c.line(
                 (cx + dx * g) as f32,
@@ -137,7 +140,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
                 (cx + dx * (g + l)) as f32,
                 (cy + dy * (g + l)) as f32,
                 ui as f32,
-                INK.fade(0.85),
+                col,
             );
         }
         if v.now - v.st.hit_at < 220.0 {
