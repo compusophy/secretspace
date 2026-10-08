@@ -6,10 +6,18 @@ use std::collections::{HashMap, VecDeque};
 
 use wandfall::laws::TICK_HZ;
 use wandfall::proto::{self, Ev, Frame, Loot, Seen};
+use wandfall::world::STORM;
 
 /// How far behind the newest frame others are drawn (ms).
 const BEHIND: f64 = 100.0;
 const MS_A_TICK: f64 = 1000.0 / TICK_HZ as f64;
+
+/// A line in the feed: words, or a knockout (who, with what, whom).
+#[derive(Clone, Debug)]
+pub enum Line {
+    Text(String),
+    Out { by: u16, with: u8, who: u16 },
+}
 
 #[derive(Default)]
 pub struct State {
@@ -21,15 +29,22 @@ pub struct State {
     offset: Option<f64>,
     snaps: VecDeque<(u32, Vec<Seen>)>,
     /// (when, line).
-    pub feed: VecDeque<(f64, String)>,
+    pub feed: VecDeque<(f64, Line)>,
     /// When your bolt last hit someone; when you were last hurt.
     pub hit_at: f64,
     pub hurt_at: f64,
     /// Bursts of light where something struck someone: (when, who,
     /// what).
     pub bursts: Vec<(f64, u16, u8)>,
-    /// You are out: by whom, your place.
+    /// You are out: by whom, your place, and with what.
     pub out: Option<(u16, u16)>,
+    pub out_with: u8,
+    /// Yourself as you last were alive (for the card when you are out).
+    pub last_own: Option<proto::Own>,
+    /// Where wizards fell: (when, where, who).
+    pub falls: Vec<(f64, [f32; 3], u16)>,
+    /// What last hurt each wizard.
+    last_hit: HashMap<u16, u8>,
     pub joined: bool,
     pub loot: Loot,
     /// Spells cast and landing, leaps and levels, for their effects:
@@ -72,6 +87,7 @@ impl State {
             _ => guess,
         });
         if let Some(o) = &f.you {
+            self.last_own = Some(*o);
             for k in 0..4 {
                 if self.cds[k] > 0 && o.cds[k] == 0 {
                     self.ready[k] = now;
@@ -112,26 +128,37 @@ impl State {
                         self.hurt_at = now;
                     }
                     self.bursts.push((now, to, what));
+                    self.last_hit.insert(to, what);
                 }
                 Ev::Out { who, by, place } => {
+                    let with = self.last_hit.get(&who).copied().unwrap_or(STORM);
                     let line = if by == 0 {
-                        format!("{} fell to the storm", self.name(who))
+                        Line::Text(format!("{} fell to the storm", self.name(who)))
                     } else {
-                        format!("{} > {}", self.name(by), self.name(who))
+                        Line::Out { by, with, who }
                     };
                     self.feed.push_back((now, line));
                     if who == self.you {
                         self.out = Some((by, place));
+                        self.out_with = with;
+                    }
+                    let at = self
+                        .snaps
+                        .back()
+                        .and_then(|s| s.1.iter().find(|s| s.id == who).map(|s| s.p));
+                    if let Some(at) = at {
+                        self.falls.push((now, at, who));
                     }
                 }
                 Ev::Win { who } => {
                     let line = format!("{} wins the match", self.name(who));
-                    self.feed.push_back((now, line));
+                    self.feed.push_back((now, Line::Text(line)));
                 }
                 Ev::Begin => {
                     self.out = None;
-                    self.feed
-                        .push_back((now, "the match begins: drop!".to_string()));
+                    self.last_hit.clear();
+                    let line = Line::Text("the match begins: drop!".to_string());
+                    self.feed.push_back((now, line));
                 }
                 Ev::Lobby => self.out = None,
                 Ev::Level { who, level } => {
@@ -149,6 +176,7 @@ impl State {
         self.bursts.retain(|b| now - b.0 < 600.0);
         self.shows.retain(|s| now - s.0 < 4000.0);
         self.numbers.retain(|n| now - n.0 < 900.0);
+        self.falls.retain(|f| now - f.0 < 4000.0);
     }
 
     /// Everyone as they were a moment ago, smoothly between frames.

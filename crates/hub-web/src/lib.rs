@@ -5,6 +5,7 @@
 //! Every pixel is drawn here, in Rust.
 
 mod luci;
+mod wand;
 mod watch;
 
 use std::cell::RefCell;
@@ -45,10 +46,10 @@ const CARDS: &[Card] = &[
         hidden: true,
     },
     Card {
-        id: "",
-        title: "NEXT GAME",
-        blurb: ["being built right now", "check back soon"],
-        path: "",
+        id: "wandfall",
+        title: "WANDFALL",
+        blurb: ["a wand battle royale:", "be the last one standing"],
+        path: "/wandfall/",
         hue: 265.0,
         hidden: false,
     },
@@ -292,6 +293,8 @@ fn draw(h: &mut Hub, now: f64) {
             h.watch.draw(c, pv, k, 6.0 * uf, u, now);
         } else if let (Some(l), "luciphon") = (h.luci.as_mut(), card.id) {
             l.draw(c, pv, 6.0 * uf, u, now);
+        } else if card.id == "wandfall" {
+            wand::draw(c, pv, t, uf);
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }

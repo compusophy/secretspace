@@ -156,10 +156,24 @@ of combat styles and all varieties to counter all varieties".
       rank), your ward glows at the screen's edge, chill is shown.
 - [x] The HUD: health in one bar over the spell bar (no overlap on a small
       screen); what lies underfoot on a card with its icon.
+- [x] **Sound**, written by numbers (`engine::synth`, played by
+      `kit::audio`): a cast and a landing for every spell, the wand, hits,
+      being hurt, knockouts, levels, chests, scrolls; heard from where they
+      happen. M mutes.
+- [x] **Wizards** in parts: a face (eyes so you see which way it faces),
+      a beard on every other one, a mantle, a belt; the wand arm rises along
+      the aim to cast; walking bobs. Your own sleeve and hand in first
+      person.
+- [x] **Reading the end:** a burst where a wizard falls; the feed shows
+      the icon of what dealt the knockout; a card when you are out or win
+      (your place, who took you and with what, knockouts, level).
+- [x] **The hub card** (from Stage C): the island from above, the storm
+      closing, wizards duelling in the spells' colours; players counted.
 - Hooks for looking (`crates/wandfall-web/src/lib.rs`): `?spells=`,
-  `?nocd`, `?spar`, `?hold=ms` (every effect held at that age).
+  `?nocd`, `?spar`, `?look=yaw,pitch`, `?hold=ms` (every effect held at
+  that age).
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.
-- The hub card (live preview), a results screen, a season of names.
+- A live hub preview (the hub watching a match), a season of names.
 - Netcode at scale (`docs/engine.md` §9): 40-60 people, lag-compensated hits.

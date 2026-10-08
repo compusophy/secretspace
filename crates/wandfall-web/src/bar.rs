@@ -184,7 +184,12 @@ pub fn glyph(c: &mut Canvas, sp: u8, b: Rect, col: Rgba, back: Rgba) {
                 stroke(c, &line, w, col);
             }
         }
-        _ => {}
+        // The wand (what a knockout was dealt with): a spark.
+        _ => {
+            let (x, y) = at(0.5, 0.5);
+            glint(c, x, y, s * 0.36, col);
+            c.circle(x, y, s * 0.08, col);
+        }
     }
 }
 

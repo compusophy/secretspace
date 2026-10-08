@@ -34,6 +34,8 @@ pub struct Look {
     pub body: [Mesh; 2],
     pub sleeve: Mesh,
     pub hand: Mesh,
+    /// A plain ball (no glow).
+    pub ball: Mesh,
     pub glider: Mesh,
     pub orb: Mesh,
     pub rod: Mesh,
@@ -299,6 +301,9 @@ impl Look {
                     g.sphere([0.06, 0.8, -0.3], [0.065; 3], (1, 7, 0.0), skin, 0.0);
                 })
             }),
+            ball: smooth(r, |g| {
+                g.sphere([0.0; 3], [1.0; 3], (2, 3, 0.0), [1.0; 3], 0.0)
+            }),
             // The right arm hangs from its shoulder down -y; it is turned
             // up to cast.
             sleeve: smooth(r, |g| {
@@ -400,6 +405,7 @@ impl Look {
             self.body[1],
             self.sleeve,
             self.hand,
+            self.ball,
             self.glider,
             self.orb,
             self.rod,
@@ -527,7 +533,7 @@ impl Look {
         lights: &mut Vec<Light>,
         cam: &render::Camera,
         kick: f32,
-        c: V3,
+        (c, robe): (V3, V3),
     ) -> V3 {
         let fwd = cam.forward();
         let (_, right, up) = cam.matrices(cam.fov);
@@ -543,6 +549,30 @@ impl Look {
         let grip = at(0.36 - 0.06 * kick, 0.2, -0.27);
         let tip = at(0.7 - 0.06 * kick, 0.16, -0.21 + 0.05 * kick);
         let along = geo::sub(tip, grip);
+        // Your sleeve, from out of sight to the hand on the grip.
+        let shoulder = at(0.02, 0.34, -0.55);
+        let arm = geo::sub(grip, shoulder);
+        let side = geo::norm(geo::cross(arm, up));
+        let other = geo::norm(geo::cross(side, arm));
+        items.push(
+            Item::new(
+                self.sleeve,
+                m4::basis(
+                    shoulder,
+                    geo::scale(side, 0.55),
+                    geo::scale(arm, -2.0),
+                    geo::scale(other, 0.55),
+                ),
+            )
+            .tint(robe, 1.0)
+            .rough(0.85)
+            .pass(Pass::View),
+        );
+        items.push(
+            Item::new(self.ball, m4::place(grip, 0.0, [0.04; 3]))
+                .tint(rgb(214, 160, 120), 1.0)
+                .pass(Pass::View),
+        );
         items.push(
             Item::new(
                 self.rod,

@@ -225,6 +225,53 @@ mod tests {
     }
 
     #[test]
+    fn a_lance_on_the_range_strikes_a_dummy() {
+        let mut w = World::new(0x5eed_0007);
+        setup(&mut w);
+        let me = w.join("me", 0);
+        assert!(equip(&mut w, me, 0, spell::LANCE, 1));
+        // Face the nearest dummy, level.
+        let k = w.players.iter().position(|p| p.id == me).unwrap();
+        let eye = w.players[k].eye();
+        let (d, at) = w
+            .players
+            .iter()
+            .filter(|p| p.bot)
+            .map(|p| (p.id, p.body.p))
+            .min_by(|a, b| {
+                let da = (a.1[0] - eye[0]).powi(2) + (a.1[2] - eye[2]).powi(2);
+                let db = (b.1[0] - eye[0]).powi(2) + (b.1[2] - eye[2]).powi(2);
+                da.total_cmp(&db)
+            })
+            .unwrap();
+        let yaw = crate::trig::heading((at[2] - eye[2]).atan2(at[0] - eye[0]));
+        let dy = at[1] + 1.0 - eye[1];
+        let flat = ((at[0] - eye[0]).powi(2) + (at[2] - eye[2]).powi(2)).sqrt();
+        let pitch = crate::trig::pitch(dy.atan2(flat));
+        let mut hits = 0;
+        for _ in 0..3 {
+            w.input(
+                me,
+                Input {
+                    yaw,
+                    pitch,
+                    cast: crate::motion::cast::SLOT[0],
+                    ..Input::default()
+                },
+            );
+            for e in w.step() {
+                if let Event::Hit { to, .. } = e {
+                    if to == d {
+                        hits += 1;
+                    }
+                }
+            }
+            w.find_mut(me).unwrap().cds = [0; 4];
+        }
+        assert_eq!(hits, 3, "every lance strikes");
+    }
+
+    #[test]
     fn the_spellbook_equips_and_levels() {
         let mut w = World::new(5);
         setup(&mut w);

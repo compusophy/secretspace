@@ -715,8 +715,13 @@ fn frame(p: &mut Page, now: f64) {
             let kick = (1.0 - (now - p.cast_at) / 180.0).clamp(0.0, 1.0) as f32;
             let flare = (1.0 - (now - p.spell_at.0) / 320.0).clamp(0.0, 1.0) as f32;
             let c = render::geo::mix(look::GOLD, fx::colour(p.spell_at.1), flare.min(1.0).sqrt());
-            i.look
-                .wand(&mut d.items, &mut d.lights, &cam, kick.max(flare * 1.4), c)
+            i.look.wand(
+                &mut d.items,
+                &mut d.lights,
+                &cam,
+                kick.max(flare * 1.4),
+                (c, look::hue(p.st.you)),
+            )
         });
         let me = (p.st.you, p.pred.body.p, p.alive);
         let at_of = |id: u16| {
@@ -726,8 +731,9 @@ fn frame(p: &mut Page, now: f64) {
             others.iter().find(|s| s.id == id).map(|s| s.p)
         };
         // `?hold=ms` holds every effect at that age (to look at them).
+        let hold = query_value("hold").and_then(|v| v.parse::<f64>().ok());
         let held: Vec<_>;
-        let shows = match query_value("hold").and_then(|v| v.parse::<f64>().ok()) {
+        let shows = match hold {
             Some(ms) => {
                 held =
                     p.st.shows
@@ -739,6 +745,12 @@ fn frame(p: &mut Page, now: f64) {
             None => &p.st.shows,
         };
         fx::shows(&i.look, &mut d, shows, now, (p.st.you, tip), at_of);
+        let falls: Vec<_> =
+            p.st.falls
+                .iter()
+                .map(|&(w, at, who)| (hold.map_or(w, |ms| w.max(now - ms)), at, who))
+                .collect();
+        fx::falls(&i.look, &mut d, &falls, now);
         if let Some(f) = &p.st.frame {
             if f.phase == 1 && !matches!(p.mode, Mode::Practice(_)) {
                 i.look.storm(&mut d.items, f.storm.0, f.storm.1);

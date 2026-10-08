@@ -11,7 +11,7 @@ use wandfall::map::Map;
 use wandfall::proto::{flag, Frame, Own, Seen};
 
 use crate::bar;
-use crate::state::State;
+use crate::state::{Line, State};
 
 const INK: Rgba = Rgba::rgb(250, 246, 236);
 const DIM: Rgba = Rgba::rgb(200, 206, 220);
@@ -319,28 +319,40 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             continue;
         }
         let fade = (1.0 - (age - 6000.0).max(0.0) / 2000.0) as f32;
-        let tw = pixels::text_width(line, ui);
-        let x = if v.touch { 12 * ui } else { w - tw - 10 * ui };
-        c.text_shadowed(x, y, line, ui, DIM.fade(fade));
-        y += 10 * ui;
+        match line {
+            Line::Text(t) => {
+                let tw = pixels::text_width(t, ui);
+                let x = if v.touch { 12 * ui } else { w - tw - 10 * ui };
+                c.text_shadowed(x, y, t, ui, DIM.fade(fade));
+            }
+            // A knockout: who, the icon of what did it, whom.
+            &Line::Out { by, with, who } => {
+                let (a, b) = (v.st.name(by), v.st.name(who));
+                let (isz, gap) = (10 * ui, 4 * ui);
+                let wa = pixels::text_width(&a, ui);
+                let tw = wa + 2 * gap + isz + pixels::text_width(&b, ui);
+                let x = if v.touch { 12 * ui } else { w - tw - 10 * ui };
+                let you = v.st.you;
+                let ca = if by == you { GOLD } else { INK };
+                let cb = if who == you { RED } else { DIM };
+                c.text_shadowed(x, y, &a, ui, ca.fade(fade));
+                let tile = Rect::new(
+                    (x + wa + gap) as f32,
+                    (y - 2 * ui) as f32,
+                    isz as f32,
+                    isz as f32,
+                );
+                bar::icon(c, with, tile);
+                c.text_shadowed(x + wa + 2 * gap + isz, y, &b, ui, cb.fade(fade));
+            }
+        }
+        y += 12 * ui;
     }
-    // What to do now.
+    // What to do now: the card when you are out or the match is won.
     let mid = h / 2 - 40 * ui;
-    if let Some((by, place)) = v.st.out.filter(|_| f.phase == 1) {
-        let line = if by == 0 {
-            format!("the storm took you - #{place}")
-        } else {
-            format!("{} knocked you out - #{place}", v.st.name(by))
-        };
-        let k = pixels::fit_scale(&line, w - 20 * ui, 2 * ui);
-        c.text_centred(cx, mid, &line, k, INK);
-        c.text_centred(
-            cx,
-            mid + 22 * ui,
-            "the next match starts when this one ends",
-            ui,
-            DIM,
-        );
+    let won = f.phase == 2 && f.winner == v.st.you && f.winner != 0;
+    if !v.practice && (won || v.st.out.is_some_and(|_| f.phase >= 1)) {
+        card(c, v, f, won);
     } else if v.me.is_none() && f.phase == 1 {
         c.text_centred(cx, mid, "a match is on: you join the next one", ui, INK);
     }
@@ -351,6 +363,63 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         let tw = pixels::text_width(p, ui);
         c.text_shadowed(w - tw - 6 * ui, h - 12 * ui, p, ui, DIM);
     }
+}
+
+/// How your match went: your place (or victory), what took you, your
+/// knockouts and level, and what comes next.
+fn card(c: &mut Canvas, v: &View, f: &Frame, won: bool) {
+    let (w, h, ui) = (c.w, c.h, v.ui);
+    let u = ui as f32;
+    let (cw, ch) = ((250 * ui).min(w - 16 * ui), 104 * ui);
+    let b = Rect::new(
+        ((w - cw) / 2) as f32,
+        (h / 2 - ch + 10 * ui) as f32,
+        cw as f32,
+        ch as f32,
+    );
+    c.round_rect(b, 8.0 * u, Rgba(8, 10, 22, 215));
+    c.round_rect_line(b, 8.0 * u, u, if won { GOLD } else { DIM.fade(0.5) });
+    let cx = w / 2;
+    let mut y = b.y as i32 + 10 * ui;
+    let (by, place) = v.st.out.unwrap_or((0, 1));
+    let of = f.entrants.max(MATCH_SIZE as u8);
+    let title = if won {
+        "victory!".to_string()
+    } else {
+        format!("#{place} of {of}")
+    };
+    c.text_centred(cx, y, &title, 3 * ui, if won { GOLD } else { INK });
+    y += 28 * ui;
+    if won {
+        c.text_centred(cx, y, "the last wizard standing", ui, INK);
+    } else if by == 0 {
+        c.text_centred(cx, y, "the storm took you", ui, INK);
+    } else {
+        // Knocked out by whom, with what.
+        let line = format!("knocked out by {}", v.st.name(by));
+        let tw = pixels::text_width(&line, ui) + 14 * ui;
+        let x = cx - tw / 2;
+        c.text_shadowed(x, y, &line, ui, INK);
+        let at = (x + tw - 10 * ui) as f32;
+        bar::icon(
+            c,
+            v.st.out_with,
+            Rect::new(at, (y - 2 * ui) as f32, 10.0 * u, 10.0 * u),
+        );
+    }
+    y += 16 * ui;
+    if let Some(o) = &v.st.last_own {
+        let stats = format!("knockouts {}     level {}", o.kills, o.level);
+        c.text_centred(cx, y, &stats, ui, GOLD);
+    }
+    y += 16 * ui;
+    let next = if f.phase == 2 {
+        format!("the next match in {}", f.secs)
+    } else {
+        "the next match starts when this one ends".to_string()
+    };
+    let k = pixels::fit_scale(&next, cw - 12 * ui, ui);
+    c.text_centred(cx, y, &next, k, DIM);
 }
 
 /// The island map at `s` pixels a side (nearest pixel).

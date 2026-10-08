@@ -544,7 +544,7 @@ pub fn shows(
                 // Motes drifting off it (not by your own eyes).
                 let along = geo::sub(to, from);
                 let len = geo::dot(along, along).sqrt().max(0.01);
-                let start = (skip * 2.0 / len).min(1.0);
+                let start = (skip * 4.0 / len).min(1.0);
                 for n in 0..32 {
                     let u = start + (1.0 - start) * unit(hash(seed, n, 21));
                     let drift = geo::scale(dir(seed, n, false), secs * 1.6);
@@ -596,6 +596,51 @@ pub fn shows(
             }
             _ => {}
         }
+    }
+}
+
+/// Wizards knocked out: a burst of their colour going up where they fell.
+pub fn falls(look: &Look, d: &mut Draw, list: &[(f64, V3, u16)], now: f64) {
+    for &(when, at, who) in list {
+        let t = ((now - when) / 1000.0) as f32;
+        let f = 1.0 - t / 1.2;
+        if f <= 0.0 {
+            continue;
+        }
+        let c = mix(crate::look::hue(who), WHITE, 0.35);
+        let seed = who as i32 ^ when as i32;
+        for n in 0..36 {
+            let a = unit(hash(seed, n, 61)) * std::f32::consts::TAU + t * 3.0;
+            let r = 0.3 + t * (0.6 + unit(hash(seed, n, 62)));
+            let y =
+                at[1] + 0.2 + t * 3.5 * unit(hash(seed, n, 63)) + 1.6 * unit(hash(seed, n, 64)) * f;
+            d.sparks.push(Spark {
+                p: [at[0] + a.cos() * r, y, at[2] + a.sin() * r],
+                size: 0.16 * f + 0.04,
+                c: [c[0], c[1], c[2], f],
+            });
+        }
+        ring(
+            look,
+            d,
+            [at[0], at[1] + 0.06, at[2]],
+            0.5 + t * 4.0,
+            c,
+            f,
+            0.0,
+        );
+        spray(
+            d,
+            [at[0], at[1] + 1.0, at[2]],
+            16,
+            6.0,
+            (t, 0.7),
+            9.0,
+            (WHITE, GOLD),
+            0.14,
+            seed,
+        );
+        light(d, [at[0], at[1] + 1.2, at[2]], 8.0, c, 3.0 * f * f);
     }
 }
 
