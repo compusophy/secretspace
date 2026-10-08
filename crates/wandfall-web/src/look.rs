@@ -307,13 +307,14 @@ impl Look {
 /// in the storm.
 pub fn sky(in_storm: bool) -> render::Look {
     let day = render::Look {
-        sun_dir: geo::norm([0.5, 0.62, 0.32]),
-        sun: [3.3, 3.0, 2.6],
+        // Late in a long afternoon: a low gold sun, a lilac horizon.
+        sun_dir: geo::norm([0.55, 0.4, 0.3]),
+        sun: [3.4, 2.75, 2.1],
         sun_size: 0.035,
-        sky: [0.36, 0.46, 0.66],
-        low: [0.14, 0.13, 0.10],
-        zenith: [0.09, 0.22, 0.58],
-        horizon: [0.58, 0.68, 0.82],
+        sky: [0.36, 0.40, 0.64],
+        low: [0.15, 0.12, 0.10],
+        zenith: [0.10, 0.17, 0.50],
+        horizon: [0.76, 0.64, 0.78],
         deep: [0.08, 0.12, 0.18],
         fog: 0.0011,
         fog_falloff: 0.015,
