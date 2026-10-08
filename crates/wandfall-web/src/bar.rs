@@ -99,7 +99,16 @@ pub fn icon(c: &mut Canvas, sp: u8, x: f32, y: f32, s: f32, col: Rgba) {
 }
 
 /// The bar, your level, and what is underfoot.
-pub fn draw(c: &mut Canvas, own: &Own, loot: &Loot, now: f64, levelled: (f64, u8), ui: i32) {
+/// `slots`: draw the four slots (a touch screen has buttons instead).
+pub fn draw(
+    c: &mut Canvas,
+    own: &Own,
+    loot: &Loot,
+    now: f64,
+    levelled: (f64, u8),
+    ui: i32,
+    slots: bool,
+) {
     let (w, h) = (c.w, c.h);
     let s = 28 * ui;
     let gap = 5 * ui;
@@ -107,7 +116,7 @@ pub fn draw(c: &mut Canvas, own: &Own, loot: &Loot, now: f64, levelled: (f64, u8
     let total = 4 * s + 2 * gap + split;
     let x0 = (w - total) / 2;
     let y = h - s - 26 * ui;
-    for (k, key) in KEYS.iter().enumerate() {
+    for (k, key) in KEYS.iter().enumerate().filter(|_| slots) {
         let x = x0 + k as i32 * (s + gap) + if k >= 2 { split - gap } else { 0 };
         let b = Rect::new(x as f32, y as f32, s as f32, s as f32);
         c.round_rect(b, 4.0 * ui as f32, SHADE);
@@ -151,11 +160,17 @@ pub fn draw(c: &mut Canvas, own: &Own, loot: &Loot, now: f64, levelled: (f64, u8
         }
         c.text_centred(x + s / 2, y + s + 3 * ui, key, ui, DIM);
     }
-    // Your level, and XP toward the next.
-    let (lx, ly) = (x0 - 22 * ui, y + s / 2);
-    c.circle(lx as f32, ly as f32, 13.0 * ui as f32, SHADE);
-    c.ring(lx as f32, ly as f32, 13.0 * ui as f32, ui as f32, GOLD);
-    c.text_centred(lx, ly - 3 * ui, &format!("{}", own.level), ui, GOLD);
+    // Your level, and XP toward the next (on a touch screen the level is
+    // in the health line, and XP under the health bar).
+    let (x0, y, total) = if slots {
+        let (lx, ly) = (x0 - 22 * ui, y + s / 2);
+        c.circle(lx as f32, ly as f32, 13.0 * ui as f32, SHADE);
+        c.ring(lx as f32, ly as f32, 13.0 * ui as f32, ui as f32, GOLD);
+        c.text_centred(lx, ly - 3 * ui, &format!("{}", own.level), ui, GOLD);
+        (x0, y, total)
+    } else {
+        (12 * ui, 58 * ui, 120 * ui)
+    };
     let xp = if own.level >= MAX_LEVEL {
         1.0
     } else {

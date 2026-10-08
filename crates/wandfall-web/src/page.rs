@@ -18,6 +18,7 @@ use crate::fx::{self, Draw};
 use crate::hud;
 use crate::look::{self, Look};
 use crate::state::State;
+use crate::touch::Touch;
 
 const MIN_SHORT: f64 = 352.0;
 const MAX_DPR: f64 = 1.5;
@@ -55,6 +56,7 @@ struct Page {
     fov: f32,
     /// Spells asked for since the last input (a bit a slot).
     asked: u8,
+    pad: Touch,
     /// When you last cast (ms), and inputs until you may again.
     cast_at: f64,
     cool: u32,
@@ -168,6 +170,12 @@ fn hands(p: &mut Page) {
             Hand::Button {
                 button: 2, down, ..
             } => p.aiming = down && locked,
+            Hand::Finger { id, kind, x, y, .. } if p.touch => {
+                let (dy, dp) = p.pad.finger(id, kind, x, y, p.g.css);
+                let k = p.fov / FOV;
+                p.yaw += dy * k;
+                p.pitch = (p.pitch + dp * k).clamp(-1.5, 1.5);
+            }
             Hand::Button {
                 button: 0, down, ..
             } => {
@@ -180,7 +188,9 @@ fn hands(p: &mut Page) {
             _ => {}
         }
     }
-    if !locked {
+    if p.touch {
+        p.aiming = p.pad.aim;
+    } else if !locked {
         p.firing = false;
         p.aiming = false;
     }
@@ -228,7 +238,11 @@ fn inputs(p: &mut Page, dt: f64) {
     if p.aiming {
         k |= keys::AIM;
     }
-    let take = if held("KeyG") { cast::TAKE } else { 0 };
+    let mut take = if held("KeyG") { cast::TAKE } else { 0 };
+    if p.touch {
+        k |= p.pad.keys();
+        take |= p.pad.casts();
+    }
     while p.acc >= MS_A_TICK {
         p.acc -= MS_A_TICK;
         if !p.alive {
@@ -394,14 +408,19 @@ fn frame(p: &mut Page, now: f64) {
     let perf = p.perf.then(|| {
         let s = p.r.stats;
         format!(
-            "{:.0} fps  draws {} inst {} tris {}k lights {}  @{:.0},{:.0}",
+            "{:.0} fps  draws {} inst {} tris {}k lights {}  @{:.0},{:.0}{}",
             p.fps,
             s.draws,
             s.instances,
             s.triangles / 1000,
             s.lights,
             cam.eye[0],
-            cam.eye[2]
+            cam.eye[2],
+            if p.touch {
+                format!(" {}", p.pad.debug())
+            } else {
+                String::new()
+            }
         )
     });
     let Some(mut fr) = p.g.frame() else {
@@ -429,6 +448,16 @@ fn frame(p: &mut Page, now: f64) {
             touch: p.touch,
         };
         hud::draw(&mut p.g.hud, &i.mini, &view);
+        if p.touch && p.alive {
+            let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
+            let me = p.pred.body.p;
+            p.pad.can_take =
+                p.st.loot
+                    .scrolls
+                    .iter()
+                    .any(|s| (s.3[0] - me[0]).powi(2) + (s.3[2] - me[2]).powi(2) < 2.5);
+            p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);
+        }
     } else {
         let c = &mut p.g.hud;
         c.text_centred(
@@ -483,6 +512,7 @@ pub fn start() {
                 aiming: false,
                 fov: FOV,
                 asked: 0,
+                pad: Touch::default(),
                 cast_at: -1e9,
                 cool: 0,
                 hands,

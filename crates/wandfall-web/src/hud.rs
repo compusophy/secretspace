@@ -181,7 +181,12 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     // Health (and a ward's shield over it), and the spell bar.
     if let Some(o) = v.own.filter(|_| v.me.is_some()) {
         let (bw, bh) = (120 * ui, 8 * ui);
-        let (x, y) = (12 * ui, h - 20 * ui);
+        // On a touch screen the thumbs own the bottom: health goes on top.
+        let (x, y) = if v.touch {
+            (12 * ui, 40 * ui)
+        } else {
+            (12 * ui, h - 20 * ui)
+        };
         let full = max_hp(o.level);
         c.round_rect(
             Rect::new(x as f32, y as f32, bw as f32, bh as f32),
@@ -207,14 +212,22 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
                 Rgba::rgb(150, 214, 255),
             );
         }
-        c.text_shadowed(x, y - 12 * ui, &format!("{} / {}", o.hp, full), ui, INK);
-        c.text_shadowed(
-            x + bw + 8 * ui,
-            y,
-            &format!("knocked out {}", o.kills),
-            ui,
-            GOLD,
-        );
+        if v.touch {
+            // Stacked at the top left: health and level, XP, knockouts.
+            let line = format!("{} / {}   level {}", o.hp, full, o.level);
+            c.text_shadowed(x, y - 12 * ui, &line, ui, INK);
+            c.text_shadowed(
+                x,
+                y + 16 * ui,
+                &format!("knocked out {}", o.kills),
+                ui,
+                GOLD,
+            );
+        } else {
+            c.text_shadowed(x, y - 12 * ui, &format!("{} / {}", o.hp, full), ui, INK);
+            let ko = format!("knocked out {}", o.kills);
+            c.text_shadowed(x + bw + 8 * ui, y, &ko, ui, GOLD);
+        }
         if o.body.root > 0 {
             c.text_centred(
                 cx,
@@ -224,10 +237,10 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
                 Rgba::rgb(130, 220, 100),
             );
         }
-        bar::draw(c, o, &v.st.loot, v.now, v.st.levelled, ui);
+        bar::draw(c, o, &v.st.loot, v.now, v.st.levelled, ui, !v.touch);
     }
     // The island, the storm's circles, and you.
-    let s = (MINI * ui).min(w / 4);
+    let s = (MINI * ui).min(w / 4).min(h / 4);
     let (mx, my) = (w - s - 10 * ui, 10 * ui + 14 * ui);
     let scaled = scale_to(mini, s);
     c.blit(&scaled, mx, my, 0.0);
@@ -262,8 +275,9 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             GOLD,
         );
     }
-    // The feed.
-    let mut y = my + s + 8 * ui;
+    // The feed: under the island map, or (on a touch screen, whose right
+    // side is the thumb's) under your health.
+    let mut y = if v.touch { 74 * ui } else { my + s + 8 * ui };
     for (at, line) in &v.st.feed {
         let age = v.now - at;
         if age > 8000.0 {
@@ -271,7 +285,8 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         }
         let fade = (1.0 - (age - 6000.0).max(0.0) / 2000.0) as f32;
         let tw = pixels::text_width(line, ui);
-        c.text_shadowed(w - tw - 10 * ui, y, line, ui, DIM.fade(fade));
+        let x = if v.touch { 12 * ui } else { w - tw - 10 * ui };
+        c.text_shadowed(x, y, line, ui, DIM.fade(fade));
         y += 10 * ui;
     }
     // What to do now.

@@ -97,7 +97,10 @@ owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
       Mend when low, Blink and Haste to outrun the storm.
 - [x] The HUD: the spell bar (icons, ranks, cooldowns), level and XP, a ward's
       shield, what lies underfoot; effects for every spell.
-- [ ] Touch controls (two sticks, cast buttons).
+- [x] Touch controls: a stick on the left half (anywhere), the right half
+      turns the view; cast (held), jump, aim (a toggle), the four spells in
+      an arc about cast (icons, cooldowns), take when a scroll is underfoot.
+      Health, level, XP and the feed move to the top left.
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.

@@ -9,6 +9,7 @@ pub mod fx;
 pub mod hud;
 pub mod look;
 pub mod state;
+pub mod touch;
 
 #[cfg(target_arch = "wasm32")]
 mod page;
