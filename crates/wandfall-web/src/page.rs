@@ -5,15 +5,16 @@ use std::cell::RefCell;
 use engine::who::{Seen as Named, Status};
 use kit::input::{Hand, Hands};
 use kit::link::Net;
-use render::{Camera, Frame, Item, Renderer};
+use render::{Camera, Frame, Renderer};
 use wandfall::laws::{BOLT_COOLDOWN, EYE, TICK_HZ};
 use wandfall::map::Map;
-use wandfall::motion::{keys, Body, Input};
+use wandfall::motion::{cast, keys, Body, Input};
 use wandfall::predict::Predict;
 use wandfall::proto::{self, flag, Up, PROTO};
 use wandfall::trig;
 use wasm_bindgen::prelude::*;
 
+use crate::fx::{self, Draw};
 use crate::hud;
 use crate::look::{self, Look};
 use crate::state::State;
@@ -24,6 +25,8 @@ const MS_A_TICK: f64 = 1000.0 / TICK_HZ as f64;
 /// Radians a pixel of mouse.
 const MOUSE: f32 = 0.0022;
 const FOV: f32 = 1.2;
+/// The field of view aiming down the wand.
+const AIM_FOV: f32 = 0.72;
 const VERSION_EVERY: f64 = 5.0 * 60_000.0;
 
 struct Island {
@@ -47,6 +50,11 @@ struct Page {
     yaw: f32,
     pitch: f32,
     firing: bool,
+    aiming: bool,
+    /// The field of view now (it eases toward aiming's and back).
+    fov: f32,
+    /// Spells asked for since the last input (a bit a slot).
+    asked: u8,
     /// When you last cast (ms), and inputs until you may again.
     cast_at: f64,
     cool: u32,
@@ -123,6 +131,10 @@ fn net(p: &mut Page, now: f64) {
                     p.st.events(list, now);
                     continue;
                 }
+                if let Some(l) = proto::Loot::decode(&b) {
+                    p.st.loot = l;
+                    continue;
+                }
                 if let Some(f) = proto::Frame::decode(&b) {
                     match (&f.you, &p.island) {
                         (Some(own), Some(i)) => {
@@ -148,9 +160,14 @@ fn hands(p: &mut Page) {
     for h in p.hands.drain() {
         match h {
             Hand::Mouse { dx, dy, .. } if locked => {
-                p.yaw += dx as f32 * MOUSE;
-                p.pitch = (p.pitch - dy as f32 * MOUSE).clamp(-1.5, 1.5);
+                // Slower when zoomed, so the aim holds.
+                let k = MOUSE * p.fov / FOV;
+                p.yaw += dx as f32 * k;
+                p.pitch = (p.pitch - dy as f32 * k).clamp(-1.5, 1.5);
             }
+            Hand::Button {
+                button: 2, down, ..
+            } => p.aiming = down && locked,
             Hand::Button {
                 button: 0, down, ..
             } => {
@@ -165,6 +182,19 @@ fn hands(p: &mut Page) {
     }
     if !locked {
         p.firing = false;
+        p.aiming = false;
+    }
+    for code in p.hands.pressed() {
+        let slot = match code.as_str() {
+            "KeyQ" | "Digit1" => 0,
+            "KeyE" | "Digit2" => 1,
+            "KeyR" | "Digit3" => 2,
+            "KeyF" | "Digit4" => 3,
+            _ => continue,
+        };
+        if locked || p.touch {
+            p.asked |= cast::SLOT[slot];
+        }
     }
 }
 
@@ -195,6 +225,10 @@ fn inputs(p: &mut Page, dt: f64) {
     if p.firing {
         k |= keys::FIRE;
     }
+    if p.aiming {
+        k |= keys::AIM;
+    }
+    let take = if held("KeyG") { cast::TAKE } else { 0 };
     while p.acc >= MS_A_TICK {
         p.acc -= MS_A_TICK;
         if !p.alive {
@@ -206,6 +240,7 @@ fn inputs(p: &mut Page, dt: f64) {
             yaw: trig::heading(p.yaw),
             pitch: trig::pitch(p.pitch),
             keys: k,
+            cast: std::mem::take(&mut p.asked) | take,
         };
         p.prev = p.pred.body;
         p.pred.push(i, &island.map);
@@ -235,6 +270,8 @@ fn frame(p: &mut Page, now: f64) {
         kit::version::reload();
     }
     let others = p.st.others(now);
+    let want = if p.aiming && p.alive { AIM_FOV } else { FOV };
+    p.fov += (want - p.fov) * (1.0 - (-(dt as f32) / 70.0).exp());
     let (w, h) = p.g.css;
     let aspect = (w / h.max(1.0)) as f32;
     // Where you see from: your own eyes, or over someone's shoulder.
@@ -253,7 +290,7 @@ fn frame(p: &mut Page, now: f64) {
             eye: [at[0], at[1] + EYE, at[2]],
             yaw: p.yaw,
             pitch: p.pitch,
-            fov: FOV,
+            fov: p.fov,
             aspect,
         }
     } else {
@@ -288,44 +325,52 @@ fn frame(p: &mut Page, now: f64) {
         }
     };
     let t = (now / 1000.0) as f32;
-    let mut items: Vec<Item> = Vec::new();
-    let mut lights = Vec::new();
-    let mut sparks = Vec::new();
+    let mut d = Draw::default();
     let mut in_storm = false;
     if let Some(i) = &p.island {
-        i.look.sea(&mut items, t);
+        i.look.sea(&mut d.items, t);
+        fx::loot(&i.look, &mut d, &p.st.loot, t, cam.eye);
         for s in &others {
-            if s.flags & flag::ALIVE == 0 || (p.alive && s.id == p.st.you) {
+            if s.flags & flag::ALIVE == 0 {
                 continue;
             }
-            i.look.wizard(
-                &mut items,
-                s.id,
-                s.p,
-                trig::radians(s.yaw),
-                s.flags & flag::GLIDE != 0,
-            );
+            if !(p.alive && s.id == p.st.you) {
+                i.look.wizard(
+                    &mut d.items,
+                    s.id,
+                    s.p,
+                    trig::radians(s.yaw),
+                    s.flags & flag::GLIDE != 0,
+                );
+            }
+            fx::on_wizard(&i.look, &mut d, s, t);
         }
         for b in p.st.bolts(now) {
-            i.look.bolt(
-                &mut items,
-                &mut lights,
-                &mut sparks,
-                b.p,
-                b.v,
-                b.by == p.st.you,
-            );
+            fx::bolt(&i.look, &mut d, &b, b.by == p.st.you);
         }
         for &(at, who) in &p.st.bursts {
             if let Some(s) = others.iter().find(|s| s.id == who) {
                 let pos = [s.p[0], s.p[1] + 1.2, s.p[2]];
-                i.look
-                    .burst(&mut lights, &mut sparks, pos, (now - at) as f32, at as u32);
+                i.look.burst(
+                    &mut d.lights,
+                    &mut d.sparks,
+                    pos,
+                    (now - at) as f32,
+                    at as u32,
+                );
             }
         }
+        let me = (p.st.you, p.pred.body.p, p.alive);
+        let at_of = |id: u16| {
+            if me.2 && id == me.0 {
+                return Some(me.1);
+            }
+            others.iter().find(|s| s.id == id).map(|s| s.p)
+        };
+        fx::shows(&i.look, &mut d, &p.st.shows, now, at_of);
         if let Some(f) = &p.st.frame {
             if f.phase == 1 {
-                i.look.storm(&mut items, f.storm.0, f.storm.1);
+                i.look.storm(&mut d.items, f.storm.0, f.storm.1);
                 let e = cam.eye;
                 in_storm = p.alive
                     && (e[0] - f.storm.0[0]).powi(2) + (e[2] - f.storm.0[1]).powi(2)
@@ -334,16 +379,16 @@ fn frame(p: &mut Page, now: f64) {
         }
         if p.alive {
             let kick = (1.0 - (now - p.cast_at) / 180.0).clamp(0.0, 1.0) as f32;
-            i.look.wand(&mut items, &mut lights, &cam, kick);
+            i.look.wand(&mut d.items, &mut d.lights, &cam, kick);
         }
     }
     let scene = Frame {
         cam,
         look: look::sky(in_storm),
         time: t,
-        items: &items,
-        lights: &lights,
-        sparks: &sparks,
+        items: &d.items,
+        lights: &d.lights,
+        sparks: &d.sparks,
         view_fov: 0.9,
     };
     let perf = p.perf.then(|| {
@@ -365,13 +410,7 @@ fn frame(p: &mut Page, now: f64) {
     p.r.draw(&mut fr.encoder, &fr.view, p.g.size, &scene);
     let (vp, _, _) = cam.matrices(cam.fov);
     let ui = p.g.ui();
-    let me = p.alive.then(|| {
-        (
-            p.pred.body.p,
-            p.yaw,
-            p.st.frame.as_ref().and_then(|f| f.you).map_or(0, |o| o.hp),
-        )
-    });
+    let me = p.alive.then_some((p.pred.body.p, p.yaw));
     p.g.hud.wipe();
     if let Some(i) = &p.island {
         let view = hud::View {
@@ -380,6 +419,7 @@ fn frame(p: &mut Page, now: f64) {
             others: &others,
             vp,
             me,
+            own: p.st.frame.as_ref().and_then(|f| f.you.as_ref()),
             watching,
             locked: kit::input::locked(),
             in_storm,
@@ -440,6 +480,9 @@ pub fn start() {
                 yaw: 0.0,
                 pitch: 0.0,
                 firing: false,
+                aiming: false,
+                fov: FOV,
+                asked: 0,
                 cast_at: -1e9,
                 cool: 0,
                 hands,

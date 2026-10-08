@@ -4,6 +4,8 @@
 //! a second in the past, and draws it all with `render`; the HUD in
 //! pixels over it. Hooks: `?perf=1` (numbers in the title and the HUD).
 
+pub mod bar;
+pub mod fx;
 pub mod hud;
 pub mod look;
 pub mod state;

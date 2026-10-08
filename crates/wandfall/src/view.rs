@@ -2,7 +2,8 @@
 //! exactly, every other wizard, and the bolts in flight. The island is
 //! small enough to tell everyone everything.
 
-use crate::proto::{flag, BoltSeen, Frame, Own, Seen};
+use crate::motion::keys;
+use crate::proto::{flag, fx, BoltSeen, Frame, Loot, Own, Seen};
 use crate::world::{Phase, World};
 
 pub fn frame(w: &World, you: u16) -> Frame {
@@ -20,9 +21,14 @@ pub fn frame(w: &World, you: u16) -> Frame {
     let own = w.find(you).filter(|p| p.alive).map(|p| Own {
         body: p.body,
         seq: p.last.seq,
-        hp: p.hp.clamp(0, 255) as u8,
+        hp: p.hp.clamp(0, u16::MAX as i32) as u16,
         kills: p.kills.min(255) as u8,
         cool: p.cool.min(255) as u8,
+        level: p.level,
+        xp: p.xp.min(255) as u8,
+        shield: p.shield.clamp(0, u16::MAX as i32) as u16,
+        slots: p.slots.map(|s| s.map(|s| (s.spell, s.rank))),
+        cds: p.cds.map(|c| c.min(u16::MAX as u32) as u16),
     });
     Frame {
         tick: w.tick,
@@ -49,7 +55,17 @@ pub fn frame(w: &World, you: u16) -> Frame {
                 p: p.body.p,
                 yaw: p.yaw,
                 pitch: p.pitch,
-                hp: p.hp.clamp(0, 255) as u8,
+                hp: p.hp.clamp(0, u16::MAX as i32) as u16,
+                level: p.level,
+                fx: if p.shield > 0 { fx::SHIELD } else { 0 }
+                    | if p.body.root > 0 { fx::ROOTED } else { 0 }
+                    | if p.body.haste > 0 { fx::HASTED } else { 0 }
+                    | if p.mend > 0 { fx::MENDING } else { 0 }
+                    | if p.last.keys & keys::AIM != 0 {
+                        fx::AIM
+                    } else {
+                        0
+                    },
                 flags: flag::ALIVE
                     | if p.body.glide { flag::GLIDE } else { 0 }
                     | if p.body.ground { flag::GROUND } else { 0 }
@@ -63,9 +79,22 @@ pub fn frame(w: &World, you: u16) -> Frame {
             .map(|b| BoltSeen {
                 id: b.id,
                 by: b.by,
+                kind: b.kind,
                 p: b.p,
                 v: b.v,
             })
+            .collect(),
+    }
+}
+
+/// The chests and scrolls on the island.
+pub fn loot(w: &World) -> Loot {
+    Loot {
+        chests: w.chests.iter().map(|c| (c.id, c.p, c.open)).collect(),
+        scrolls: w
+            .scrolls
+            .iter()
+            .map(|s| (s.id, s.spell, s.rank, s.p))
             .collect(),
     }
 }

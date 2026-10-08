@@ -2,7 +2,8 @@
 //! lobby (anyone here warms up, unhurt) → the fight (everyone drops from
 //! the sky, bots fill the island to MATCH_SIZE, the storm closes) → over
 //! (the last one standing is shown) → lobby again. Whoever comes during
-//! a fight watches until the next.
+//! a fight watches until the next. Spells are in `spells`, chests,
+//! scrolls and levels in `loot`.
 
 use std::collections::VecDeque;
 
@@ -10,10 +11,22 @@ use engine::rng::Rng;
 
 use crate::bots::{self, Mind};
 use crate::laws::*;
+use crate::loot::{self, Chest, Scroll};
 use crate::map::Map;
-use crate::motion::{self, keys, Body, Input};
+use crate::motion::{self, cast, keys, Body, Input};
+use crate::spells::{self, Zone};
 use crate::storm::{self, Storm};
 use crate::trig;
+
+/// A spell in a slot, and its rank (1 to MAX_RANK).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Slot {
+    pub spell: u8,
+    pub rank: u8,
+}
+
+/// What a bolt is: the wand's, or a spell's.
+pub const WAND: u8 = 200;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -48,23 +61,46 @@ pub struct Player {
     pub idle: u32,
     pub hurt_at: u32,
     pub mind: Mind,
+    /// 1 to MAX_LEVEL, and XP toward the next.
+    pub level: u8,
+    pub xp: u32,
+    /// Two offensive slots, then two utility; ticks until each is ready.
+    pub slots: [Option<Slot>; 4],
+    pub cds: [u32; 4],
+    /// A ward's shield, until when; healing still to come, until when.
+    pub shield: i32,
+    pub shield_until: u32,
+    pub mend: i32,
+    pub mend_until: u32,
+    /// Asked to take the scroll underfoot (over one already held).
+    pub take: bool,
 }
 
 impl Player {
     pub fn eye(&self) -> [f32; 3] {
         [self.body.p[0], self.body.p[1] + EYE, self.body.p[2]]
     }
+
+    pub fn max_hp(&self) -> i32 {
+        loot::max_hp(self.level)
+    }
 }
 
 pub struct Bolt {
     pub id: u16,
     pub by: u16,
+    /// `WAND`, or the spell it carries.
+    pub kind: u8,
+    pub rank: u8,
     pub p: [f32; 3],
     pub v: [f32; 3],
     pub life: u32,
+    /// Its damage, and ticks it holds its mark (Root).
+    pub power: i32,
+    pub hold: u16,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Hit {
         by: u16,
@@ -83,6 +119,22 @@ pub enum Event {
     /// The fight began; the lobby began.
     Begin,
     Lobby,
+    /// A spell cast (stage 0) or landing (stage 1), at a point.
+    Cast {
+        by: u16,
+        spell: u8,
+        stage: u8,
+        at: [f32; 3],
+    },
+    /// A chain spark leaping from one wizard to another.
+    Link {
+        from: u16,
+        to: u16,
+    },
+    Level {
+        who: u16,
+        level: u8,
+    },
 }
 
 pub struct World {
@@ -96,13 +148,18 @@ pub struct World {
     pub storm: Storm,
     pub players: Vec<Player>,
     pub bolts: Vec<Bolt>,
+    pub chests: Vec<Chest>,
+    pub scrolls: Vec<Scroll>,
+    pub zones: Vec<Zone>,
     pub winner: u16,
     pub matches: u32,
-    /// Names changed: the room sends the roster again.
+    /// Names changed: the room sends the roster again; and the loot.
     pub roster_dirty: bool,
-    rng: Rng,
+    pub loot_dirty: bool,
+    pub(crate) rng: Rng,
     next_id: u16,
-    next_bolt: u16,
+    pub(crate) next_bolt: u16,
+    pub(crate) next_loot: u16,
 }
 
 impl World {
@@ -116,12 +173,17 @@ impl World {
             storm: Storm::default(),
             players: Vec::new(),
             bolts: Vec::new(),
+            chests: Vec::new(),
+            scrolls: Vec::new(),
+            zones: Vec::new(),
             winner: 0,
             matches: 0,
             roster_dirty: true,
+            loot_dirty: true,
             rng: Rng::new(seed ^ 0xbad5eed),
             next_id: 1,
             next_bolt: 1,
+            next_loot: 1,
         }
     }
 
@@ -174,13 +236,29 @@ impl World {
             idle: 0,
             hurt_at: 0,
             mind: Mind::default(),
+            level: 1,
+            xp: 0,
+            slots: [None; 4],
+            cds: [0; 4],
+            shield: 0,
+            shield_until: 0,
+            mend: 0,
+            mend_until: 0,
+            take: false,
         }
+    }
+
+    pub fn find_mut(&mut self, id: u16) -> Option<&mut Player> {
+        self.players.iter_mut().find(|p| p.id == id)
     }
 
     /// A person arrives: warming up in the lobby, or watching a fight.
     pub fn join(&mut self, name: &str, soul: u64) -> u16 {
         let mut p = self.player(name, soul, false);
         p.alive = self.phase == Phase::Lobby;
+        if p.alive {
+            practice(&mut p, &mut self.rng);
+        }
         let id = p.id;
         self.players.push(p);
         self.roster_dirty = true;
@@ -251,16 +329,18 @@ impl World {
             body.ground = false;
             body.glide = true;
             p.body = body;
-            p.hp = HEALTH;
             p.alive = true;
             p.entrant = true;
             p.kills = 0;
             p.place = 0;
             p.cool = 0;
             p.hurt_at = 0;
+            fresh(p);
         }
         self.storm = Storm::plan(&self.map, &mut self.rng);
         self.bolts.clear();
+        self.zones.clear();
+        loot::scatter(self);
         self.phase = Phase::Fight;
         self.began = self.tick;
         self.winner = 0;
@@ -276,9 +356,14 @@ impl World {
             p.body = b;
             p.alive = true;
             p.entrant = false;
-            p.hp = HEALTH;
+            fresh(p);
+            practice(p, &mut self.rng);
         }
         self.bolts.clear();
+        self.zones.clear();
+        self.chests.clear();
+        self.scrolls.clear();
+        self.loot_dirty = true;
         self.phase = Phase::Lobby;
         self.until = if self.players.is_empty() {
             0
@@ -291,26 +376,42 @@ impl World {
 
     fn out(&mut self, who: u16, by: u16, ev: &mut Vec<Event>) {
         let place = self.alive() as u16;
-        if let Some(p) = self.players.iter_mut().find(|p| p.id == who) {
+        let mut level = 1;
+        if let Some(k) = self.players.iter().position(|p| p.id == who) {
+            level = self.players[k].level;
+            loot::drop_spells(self, k);
+            let p = &mut self.players[k];
             p.alive = false;
             p.place = place;
             p.hp = 0;
         }
-        if let Some(k) = self.players.iter_mut().find(|p| p.id == by) {
+        let killer = self.find_mut(by).map(|k| {
             k.kills += 1;
+            k.level
+        });
+        if let Some(mine) = killer {
+            let more = level.saturating_sub(mine) as u32;
+            loot::gain(self, by, XP_KNOCKOUT + more * XP_KNOCKOUT_LEVEL, ev);
         }
         ev.push(Event::Out { who, by, place });
     }
 
-    fn hurt(&mut self, by: u16, to: u16, amount: i32, ev: &mut Vec<Event>) {
-        if self.phase != Phase::Fight {
+    /// `by` (0: the storm) hurts `to`: a ward takes it first.
+    pub(crate) fn hurt(&mut self, by: u16, to: u16, amount: i32, ev: &mut Vec<Event>) {
+        if self.phase != Phase::Fight || amount <= 0 {
             return;
         }
         let tick = self.tick;
-        let Some(p) = self.players.iter_mut().find(|p| p.id == to && p.alive) else {
+        let Some(p) = self
+            .players
+            .iter_mut()
+            .find(|p| p.id == to && p.alive && p.entrant)
+        else {
             return;
         };
-        p.hp -= amount;
+        let soaked = amount.min(p.shield);
+        p.shield -= soaked;
+        p.hp -= amount - soaked;
         p.hurt_at = tick;
         let dead = p.hp <= 0;
         if by != 0 {
@@ -319,6 +420,7 @@ impl World {
                 to,
                 amount: amount as u16,
             });
+            loot::gain(self, by, (amount / XP_DAMAGE) as u32, ev);
         }
         if dead {
             self.out(to, by, ev);
@@ -358,8 +460,13 @@ impl World {
             _ => {}
         }
         self.minds();
-        self.move_all();
+        let casts = self.move_all();
+        for (k, slot) in casts {
+            spells::cast(self, k, slot, &mut ev);
+        }
         self.fly(&mut ev);
+        spells::tick(self, &mut ev);
+        loot::touch(self, &mut ev);
         self.weather(&mut ev);
         ev
     }
@@ -379,10 +486,14 @@ impl World {
         }
     }
 
-    fn move_all(&mut self) {
+    /// Everyone moves by their inputs; the wand fires. The spells asked
+    /// for: (who, slot).
+    fn move_all(&mut self) -> Vec<(usize, usize)> {
         let mut shots = Vec::new();
-        for p in self.players.iter_mut() {
+        let mut casts = Vec::new();
+        for (k, p) in self.players.iter_mut().enumerate() {
             p.cool = p.cool.saturating_sub(1);
+            p.take = false;
             if !p.alive {
                 p.queue.clear();
                 continue;
@@ -402,34 +513,47 @@ impl World {
                         if p.idle < TICK_HZ / 3 {
                             break;
                         }
-                        Input { keys: 0, ..p.last }
+                        Input {
+                            keys: 0,
+                            cast: 0,
+                            ..p.last
+                        }
                     }
                 };
                 p.yaw = i.yaw;
                 p.pitch = i.pitch.clamp(-16000, 16000);
                 motion::step(&mut p.body, &i, &self.map);
                 p.last = i;
+                p.take |= i.cast & cast::TAKE != 0;
+                for (slot, bit) in cast::SLOT.iter().enumerate() {
+                    if i.cast & bit != 0 && !casts.contains(&(k, slot)) {
+                        casts.push((k, slot));
+                    }
+                }
                 if i.keys & keys::FIRE != 0 && p.cool == 0 && !p.body.glide {
                     p.cool = BOLT_COOLDOWN;
                     let d = trig::look(p.yaw, p.pitch);
                     let e = p.eye();
                     shots.push((
                         p.id,
+                        loot::level_scale(p.level, BOLT_DAMAGE),
                         [e[0] + d[0] * 0.5, e[1] + d[1] * 0.5, e[2] + d[2] * 0.5],
                         [d[0] * BOLT_SPEED, d[1] * BOLT_SPEED, d[2] * BOLT_SPEED],
                     ));
                 }
             }
         }
-        for (by, p, v) in shots {
-            let id = self.next_bolt;
-            self.next_bolt = self.next_bolt.wrapping_add(1).max(1);
-            self.bolts.push(Bolt {
-                id,
+        for (by, power, p, v) in shots {
+            self.bolt(Bolt {
+                id: 0,
                 by,
+                kind: WAND,
+                rank: 1,
                 p,
                 v,
                 life: BOLT_LIFE,
+                power,
+                hold: 0,
             });
         }
         // Fallen off into the deep (should not happen): back on land.
@@ -439,17 +563,26 @@ impl World {
                 self.players[k].body = b;
             }
         }
+        casts
+    }
+
+    /// Set a bolt flying.
+    pub(crate) fn bolt(&mut self, mut b: Bolt) {
+        b.id = self.next_bolt;
+        self.next_bolt = self.next_bolt.wrapping_add(1).max(1);
+        self.bolts.push(b);
     }
 
     fn fly(&mut self, ev: &mut Vec<Event>) {
-        let mut hits = Vec::new();
+        let mut impacts = Vec::new();
         let mut keep = Vec::with_capacity(self.bolts.len());
+        let fight = self.phase_fight();
         for mut b in std::mem::take(&mut self.bolts) {
             let a = b.p;
             let e = [a[0] + b.v[0] * DT, a[1] + b.v[1] * DT, a[2] + b.v[2] * DT];
             let mut first = self.map.strikes(a, e).map(|t| (t, 0u16));
             for p in &self.players {
-                if p.id == b.by || !p.alive || (p.entrant != self.phase_fight()) {
+                if p.id == b.by || !p.alive || p.entrant != fight {
                     continue;
                 }
                 if let Some(t) = through(a, e, p.body.p) {
@@ -460,21 +593,26 @@ impl World {
             }
             b.life = b.life.saturating_sub(1);
             match first {
-                Some((_, who)) => {
-                    if who != 0 {
-                        hits.push((b.by, who));
-                    }
+                Some((t, who)) => {
+                    let at = [
+                        a[0] + (e[0] - a[0]) * t,
+                        a[1] + (e[1] - a[1]) * t,
+                        a[2] + (e[2] - a[2]) * t,
+                    ];
+                    impacts.push((b, at, who));
                 }
                 None if b.life > 0 => {
                     b.p = e;
                     keep.push(b);
                 }
+                // A comet bursts at the end of its flight too.
+                None if b.kind == spell::COMET => impacts.push((b, e, 0)),
                 None => {}
             }
         }
         self.bolts = keep;
-        for (by, to) in hits {
-            self.hurt(by, to, BOLT_DAMAGE, ev);
+        for (b, at, who) in impacts {
+            spells::impact(self, &b, at, who, ev);
         }
     }
 
@@ -493,13 +631,55 @@ impl World {
             if fight && p.entrant && storm.outside(p.body.p[0], p.body.p[2]) {
                 burned.push(p.id);
             } else if self.tick - p.hurt_at >= REGEN_AFTER * TICK_HZ {
-                p.hp = (p.hp + REGEN).min(HEALTH);
+                p.hp = (p.hp + REGEN).min(p.max_hp());
             }
         }
         for id in burned {
             self.hurt(0, id, storm.dps, ev);
         }
     }
+}
+
+/// A wizard as a match begins (or the lobby does): level 1, no spells.
+fn fresh(p: &mut Player) {
+    p.level = 1;
+    p.xp = 0;
+    p.slots = [None; 4];
+    p.cds = [0; 4];
+    p.shield = 0;
+    p.mend = 0;
+    p.hp = p.max_hp();
+    p.body.haste = 0;
+    p.body.root = 0;
+}
+
+/// In the lobby, a spell of every slot to practise with (unhurt).
+fn practice(p: &mut Player, rng: &mut Rng) {
+    let mut pick = |from: &[u8]| from[(rng.next_u64() % from.len() as u64) as usize];
+    let off = [spell::LANCE, spell::COMET, spell::CHAIN, spell::STARFALL];
+    let util = [
+        spell::ROOT,
+        spell::BLINK,
+        spell::WARD,
+        spell::MEND,
+        spell::GUST,
+        spell::HASTE,
+    ];
+    let a = pick(&off);
+    let b = loop {
+        let b = pick(&off);
+        if b != a {
+            break b;
+        }
+    };
+    let c = pick(&util);
+    let d = loop {
+        let d = pick(&util);
+        if d != c {
+            break d;
+        }
+    };
+    p.slots = [a, b, c, d].map(|spell| Some(Slot { spell, rank: 1 }));
 }
 
 /// Where along a bolt's step from `a` to `e` (0..1) it passes through a

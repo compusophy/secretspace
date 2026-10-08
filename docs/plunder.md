@@ -81,16 +81,23 @@ owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
       bursts, the storm's wall, the island map with both circles, the feed,
       names and health over heads, spectating.
 
-### Stage B: spells, levels, loot (next)
-- Levels 1-20 within a match (from knockouts, bots and chests): health and
-  damage grow.
-- Spells found as loot, ranks 1-5 (a duplicate ranks one up): 2 offensive
-  slots (single target, area), 2 utility (a blink or dash, a shield, a
-  heal, crowd control: root, slow, knockback). Keys 1-4 / Q E R F; cooldowns
-  on the HUD.
-- Chests on the map (open by standing at them), drops from the knocked out.
-- Right click aims down the wand: zoom, tighter aim, slower walk (owner's lean).
-- Touch controls (two sticks, cast buttons).
+### Stage B: spells, levels, loot (in progress, October 2026)
+- [x] Levels 1-20 within a match (XP from chests, damage dealt and
+      knockouts; more for a higher-level knockout): +8 health and +5% damage
+      a level.
+- [x] Ten spells as loot, ranks 1-5 (a duplicate ranks one up; each rank
+      +12-15% power, 6% less cooldown): offensive (Q, E) Lance, Comet, Chain
+      Spark, Starfall; utility (R, F) Root, Blink, Ward, Mend, Gust, Haste.
+      Over a full set, hold G to swap out the weaker of that kind.
+- [x] 40 chests a match (a third at the ruins), two scrolls each; the
+      knocked out drop everything they carried. The lobby hands out a random
+      practice set.
+- [x] Right click aims down the wand: zoom to 0.72 rad, walk at 55%.
+- [x] Bots loot chests and scrolls, and cast: at their mark, Ward when hurt,
+      Mend when low, Blink and Haste to outrun the storm.
+- [x] The HUD: the spell bar (icons, ranks, cooldowns), level and XP, a ward's
+      shield, what lies underfoot; effects for every spell.
+- [ ] Touch controls (two sticks, cast buttons).
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.

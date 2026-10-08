@@ -12,14 +12,17 @@ pub const GOLD: V3 = rgb(255, 214, 128);
 const STORM: V3 = rgb(150, 70, 230);
 
 pub struct Look {
-    sea: Mesh,
-    robe: Mesh,
-    hat: Mesh,
-    body: Mesh,
-    glider: Mesh,
-    orb: Mesh,
-    rod: Mesh,
-    wall: Mesh,
+    pub sea: Mesh,
+    pub robe: Mesh,
+    pub hat: Mesh,
+    pub body: Mesh,
+    pub glider: Mesh,
+    pub orb: Mesh,
+    pub rod: Mesh,
+    pub wall: Mesh,
+    pub chest: Mesh,
+    pub lid: Mesh,
+    pub roots: Mesh,
 }
 
 /// A wizard's colour from its id.
@@ -265,6 +268,33 @@ impl Look {
                     true,
                 )
             }),
+            chest: one(r, |g| {
+                let wood = rgb(120, 82, 50);
+                g.block([0.0; 3], [1.1, 0.6, 0.75], 0.0, wood, rgb(100, 66, 40), 0.0);
+                for x in [-0.4, 0.4] {
+                    g.block([x, 0.0, 0.0], [0.08, 0.62, 0.78], 0.0, GOLD, GOLD, 0.25);
+                }
+            }),
+            lid: one(r, |g| {
+                g.block(
+                    [0.0, 0.6, 0.0],
+                    [1.14, 0.22, 0.79],
+                    0.0,
+                    rgb(130, 90, 56),
+                    rgb(110, 74, 46),
+                    0.0,
+                );
+                g.block([0.0, 0.6, 0.0], [0.1, 0.24, 0.81], 0.0, GOLD, GOLD, 0.3);
+            }),
+            roots: one(r, |g| {
+                for k in 0..7 {
+                    let a = k as f32 / 7.0 * std::f32::consts::TAU;
+                    let (c, s) = (a.cos(), a.sin());
+                    let base = [c * 0.55, 0.0, s * 0.55];
+                    let tip = [c * 0.2, 1.1 + 0.2 * (k % 2) as f32, s * 0.2];
+                    g.spike(base, tip, 0.09, 5, rgb(86, 120, 50), 0.15);
+                }
+            }),
             wall: one(r, |g| {
                 g.column([0.0; 3], 64, (1.0, 1.0), 1.0, 0.0, STORM, 0.5, false);
             }),
@@ -295,41 +325,6 @@ impl Look {
                     .glow(0.5)
                     .pass(Pass::Faint),
             );
-        }
-    }
-
-    /// A bolt in flight, its light, and its tail.
-    pub fn bolt(
-        &self,
-        items: &mut Vec<Item>,
-        lights: &mut Vec<Light>,
-        sparks: &mut Vec<Spark>,
-        p: V3,
-        v: V3,
-        mine: bool,
-    ) {
-        let c = if mine { GOLD } else { rgb(255, 150, 120) };
-        items.push(
-            Item::new(self.orb, m4::place(p, 0.0, [0.16; 3]))
-                .tint(c, 1.0)
-                .glow(1.0)
-                .pass(Pass::Glow),
-        );
-        lights.push(Light {
-            p,
-            r: 7.0,
-            c: geo::scale(c, 1.6),
-        });
-        let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1.0);
-        let back = [-v[0] / speed, -v[1] / speed, -v[2] / speed];
-        for k in 0..10 {
-            let d = k as f32 * 0.22;
-            let fade = 1.0 - k as f32 / 10.0;
-            sparks.push(Spark {
-                p: geo::add(p, geo::scale(back, d)),
-                size: 0.3 * fade + 0.05,
-                c: [c[0], c[1], c[2], fade],
-            });
         }
     }
 

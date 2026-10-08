@@ -6,11 +6,13 @@
 
 pub mod bots;
 pub mod laws;
+pub mod loot;
 pub mod map;
 pub mod motion;
 pub mod predict;
 pub mod proto;
 pub mod room;
+pub mod spells;
 pub mod storm;
 pub mod trig;
 pub mod view;

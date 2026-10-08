@@ -9,7 +9,7 @@ use engine::wire::{Reader, Writer};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 1;
+pub const PROTO: u8 = 2;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -18,6 +18,7 @@ pub mod tag {
     pub const FRAME: u8 = 2;
     pub const ROSTER: u8 = 3;
     pub const EVENTS: u8 = 4;
+    pub const LOOT: u8 = 5;
 }
 
 /// At most this many inputs in one message.
@@ -39,7 +40,7 @@ impl Up {
             Up::Inputs(v) => {
                 w.u8(tag::INPUT).u8(v.len().min(MAX_INPUTS) as u8);
                 for i in v.iter().take(MAX_INPUTS) {
-                    w.u16(i.seq).u16(i.yaw).i16(i.pitch).u8(i.keys);
+                    w.u16(i.seq).u16(i.yaw).i16(i.pitch).u8(i.keys).u8(i.cast);
                 }
             }
         }
@@ -62,6 +63,7 @@ impl Up {
                         yaw: r.u16()?,
                         pitch: r.i16()?,
                         keys: r.u8()?,
+                        cast: r.u8()?,
                     });
                 }
                 Some(Up::Inputs(v))
@@ -86,10 +88,17 @@ pub struct Own {
     pub body: Body,
     /// The last input the server applied.
     pub seq: u16,
-    pub hp: u8,
+    pub hp: u16,
     pub kills: u8,
     /// Ticks until the wand is ready.
     pub cool: u8,
+    pub level: u8,
+    /// XP toward the next level (of XP_PER_LEVEL).
+    pub xp: u8,
+    pub shield: u16,
+    /// Each slot: (spell, rank), or None; ticks until it is ready.
+    pub slots: [Option<(u8, u8)>; 4],
+    pub cds: [u16; 4],
 }
 
 /// Another wizard (or you, as everyone sees you).
@@ -99,8 +108,19 @@ pub struct Seen {
     pub p: [f32; 3],
     pub yaw: u16,
     pub pitch: i16,
-    pub hp: u8,
+    pub hp: u16,
     pub flags: u8,
+    pub level: u8,
+    /// What spells are on it (`fx`).
+    pub fx: u8,
+}
+
+pub mod fx {
+    pub const SHIELD: u8 = 1;
+    pub const ROOTED: u8 = 2;
+    pub const HASTED: u8 = 4;
+    pub const MENDING: u8 = 8;
+    pub const AIM: u8 = 16;
 }
 
 pub mod flag {
@@ -115,6 +135,8 @@ pub mod flag {
 pub struct BoltSeen {
     pub id: u16,
     pub by: u16,
+    /// `world::WAND`, or a spell.
+    pub kind: u8,
     pub p: [f32; 3],
     pub v: [f32; 3],
 }
@@ -188,10 +210,19 @@ impl Frame {
                 f32s(&mut w, o.body.p);
                 f32s(&mut w, o.body.v);
                 w.u8(o.body.ground as u8 | (o.body.glide as u8) << 1)
+                    .u16(o.body.haste)
+                    .u16(o.body.root)
                     .u16(o.seq)
-                    .u8(o.hp)
+                    .u16(o.hp)
                     .u8(o.kills)
-                    .u8(o.cool);
+                    .u8(o.cool)
+                    .u8(o.level)
+                    .u8(o.xp)
+                    .u16(o.shield);
+                for (s, cd) in o.slots.iter().zip(o.cds) {
+                    let (spell, rank) = s.unwrap_or((255, 0));
+                    w.u8(spell).u8(rank).u16(cd);
+                }
             }
         }
         let n = self.players.len().min(255);
@@ -203,13 +234,15 @@ impl Frame {
                 .i16(q(s.p[2]))
                 .u16(s.yaw)
                 .i16(s.pitch)
-                .u8(s.hp)
-                .u8(s.flags);
+                .u16(s.hp)
+                .u8(s.flags)
+                .u8(s.level)
+                .u8(s.fx);
         }
         let n = self.bolts.len().min(255);
         w.u8(n as u8);
         for b in &self.bolts[..n] {
-            w.u16(b.id).u16(b.by);
+            w.u16(b.id).u16(b.by).u8(b.kind);
             for x in b.p {
                 w.i16(q(x));
             }
@@ -242,42 +275,57 @@ impl Frame {
             let p = read_f32s(&mut r)?;
             let v = read_f32s(&mut r)?;
             let g = r.u8()?;
-            f.you = Some(Own {
+            let mut o = Own {
                 body: Body {
                     p,
                     v,
                     ground: g & 1 != 0,
                     glide: g & 2 != 0,
+                    haste: r.u16()?,
+                    root: r.u16()?,
                 },
                 seq: r.u16()?,
-                hp: r.u8()?,
+                hp: r.u16()?,
                 kills: r.u8()?,
                 cool: r.u8()?,
-            });
+                level: r.u8()?,
+                xp: r.u8()?,
+                shield: r.u16()?,
+                ..Own::default()
+            };
+            for k in 0..4 {
+                let (spell, rank) = (r.u8()?, r.u8()?);
+                o.slots[k] = (spell != 255).then_some((spell, rank));
+                o.cds[k] = r.u16()?;
+            }
+            f.you = Some(o);
         }
         let n = r.u8()? as usize;
-        r.room(n, 14)?;
+        r.room(n, 17)?;
         for _ in 0..n {
             f.players.push(Seen {
                 id: r.u16()?,
                 p: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
                 yaw: r.u16()?,
                 pitch: r.i16()?,
-                hp: r.u8()?,
+                hp: r.u16()?,
                 flags: r.u8()?,
+                level: r.u8()?,
+                fx: r.u8()?,
             });
         }
         let n = r.u8()? as usize;
-        r.room(n, 16)?;
+        r.room(n, 17)?;
         for _ in 0..n {
             let id = r.u16()?;
             let by = r.u16()?;
+            let kind = r.u8()?;
             let p = [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)];
             let mut v = [0.0; 3];
             for x in v.iter_mut() {
                 *x = r.i16()? as f32 / 8.0;
             }
-            f.bolts.push(BoltSeen { id, by, p, v });
+            f.bolts.push(BoltSeen { id, by, kind, p, v });
         }
         Some(f)
     }
@@ -324,13 +372,37 @@ pub fn read_roster(b: &[u8]) -> Option<Vec<(u16, bool, String)>> {
 }
 
 /// Events as the wire carries them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ev {
-    Hit { by: u16, to: u16, amount: u16 },
-    Out { who: u16, by: u16, place: u16 },
-    Win { who: u16 },
+    Hit {
+        by: u16,
+        to: u16,
+        amount: u16,
+    },
+    Out {
+        who: u16,
+        by: u16,
+        place: u16,
+    },
+    Win {
+        who: u16,
+    },
     Begin,
     Lobby,
+    Cast {
+        by: u16,
+        spell: u8,
+        stage: u8,
+        at: [f32; 3],
+    },
+    Link {
+        from: u16,
+        to: u16,
+    },
+    Level {
+        who: u16,
+        level: u8,
+    },
 }
 
 pub fn events(list: &[Ev]) -> Vec<u8> {
@@ -344,6 +416,21 @@ pub fn events(list: &[Ev]) -> Vec<u8> {
             Ev::Win { who } => w.u8(3).u16(who),
             Ev::Begin => w.u8(4),
             Ev::Lobby => w.u8(5),
+            Ev::Cast {
+                by,
+                spell,
+                stage,
+                at,
+            } => w
+                .u8(6)
+                .u16(by)
+                .u8(spell)
+                .u8(stage)
+                .i16(q(at[0]))
+                .i16(q(at[1]))
+                .i16(q(at[2])),
+            Ev::Link { from, to } => w.u8(7).u16(from).u16(to),
+            Ev::Level { who, level } => w.u8(8).u16(who).u8(level),
         };
     }
     w.0
@@ -372,10 +459,86 @@ pub fn read_events(b: &[u8]) -> Option<Vec<Ev>> {
             3 => Ev::Win { who: r.u16()? },
             4 => Ev::Begin,
             5 => Ev::Lobby,
+            6 => Ev::Cast {
+                by: r.u16()?,
+                spell: r.u8()?,
+                stage: r.u8()?,
+                at: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
+            },
+            7 => Ev::Link {
+                from: r.u16()?,
+                to: r.u16()?,
+            },
+            8 => Ev::Level {
+                who: r.u16()?,
+                level: r.u8()?,
+            },
             _ => return None,
         });
     }
     Some(v)
+}
+
+/// The chests (id, where, opened) and the scrolls (id, spell, rank,
+/// where) on the island, sent when they change.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Loot {
+    pub chests: Vec<(u16, [f32; 3], bool)>,
+    pub scrolls: Vec<(u16, u8, u8, [f32; 3])>,
+}
+
+impl Loot {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut w = Writer::default();
+        let n = self.chests.len().min(u16::MAX as usize);
+        w.u8(tag::LOOT).u16(n as u16);
+        for (id, p, open) in &self.chests[..n] {
+            w.u16(*id)
+                .i16(q(p[0]))
+                .i16(q(p[1]))
+                .i16(q(p[2]))
+                .u8(*open as u8);
+        }
+        let n = self.scrolls.len().min(u16::MAX as usize);
+        w.u16(n as u16);
+        for (id, spell, rank, p) in &self.scrolls[..n] {
+            w.u16(*id)
+                .u8(*spell)
+                .u8(*rank)
+                .i16(q(p[0]))
+                .i16(q(p[1]))
+                .i16(q(p[2]));
+        }
+        w.0
+    }
+
+    pub fn decode(b: &[u8]) -> Option<Loot> {
+        let mut r = Reader::new(b);
+        if r.u8()? != tag::LOOT {
+            return None;
+        }
+        let mut l = Loot::default();
+        let n = r.u16()? as usize;
+        r.room(n, 9)?;
+        for _ in 0..n {
+            l.chests.push((
+                r.u16()?,
+                [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
+                r.u8()? != 0,
+            ));
+        }
+        let n = r.u16()? as usize;
+        r.room(n, 10)?;
+        for _ in 0..n {
+            l.scrolls.push((
+                r.u16()?,
+                r.u8()?,
+                r.u8()?,
+                [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
+            ));
+        }
+        Some(l)
+    }
 }
 
 #[cfg(test)]
@@ -393,6 +556,7 @@ mod tests {
                 let _ = read_roster(&b);
                 let _ = read_events(&b);
                 let _ = read_welcome(&b);
+                let _ = Loot::decode(&b);
             }
         }
     }
@@ -416,11 +580,18 @@ mod tests {
                     v: [0.1, -9.8, 0.0],
                     ground: false,
                     glide: true,
+                    haste: 7,
+                    root: 0,
                 },
                 seq: 65535,
-                hp: 88,
+                hp: 252,
                 kills: 2,
                 cool: 3,
+                level: 20,
+                xp: 99,
+                shield: 40,
+                slots: [Some((0, 5)), None, Some((9, 1)), None],
+                cds: [0, 300, 12, 0],
             }),
             players: vec![Seen {
                 id: 4,
@@ -429,10 +600,13 @@ mod tests {
                 pitch: -200,
                 hp: 50,
                 flags: flag::ALIVE | flag::BOT,
+                level: 3,
+                fx: fx::SHIELD,
             }],
             bolts: vec![BoltSeen {
                 id: 9,
                 by: 4,
+                kind: 1,
                 p: [1.0, 2.0, 3.0],
                 v: [75.0, 0.5, -1.0],
             }],
@@ -443,6 +617,7 @@ mod tests {
             yaw: 9,
             pitch: -3,
             keys: 33,
+            cast: 17,
         }]);
         assert_eq!(Up::decode(&up.encode()), Some(up));
         let ev = vec![

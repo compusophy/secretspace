@@ -44,6 +44,19 @@ fn wire(e: &Event) -> Ev {
         Event::Win { who } => Ev::Win { who },
         Event::Begin => Ev::Begin,
         Event::Lobby => Ev::Lobby,
+        Event::Cast {
+            by,
+            spell,
+            stage,
+            at,
+        } => Ev::Cast {
+            by,
+            spell,
+            stage,
+            at,
+        },
+        Event::Link { from, to } => Ev::Link { from, to },
+        Event::Level { who, level } => Ev::Level { who, level },
     }
 }
 
@@ -62,6 +75,7 @@ impl Room for Wandfall {
         // Watchers see the island and the match, never a wizard of their own.
         out.send(conn, proto::welcome(0, self.world.seed(), TICK_HZ as u8));
         out.send(conn, self.roster());
+        out.send(conn, view::loot(&self.world).encode());
     }
 
     fn who(&mut self, conn: u32, who: &Who) {
@@ -130,6 +144,13 @@ impl Room for Wandfall {
             let r = self.roster();
             for &conn in self.you.keys() {
                 out.send(conn, r.clone());
+            }
+        }
+        if self.world.loot_dirty {
+            self.world.loot_dirty = false;
+            let l = view::loot(&self.world).encode();
+            for &conn in self.you.keys() {
+                out.send(conn, l.clone());
             }
         }
         if !ev.is_empty() {

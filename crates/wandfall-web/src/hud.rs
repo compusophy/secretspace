@@ -5,10 +5,12 @@
 
 use pixels::{Canvas, Rect, Rgba};
 use render::{m4, M4};
-use wandfall::laws::{HEALTH, MAP_HALF, MATCH_SIZE, SEA};
+use wandfall::laws::{MAP_HALF, MATCH_SIZE, SEA};
+use wandfall::loot::max_hp;
 use wandfall::map::Map;
-use wandfall::proto::{flag, Frame, Seen};
+use wandfall::proto::{flag, Frame, Own, Seen};
 
+use crate::bar;
 use crate::state::State;
 
 const INK: Rgba = Rgba::rgb(250, 246, 236);
@@ -47,7 +49,9 @@ pub struct View<'a> {
     pub frame: Option<&'a Frame>,
     pub others: &'a [Seen],
     pub vp: M4,
-    pub me: Option<([f32; 3], f32, u8)>,
+    /// Where you are and which way you face, and your own state.
+    pub me: Option<([f32; 3], f32)>,
+    pub own: Option<&'a Own>,
     pub watching: Option<String>,
     pub locked: bool,
     pub in_storm: bool,
@@ -70,7 +74,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         return;
     };
     // Names over heads, near enough to read.
-    if let Some((eye, _, _)) = v.me.or(Some(([0.0; 3], 0.0, 0))) {
+    if let Some((eye, _)) = v.me.or(Some(([0.0; 3], 0.0))) {
         for s in v
             .others
             .iter()
@@ -89,18 +93,14 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             if sx < 0 || sx > w || sy < 0 || sy > h {
                 continue;
             }
-            let name = v.st.name(s.id);
+            let name = format!("{}  {}", v.st.name(s.id), s.level);
             c.text_centred(sx, sy - 9 * ui, &name, ui, INK.fade(0.9));
             let bar = 24 * ui;
+            let full = max_hp(s.level);
             c.fill_rect(sx - bar / 2, sy, bar, 2 * ui, SHADE);
-            let k = s.hp as i32 * bar / HEALTH;
-            c.fill_rect(
-                sx - bar / 2,
-                sy,
-                k,
-                2 * ui,
-                if s.hp < 35 { RED } else { INK },
-            );
+            let k = (s.hp as i32 * bar / full).min(bar);
+            let col = if (s.hp as i32) * 3 < full { RED } else { INK };
+            c.fill_rect(sx - bar / 2, sy, k, 2 * ui, col);
         }
     }
     // The crosshair, and a mark when your bolt lands.
@@ -178,17 +178,18 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     };
     let k = pixels::fit_scale(&top, w - 20 * ui, 2 * ui);
     c.text_shadowed(cx - pixels::text_width(&top, k) / 2, 8 * ui, &top, k, INK);
-    // Health.
-    if let Some((_, _, hp)) = v.me {
+    // Health (and a ward's shield over it), and the spell bar.
+    if let Some(o) = v.own.filter(|_| v.me.is_some()) {
         let (bw, bh) = (120 * ui, 8 * ui);
         let (x, y) = (12 * ui, h - 20 * ui);
+        let full = max_hp(o.level);
         c.round_rect(
             Rect::new(x as f32, y as f32, bw as f32, bh as f32),
             2.0 * ui as f32,
             SHADE,
         );
-        let k = hp as i32 * bw / HEALTH;
-        let col = if hp < 35 {
+        let k = (o.hp as i32 * bw / full).min(bw);
+        let col = if (o.hp as i32) * 3 < full {
             RED
         } else {
             Rgba::rgb(110, 220, 120)
@@ -198,16 +199,32 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             2.0 * ui as f32,
             col,
         );
-        c.text_shadowed(x, y - 10 * ui, &format!("{hp}"), ui, INK);
-        if let Some(fr) = f.you {
-            c.text_shadowed(
-                x + bw + 8 * ui,
-                y,
-                &format!("knocked out {}", fr.kills),
-                ui,
-                GOLD,
+        if o.shield > 0 {
+            let sw = (o.shield as i32 * bw / full).min(bw);
+            c.round_rect(
+                Rect::new(x as f32, (y - 3 * ui) as f32, sw as f32, (2 * ui) as f32),
+                ui as f32,
+                Rgba::rgb(150, 214, 255),
             );
         }
+        c.text_shadowed(x, y - 12 * ui, &format!("{} / {}", o.hp, full), ui, INK);
+        c.text_shadowed(
+            x + bw + 8 * ui,
+            y,
+            &format!("knocked out {}", o.kills),
+            ui,
+            GOLD,
+        );
+        if o.body.root > 0 {
+            c.text_centred(
+                cx,
+                h / 2 + 18 * ui,
+                "rooted!",
+                2 * ui,
+                Rgba::rgb(130, 220, 100),
+            );
+        }
+        bar::draw(c, o, &v.st.loot, v.now, v.st.levelled, ui);
     }
     // The island, the storm's circles, and you.
     let s = (MINI * ui).min(w / 4);
@@ -233,7 +250,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             c.ring(nx, ny, f.next.1 * k, 1.0, INK.fade(0.8));
         }
     }
-    if let Some((p, yaw, _)) = v.me {
+    if let Some((p, yaw)) = v.me {
         let (px, py) = to(p[0], p[2]);
         c.circle(px, py, 2.5 * ui as f32, GOLD);
         c.line(

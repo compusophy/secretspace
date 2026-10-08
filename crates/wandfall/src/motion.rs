@@ -15,6 +15,13 @@ pub struct Input {
     pub yaw: u16,
     pub pitch: i16,
     pub keys: u8,
+    /// Spells cast this input (a bit a slot) and taking a scroll.
+    pub cast: u8,
+}
+
+pub mod cast {
+    pub const SLOT: [u8; 4] = [1, 2, 4, 8];
+    pub const TAKE: u8 = 16;
 }
 
 pub mod keys {
@@ -24,6 +31,8 @@ pub mod keys {
     pub const RIGHT: u8 = 8;
     pub const JUMP: u8 = 16;
     pub const FIRE: u8 = 32;
+    /// Aiming down the wand.
+    pub const AIM: u8 = 64;
 }
 
 /// A wizard's body: feet, velocity, and whether it stands.
@@ -34,6 +43,9 @@ pub struct Body {
     pub ground: bool,
     /// Falling slowly from the drop until it lands.
     pub glide: bool,
+    /// Ticks left hasted, and held in place.
+    pub haste: u16,
+    pub root: u16,
 }
 
 fn toward(v: f32, want: f32, step: f32) -> f32 {
@@ -47,7 +59,8 @@ fn toward(v: f32, want: f32, step: f32) -> f32 {
 /// One tick of a body under an input.
 pub fn step(b: &mut Body, i: &Input, map: &Map) {
     let (s, c) = trig::sin_cos(i.yaw);
-    let has = |k| i.keys & k != 0;
+    let held = b.root > 0;
+    let has = |k| i.keys & k != 0 && !held;
     let f = has(keys::FWD) as i32 as f32 - has(keys::BACK) as i32 as f32;
     let r = has(keys::RIGHT) as i32 as f32 - has(keys::LEFT) as i32 as f32;
     // Forward is (c, s) on the ground; right is (-s, c).
@@ -60,13 +73,21 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     }
     let under = map.height(b.p[0], b.p[2]);
     let wading = b.ground && under < SEA;
-    let speed = if b.glide {
+    let mut speed = if b.glide {
         GLIDE_SPEED
     } else if wading {
         RUN * WADE
     } else {
         RUN
     };
+    if b.haste > 0 {
+        speed *= HASTE;
+    }
+    if i.keys & keys::AIM != 0 && !b.glide {
+        speed *= AIM_SLOW;
+    }
+    b.haste = b.haste.saturating_sub(1);
+    b.root = b.root.saturating_sub(1);
     let accel = if b.ground || b.glide {
         ACCEL_GROUND
     } else {
@@ -127,11 +148,29 @@ mod tests {
             keys: keys::FWD,
             ..Input::default()
         };
+        let mut aim = b;
+        let mut fast = b;
+        fast.haste = 60;
         for _ in 0..30 {
             step(&mut b, &run, &map);
         }
         let moved = b.p[0] - start[0];
         assert!(moved > 3.0, "east, about RUN a second: {moved}");
+        let aiming = Input {
+            keys: keys::FWD | keys::AIM,
+            ..Input::default()
+        };
+        for _ in 0..30 {
+            step(&mut aim, &aiming, &map);
+            step(&mut fast, &run, &map);
+        }
+        assert!(aim.p[0] - start[0] < moved * 0.8, "aiming is slower");
+        assert!(fast.p[0] - start[0] > moved * 1.2, "haste is faster");
+        let mut held = stand(&map);
+        held.root = 30;
+        let p0 = held.p;
+        step(&mut held, &run, &map);
+        assert_eq!((held.p[0], held.p[2]), (p0[0], p0[2]), "rooted");
         let jump = Input {
             keys: keys::JUMP,
             ..Input::default()

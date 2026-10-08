@@ -7,10 +7,11 @@
 use engine::rng::splitmix;
 
 use crate::laws::*;
-use crate::motion::{keys, Input};
+use crate::loot;
+use crate::motion::{cast, keys, Input};
 use crate::storm::Now;
 use crate::trig;
-use crate::world::World;
+use crate::world::{Player, World};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Mind {
@@ -125,7 +126,27 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
             keys |= keys::JUMP;
         }
     } else {
-        let to = if flee { next.0 } else { m.goal };
+        // Loot nearby (a closed chest, a scroll worth having), else its goal.
+        let near = |q: [f32; 3]| (q[0] - me.body.p[0]).powi(2) + (q[2] - me.body.p[2]).powi(2);
+        let chest = w
+            .chests
+            .iter()
+            .filter(|c| {
+                !c.open && near(c.p) < LOOT_SIGHT * LOOT_SIGHT && !storm.outside(c.p[0], c.p[2])
+            })
+            .map(|c| (c.p, near(c.p)))
+            .chain(
+                w.scrolls
+                    .iter()
+                    .filter(|s| near(s.p) < 25.0 * 25.0 && wants(me, s.spell, s.rank))
+                    .map(|s| (s.p, near(s.p))),
+            )
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        let to = match (flee, chest) {
+            (true, _) => next.0,
+            (false, Some((p, _))) => [p[0], p[2]],
+            (false, None) => m.goal,
+        };
         walk = Some(walk_to(to));
     }
     if let Some(a) = walk {
@@ -144,11 +165,52 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
         }
         m.was = me.body.p;
     }
+    let cast = spells(me, seen.map(|s| s.1), flee, tick, m.seed);
     let input = Input {
         seq: 0,
         yaw,
         pitch,
         keys,
+        cast,
     };
     (input, m)
+}
+
+/// Whether a bot would take this scroll: a spell it has, a free slot of
+/// its kind, or better than its weakest.
+fn wants(me: &Player, spell: u8, rank: u8) -> bool {
+    let [a, b] = loot::slots_of(spell);
+    me.slots.iter().flatten().any(|s| s.spell == spell)
+        || me.slots[a]
+            .map_or(0, |s| s.rank)
+            .min(me.slots[b].map_or(0, |s| s.rank))
+            < rank
+}
+
+/// Which spells a bot casts now: at its mark when it has one, to save
+/// itself when hurt, to run when the storm comes.
+fn spells(me: &Player, mark: Option<f32>, flee: bool, tick: u32, seed: u64) -> u8 {
+    let mut bits = 0;
+    let hurt = me.hp * 100 / me.max_hp().max(1);
+    for (k, slot) in me.slots.iter().enumerate() {
+        let Some(s) = slot else {
+            continue;
+        };
+        if me.cds[k] > 0 || unit(seed, tick, 20 + k as u64) > 0.08 {
+            continue;
+        }
+        let go = match (s.spell, mark) {
+            (spell::LANCE | spell::COMET | spell::CHAIN | spell::STARFALL, Some(d)) => d < 40.0,
+            (spell::ROOT, Some(d)) => d < 30.0,
+            (spell::GUST, Some(d)) => d < GUST_RADIUS * 0.8,
+            (spell::WARD, _) => tick.saturating_sub(me.hurt_at) < 20 && hurt < 75,
+            (spell::MEND, _) => hurt < 55,
+            (spell::HASTE | spell::BLINK, _) => flee || (hurt < 30 && mark.is_some()),
+            _ => false,
+        };
+        if go {
+            bits |= cast::SLOT[k];
+        }
+    }
+    bits
 }

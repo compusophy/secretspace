@@ -14,6 +14,7 @@ fn a_match_runs_to_a_winner_and_starts_again() {
     let me = w.join("tester", 0);
     assert_eq!(w.phase, Phase::Lobby);
     let (mut began, mut winner, mut shot, mut storm, mut lobby) = (false, None, 0, 0, false);
+    let (mut casts, mut levels, mut top, mut opened) = (0, 0, 1, 0);
     for _ in 0..TICK_HZ * 60 * 6 {
         for e in w.step() {
             match e {
@@ -25,8 +26,16 @@ fn a_match_runs_to_a_winner_and_starts_again() {
                 Event::Out { .. } => storm += 1,
                 Event::Win { who } => winner = Some(who),
                 Event::Lobby => lobby = true,
-                Event::Hit { .. } => {}
+                Event::Cast { stage: 0, .. } => casts += 1,
+                Event::Level { level, .. } => {
+                    levels += 1;
+                    top = top.max(level);
+                }
+                _ => {}
             }
+        }
+        if w.phase == Phase::Fight {
+            opened = opened.max(w.chests.iter().filter(|c| c.open).count());
         }
         if lobby {
             break;
@@ -48,6 +57,13 @@ fn a_match_runs_to_a_winner_and_starts_again() {
         "back to the lobby, bots gone"
     );
     assert!(w.find(me).is_some());
+    assert!(opened >= 8, "chests are opened: {opened}");
+    assert!(casts >= 10, "spells are cast: {casts}");
+    assert!(
+        levels >= 10 && top >= 4,
+        "wizards level up: {levels} times, to {top}"
+    );
+    println!("knocked out {shot}, storm {storm}, chests {opened}, casts {casts}, levels {levels} (top {top})");
     let _ = winner;
 }
 
@@ -80,7 +96,8 @@ fn the_page_predicts_its_wizard_exactly() {
                 seq,
                 yaw: (t * 300) as u16,
                 pitch: 0,
-                keys: (rng.next_u64() as u8) & (keys::FWD | keys::LEFT | keys::JUMP),
+                keys: (rng.next_u64() as u8) & (keys::FWD | keys::LEFT | keys::JUMP | keys::AIM),
+                cast: 0,
             };
             page.push(i, &w.map);
             w.input(me, i);

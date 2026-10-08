@@ -5,7 +5,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use wandfall::laws::TICK_HZ;
-use wandfall::proto::{self, Ev, Frame, Seen};
+use wandfall::proto::{self, Ev, Frame, Loot, Seen};
 
 /// How far behind the newest frame others are drawn (ms).
 const BEHIND: f64 = 100.0;
@@ -30,6 +30,12 @@ pub struct State {
     /// You are out: by whom, your place.
     pub out: Option<(u16, u16)>,
     pub joined: bool,
+    pub loot: Loot,
+    /// Spells cast and landing, leaps and levels, for their effects:
+    /// (when, what).
+    pub shows: Vec<(f64, Ev)>,
+    /// When you last levelled, and to what.
+    pub levelled: (f64, u8),
 }
 
 impl State {
@@ -95,12 +101,20 @@ impl State {
                         .push_back((now, "the match begins: drop!".to_string()));
                 }
                 Ev::Lobby => self.out = None,
+                Ev::Level { who, level } => {
+                    if who == self.you {
+                        self.levelled = (now, level);
+                    }
+                    self.shows.push((now, e));
+                }
+                Ev::Cast { .. } | Ev::Link { .. } => self.shows.push((now, e)),
             }
         }
         while self.feed.len() > 6 {
             self.feed.pop_front();
         }
         self.bursts.retain(|b| now - b.0 < 600.0);
+        self.shows.retain(|s| now - s.0 < 1600.0);
     }
 
     /// Everyone as they were a moment ago, smoothly between frames.
