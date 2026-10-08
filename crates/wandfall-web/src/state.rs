@@ -44,6 +44,8 @@ pub struct State {
     /// bar), and its cooldown the frame before.
     pub ready: [f64; 4],
     cds: [u16; 4],
+    /// When each wizard last loosed a bolt (to raise its arm).
+    pub fired: HashMap<u16, f64>,
 }
 
 impl State {
@@ -76,6 +78,15 @@ impl State {
                 }
             }
             self.cds = o.cds;
+        }
+        for b in &f.bolts {
+            let known = self
+                .frame
+                .as_ref()
+                .is_some_and(|o| o.bolts.iter().any(|x| x.id == b.id));
+            if !known {
+                self.fired.insert(b.by, now);
+            }
         }
         self.snaps.push_back((f.tick, f.players.clone()));
         while self.snaps.len() > 12 {
@@ -174,6 +185,24 @@ impl State {
                 None => *s,
             })
             .collect()
+    }
+
+    /// How fast a wizard moves over the ground (m/s), from the last two
+    /// frames.
+    pub fn speed(&self, id: u16) -> f32 {
+        let n = self.snaps.len();
+        if n < 2 {
+            return 0.0;
+        }
+        let (a, b) = (&self.snaps[n - 2], &self.snaps[n - 1]);
+        let (Some(p), Some(q)) = (
+            a.1.iter().find(|s| s.id == id),
+            b.1.iter().find(|s| s.id == id),
+        ) else {
+            return 0.0;
+        };
+        let secs = (b.0.saturating_sub(a.0)).max(1) as f32 / TICK_HZ as f32;
+        ((q.p[0] - p.p[0]).powi(2) + (q.p[2] - p.p[2]).powi(2)).sqrt() / secs
     }
 
     /// Bolts where they are now (flown on from the last frame).

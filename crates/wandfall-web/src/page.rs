@@ -310,6 +310,12 @@ fn practise(p: &mut Page) {
             r.sparring |= query("spar");
         }
     }
+    // `?look=yaw,pitch` (degrees) faces you a way to start.
+    if let Some(v) = query_value("look") {
+        let mut it = v.split(',').filter_map(|x| x.parse::<f32>().ok());
+        p.yaw = it.next().unwrap_or(0.0).to_radians();
+        p.pitch = it.next().unwrap_or(0.0).to_radians();
+    }
     if !p.touch {
         kit::input::lock(p.g.canvas());
     }
@@ -669,15 +675,23 @@ fn frame(p: &mut Page, now: f64) {
                 continue;
             }
             if !(p.alive && s.id == p.st.you) {
-                i.look.wizard(
-                    &mut d.items,
-                    &mut d.lights,
-                    s.id,
-                    s.p,
-                    trig::radians(s.yaw),
-                    s.flags & flag::GLIDE != 0,
-                    fx::tip(&p.st.shows, s.id, now),
-                );
+                // Walking bobs it; casting (or firing) raises its arm.
+                let tip = fx::tip(&p.st.shows, s.id, now);
+                let fired = p.st.fired.get(&s.id).map_or(1e9, |&f| now - f);
+                let speed = (p.st.speed(s.id) / 7.0).min(1.0);
+                let ground = s.flags & flag::GROUND != 0;
+                let step = ((now / 1000.0) as f32 * 9.0 + s.id as f32).sin().abs();
+                let pose = look::Pose {
+                    bob: if ground { step * 0.06 * speed } else { 0.0 },
+                    arm: (tip.1 * 2.0)
+                        .max((1.0 - fired as f32 / 450.0) * 1.5)
+                        .min(1.0),
+                    aim: s.pitch as f32 / 65536.0 * std::f32::consts::TAU,
+                    tip,
+                    glide: s.flags & flag::GLIDE != 0,
+                };
+                i.look
+                    .wizard(&mut d, s.id, s.p, trig::radians(s.yaw), &pose);
             }
             fx::on_wizard(&i.look, &mut d, s, t, p.alive && s.id == p.st.you);
         }

@@ -5,16 +5,35 @@
 
 use render::geo::{self, hash, mix, rgb, unit, Geo, V3};
 use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark, Terrain};
+
+use crate::fx::Draw;
 use wandfall::laws::{MAP_HALF, SEA};
 use wandfall::map::{Kind, Map};
 
 pub const GOLD: V3 = rgb(255, 214, 128);
 const STORM: V3 = rgb(150, 70, 230);
 
+/// How a wizard stands this frame: bobbing as it walks, its arm raised
+/// to cast (0 at rest, 1 along its aim, `aim` radians up), its wand's tip
+/// alight (a colour, and how bright: 1 just cast), gliding down.
+pub struct Pose {
+    pub bob: f32,
+    pub arm: f32,
+    pub aim: f32,
+    pub tip: (V3, f32),
+    pub glide: bool,
+}
+
 pub struct Look {
+    /// A wizard: its robe (and left sleeve) in its colour, hat and mantle
+    /// darker, the rest as it is (a face, a beard or not, a belt, a
+    /// hand); its right arm apart, to raise: the sleeve, and the hand
+    /// with the wand.
     pub robe: Mesh,
     pub hat: Mesh,
-    pub body: Mesh,
+    pub body: [Mesh; 2],
+    pub sleeve: Mesh,
+    pub hand: Mesh,
     pub glider: Mesh,
     pub orb: Mesh,
     pub rod: Mesh,
@@ -200,45 +219,108 @@ impl Look {
             robe: smooth(r, |g| {
                 let profile = [
                     (0.5, 0.0),
-                    (0.45, 0.25),
-                    (0.33, 0.85),
-                    (0.25, 1.2),
-                    (0.2, 1.38),
-                    (0.0, 1.42),
+                    (0.47, 0.12),
+                    (0.36, 0.6),
+                    (0.28, 0.98),
+                    (0.27, 1.12),
+                    (0.2, 1.34),
+                    (0.0, 1.4),
                 ];
-                g.lathe([0.0; 3], &profile, 16, [1.0; 3], 0.0);
+                g.lathe([0.0; 3], &profile, 18, [1.0; 3], 0.0);
+                // The left sleeve, hanging a little forward.
                 g.lathe(
-                    [0.0, 1.0, 0.0],
-                    &[(0.27, 0.0), (0.29, 0.1), (0.25, 0.2)],
-                    16,
-                    rgb(230, 218, 196),
+                    [0.06, 0.84, -0.3],
+                    &[(0.11, 0.0), (0.09, 0.2), (0.07, 0.46)],
+                    10,
+                    [1.0; 3],
                     0.0,
                 );
             }),
             hat: smooth(r, |g| {
                 let profile = [
-                    (0.46, 0.0),
-                    (0.46, 0.04),
-                    (0.26, 0.07),
-                    (0.18, 0.3),
-                    (0.08, 0.58),
-                    (0.0, 0.74),
+                    (0.47, 0.0),
+                    (0.47, 0.035),
+                    (0.27, 0.065),
+                    (0.2, 0.3),
+                    (0.11, 0.62),
+                    (0.0, 0.86),
                 ];
-                g.lathe([0.0, 1.64, 0.0], &profile, 16, [1.0; 3], 0.0);
-            }),
-            body: smooth(r, |g| {
-                g.sphere(
-                    [0.0, 1.5, 0.0],
-                    [0.19, 0.21, 0.19],
-                    (2, 4, 0.02),
-                    rgb(236, 196, 160),
+                g.lathe([0.0, 1.66, 0.0], &profile, 18, [1.0; 3], 0.0);
+                // A mantle over the shoulders.
+                g.lathe(
+                    [0.0, 1.1, 0.0],
+                    &[
+                        (0.33, 0.0),
+                        (0.35, 0.1),
+                        (0.3, 0.2),
+                        (0.17, 0.3),
+                        (0.0, 0.33),
+                    ],
+                    18,
+                    [1.0; 3],
                     0.0,
                 );
-                // The wand, held out front and right (its tip is drawn
-                // alight on its own).
+            }),
+            body: [true, false].map(|beard| {
+                smooth(r, |g| {
+                    let skin = rgb(214, 160, 120);
+                    let gold = rgb(214, 170, 90);
+                    let white = rgb(248, 248, 252);
+                    let head = ([0.0, 1.52, 0.0], [0.19, 0.21, 0.19]);
+                    g.sphere(head.0, head.1, (2, 4, 0.02), skin, 0.0);
+                    // Eyes (so you see which way it faces), brows, a nose.
+                    for z in [-0.06f32, 0.06] {
+                        let ball = [0.172, 1.565, z];
+                        g.sphere(ball, [0.024; 3], (1, 5, 0.0), white, 0.0);
+                        let dot = [0.19, 1.565, z];
+                        g.sphere(dot, [0.012; 3], (1, 5, 0.0), rgb(30, 40, 60), 0.0);
+                        let (a, b) = ([0.17, 1.61, z - 0.03], [0.17, 1.615, z + 0.03]);
+                        g.spike(a, b, 0.012, 4, white, 0.0);
+                    }
+                    let nose = ([0.2, 1.5, 0.0], [0.04, 0.035, 0.035]);
+                    g.sphere(nose.0, nose.1, (1, 6, 0.0), skin, 0.0);
+                    if beard {
+                        let (a, b) = ([0.11, 1.45, 0.0], [0.22, 1.12, 0.0]);
+                        g.spike(a, b, 0.12, 10, white, 0.0);
+                    }
+                    // Belt, hem and hat band.
+                    let belt = rgb(90, 62, 40);
+                    g.lathe(
+                        [0.0, 0.94, 0.0],
+                        &[(0.29, 0.0), (0.295, 0.07)],
+                        18,
+                        belt,
+                        0.0,
+                    );
+                    g.lathe([0.0; 3], &[(0.51, 0.0), (0.49, 0.07)], 18, gold, 0.1);
+                    let band = [(0.26, 0.0), (0.245, 0.06)];
+                    g.lathe([0.0, 1.725, 0.0], &band, 18, gold, 0.1);
+                    // The left hand.
+                    g.sphere([0.06, 0.8, -0.3], [0.065; 3], (1, 7, 0.0), skin, 0.0);
+                })
+            }),
+            // The right arm hangs from its shoulder down -y; it is turned
+            // up to cast.
+            sleeve: smooth(r, |g| {
                 g.lathe(
-                    [0.12, 0.92, 0.3],
-                    &[(0.03, 0.0), (0.024, 0.3), (0.018, 0.56)],
+                    [0.0, -0.5, 0.0],
+                    &[(0.11, 0.0), (0.09, 0.22), (0.075, 0.5)],
+                    10,
+                    [1.0; 3],
+                    0.0,
+                );
+            }),
+            hand: smooth(r, |g| {
+                g.sphere(
+                    [0.0, -0.55, 0.0],
+                    [0.065; 3],
+                    (1, 8, 0.0),
+                    rgb(214, 160, 120),
+                    0.0,
+                );
+                g.lathe(
+                    [0.0, -1.0, 0.0],
+                    &[(0.016, 0.0), (0.022, 0.25), (0.028, 0.47)],
                     8,
                     rgb(110, 76, 50),
                     0.0,
@@ -314,7 +396,10 @@ impl Look {
         let all = [
             self.robe,
             self.hat,
-            self.body,
+            self.body[0],
+            self.body[1],
+            self.sleeve,
+            self.hand,
             self.glider,
             self.orb,
             self.rod,
@@ -331,48 +416,54 @@ impl Look {
         r.statics(Vec::new());
     }
 
-    /// A wizard standing at `at`, facing `yaw` (radians), its wand's tip
-    /// alight in `tip` (a colour, and how bright: 1 just cast).
-    #[allow(clippy::too_many_arguments)]
-    pub fn wizard(
-        &self,
-        items: &mut Vec<Item>,
-        lights: &mut Vec<Light>,
-        id: u16,
-        at: V3,
-        yaw: f32,
-        glide: bool,
-        tip: (V3, f32),
-    ) {
+    /// A wizard standing at `at`, facing `yaw` (radians), posed.
+    pub fn wizard(&self, d: &mut Draw, id: u16, at: V3, yaw: f32, pose: &Pose) {
+        let at = [at[0], at[1] + pose.bob, at[2]];
         let m = m4::place(at, yaw, [1.0; 3]);
         let c = hue(id);
-        items.push(Item::new(self.robe, m).tint(c, 1.0));
-        items.push(Item::new(self.hat, m).tint(geo::scale(c, 0.7), 1.0));
-        items.push(Item::new(self.body, m));
+        d.items
+            .push(Item::new(self.robe, m).tint(c, 1.0).rough(0.85));
+        d.items.push(
+            Item::new(self.hat, m)
+                .tint(geo::scale(c, 0.62), 1.0)
+                .rough(0.8),
+        );
+        d.items
+            .push(Item::new(self.body[id as usize % 2], m).rough(0.7));
+        // The right arm: hanging forward at rest, along the aim to cast.
+        let rest = 0.55;
+        let up = std::f32::consts::FRAC_PI_2 + pose.aim.clamp(-1.0, 1.0);
+        let th = rest + (up - rest) * pose.arm.clamp(0.0, 1.0);
         let (s, co) = yaw.sin_cos();
-        let (lx, lz) = (0.12, 0.3);
-        let p = [
-            at[0] + co * lx - s * lz,
-            at[1] + 1.5,
-            at[2] + s * lx + co * lz,
-        ];
-        let k = 0.06 + 0.07 * tip.1;
-        items.push(
-            Item::new(self.orb, m4::place(p, 0.0, [k; 3]))
-                .tint(tip.0, 1.0)
+        let turn = |v: V3| [co * v[0] - s * v[2], v[1], s * v[0] + co * v[2]];
+        let shoulder = geo::add(at, turn([0.04, 1.3, 0.27]));
+        let (st, ct) = th.sin_cos();
+        let along = turn([st, -ct, 0.0]);
+        let x = turn([ct, st, 0.0]);
+        let z = turn([0.0, 0.0, 1.0]);
+        let arm = m4::basis(shoulder, x, geo::scale(along, -1.0), z);
+        d.items
+            .push(Item::new(self.sleeve, arm).tint(c, 1.0).rough(0.85));
+        d.items.push(Item::new(self.hand, arm).rough(0.6));
+        let tip = geo::add(shoulder, geo::scale(along, 1.02));
+        let (col, flare) = pose.tip;
+        let k = 0.055 + 0.07 * flare;
+        d.items.push(
+            Item::new(self.orb, m4::place(tip, 0.0, [k; 3]))
+                .tint(col, 1.0)
                 .glow(1.0)
                 .pass(Pass::Glow),
         );
-        if tip.1 > 0.05 {
-            lights.push(Light {
-                p,
-                r: 3.0 + 5.0 * tip.1,
-                c: geo::scale(tip.0, 2.5 * tip.1),
+        if flare > 0.05 {
+            d.lights.push(Light {
+                p: tip,
+                r: 3.0 + 5.0 * flare,
+                c: geo::scale(col, 2.5 * flare),
             });
         }
-        if glide {
-            let top = [at[0], at[1] + 2.6, at[2]];
-            items.push(
+        if pose.glide {
+            let top = [at[0], at[1] + 2.7, at[2]];
+            d.items.push(
                 Item::new(self.glider, m4::place(top, yaw, [1.4, 1.0, 1.4]))
                     .tint(rgb(200, 230, 255), 0.5)
                     .glow(0.5)
