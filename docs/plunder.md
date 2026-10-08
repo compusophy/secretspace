@@ -172,6 +172,15 @@ of combat styles and all varieties to counter all varieties".
       island, the storm's circles, every wizard, bolts and beams in their
       spells' colours, falls, "LIVE n left"; between matches, the idea of
       one (the storm closing, wizards duelling).
+- [x] **Aim and feel:** the crosshair reddens on a wizard in the Lance's
+      reach; aiming with Lightning ready shows where it will strike. Hit
+      wizards flash white; your view bobs as you walk and shakes when you
+      are hurt. The title shows the eight spells. The storm's wall burns at
+      its edge and crackles near you.
+- Balance as bots play it (24 matches): every spell is in the winners'
+  hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
+  15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half
+  of all damage, the spells the big moments.
 - Hooks for looking (`crates/wandfall-web/src/lib.rs`): `?spells=`,
   `?nocd`, `?spar`, `?look=yaw,pitch`, `?hold=ms` (every effect held at
   that age).
