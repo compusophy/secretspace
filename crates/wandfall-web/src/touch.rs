@@ -228,7 +228,7 @@ impl Touch {
                         label(c, KEYS[k]);
                         continue;
                     };
-                    let s = px(r * 1.3);
+                    let s = px(r * 1.42);
                     let tile = Rect::new(px(x) - s / 2.0, px(y) - s / 2.0, s, s);
                     icon(c, sp, tile);
                     let cd = own.map_or(0, |o| o.cds[k]) as u32;

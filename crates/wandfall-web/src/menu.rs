@@ -4,7 +4,7 @@
 //! and the online lobby's panel. Each button is a spot the page hit-tests.
 
 use pixels::{Canvas, Rect, Rgba};
-use wandfall::laws::{Kind, MAX_LEVEL, MAX_RANK, SPELLS};
+use wandfall::laws::{spell, Kind, MAX_LEVEL, MAX_RANK, SPELLS};
 use wandfall::proto::Own;
 
 use crate::bar::{icon, pips, rgba, KEYS};
@@ -70,11 +70,16 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
     let (w, h) = (c.w, c.h);
     c.fill_rect(0, 0, w, h, Rgba(6, 8, 18, 110));
     let name = "WANDFALL";
-    let k = pixels::fit_scale(name, w - 20 * ui, 7 * ui);
-    let top = h / 4;
+    // Everything under the name, so the name takes what room is left.
+    let s = (22 * ui).min((w - 24 * ui) / 10);
+    let rest = 30 * ui + 70 * ui + 32 * ui + 22 * ui + 2 * (s + s / 4) + 16 * ui;
+    let room = ((h - rest - 16 * ui) / 10).max(ui);
+    let k = pixels::fit_scale(name, w - 20 * ui, 7 * ui).min(room);
+    let top = ((h - 9 * k - rest) / 2).max(6 * ui);
     c.text_shadowed((w - pixels::text_width(name, k)) / 2, top, name, k, GOLD);
     let sub = "a wand battle royale";
-    c.text_centred(w / 2, top + 9 * k, sub, 2 * ui, INK);
+    let ks = pixels::fit_scale(sub, w - 16 * ui, 2 * ui);
+    c.text_centred(w / 2, top + 9 * k, sub, ks, INK);
     let bw = (220 * ui).min(w - 24 * ui) as f32;
     let x = (w as f32 - bw) / 2.0;
     let y = (top + 9 * k + 30 * ui) as f32;
@@ -97,15 +102,44 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
         Act::Practice,
         ui,
     );
-    let mut ty = y as i32 + 2 * bh as i32 + 30 * ui;
-    for line in [
-        note,
-        "drop on the island, find spells in chests,",
-        "outlast the storm: last wizard standing wins",
-    ] {
-        let k = pixels::fit_scale(line, w - 16 * ui, ui);
-        c.text_centred(w / 2, ty, line, k, DIM);
+    let mut ty = y as i32 + 2 * bh as i32 + 26 * ui;
+    let how =
+        "drop on the island, find spells in chests, outlast the storm: last wizard standing wins";
+    let half = pixels::text_width(how, ui) / 2 + 8 * ui;
+    for line in pixels::wrap(how, half.min(w - 16 * ui), ui) {
+        c.text_centred(w / 2, ty, &line, ui, DIM);
         ty += 11 * ui;
+    }
+    // The eight spells: what you hurt with, what you live by.
+    ty += 6 * ui;
+    let gap = s / 4;
+    for (label, row) in [("to hurt", spell::OFFENSE), ("to live", spell::UTILITY)] {
+        if ty + s > h - 14 * ui {
+            break;
+        }
+        let row_w = 4 * s + 3 * gap;
+        let x0 = (w - row_w) / 2;
+        c.text_shadowed(
+            x0 - pixels::text_width(label, ui) - 8 * ui,
+            ty + s / 2 - 3 * ui,
+            label,
+            ui,
+            DIM,
+        );
+        for (k, sp) in row.into_iter().enumerate() {
+            let b = Rect::new(
+                (x0 + k as i32 * (s + gap)) as f32,
+                ty as f32,
+                s as f32,
+                s as f32,
+            );
+            icon(c, sp, b);
+        }
+        ty += s + gap;
+    }
+    if ty + 8 * ui < h - 14 * ui {
+        let k = pixels::fit_scale(note, w - 16 * ui, ui);
+        c.text_centred(w / 2, h - 14 * ui, note, k, DIM.fade(0.7));
     }
 }
 
