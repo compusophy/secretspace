@@ -26,6 +26,18 @@ impl Wandfall {
         }
     }
 
+    /// The practice range, for a page to run itself.
+    pub fn practice(seed: u64) -> Wandfall {
+        let mut r = Wandfall::new(seed);
+        crate::practice::setup(&mut r.world);
+        r
+    }
+
+    /// The world, for the practice range's tools.
+    pub fn world(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     fn roster(&self) -> Vec<u8> {
         let list: Vec<(u16, bool, String)> = self
             .world

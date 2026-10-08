@@ -59,6 +59,8 @@ pub struct View<'a> {
     pub ui: i32,
     pub perf: Option<String>,
     pub touch: bool,
+    /// On the practice range (no match, no storm).
+    pub practice: bool,
 }
 
 fn clock(secs: u16) -> String {
@@ -102,6 +104,28 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             let col = if (s.hp as i32) * 3 < full { RED } else { INK };
             c.fill_rect(sx - bar / 2, sy, k, 2 * ui, col);
         }
+    }
+    // The numbers your hits do, rising off whom they struck.
+    for (k, &(at, to, amount)) in v.st.numbers.iter().enumerate() {
+        let Some(s) = v.others.iter().find(|s| s.id == to) else {
+            continue;
+        };
+        let age = (v.now - at) as f32 / 900.0;
+        let side = if k % 2 == 0 { 0.4 } else { -0.4 };
+        let (x, y, ww) = m4::project(&v.vp, [s.p[0] + side, s.p[1] + 2.2 + age * 1.2, s.p[2]]);
+        if ww <= 0.1 {
+            continue;
+        }
+        let sx = ((x / ww * 0.5 + 0.5) * w as f32) as i32;
+        let sy = ((0.5 - y / ww * 0.5) * h as f32) as i32;
+        let big = if amount >= 30 { 3 } else { 2 };
+        c.text_centred(
+            sx,
+            sy,
+            &format!("{amount}"),
+            big * ui,
+            GOLD.fade(1.0 - age * age),
+        );
     }
     // The crosshair, and a mark when your bolt lands.
     if v.me.is_some() {
@@ -157,6 +181,13 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     }
     // Top: the match.
     let top = match f.phase {
+        _ if v.practice => {
+            if v.touch {
+                "practice range - menu: spellbook".to_string()
+            } else {
+                "practice range - B spellbook - Esc menu".to_string()
+            }
+        }
         0 if f.secs > 0 => format!("the match begins in {}", f.secs),
         0 => "waiting for wizards".to_string(),
         1 => {
@@ -251,7 +282,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         )
     };
     let k = s as f32 / (2.0 * MAP_HALF);
-    if f.phase == 1 {
+    if f.phase == 1 && !v.practice {
         // A circle bigger than the island is not drawn past the map.
         let fits = |r: f32| r < MAP_HALF * 1.05;
         if fits(f.storm.1) {
@@ -311,24 +342,6 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     }
     if let Some(name) = &v.watching {
         c.text_centred(cx, h - 30 * ui, &format!("watching {name}"), ui, DIM);
-    }
-    if !v.locked && v.me.is_some() && !v.touch {
-        let b = Rect::new(
-            (cx - 120 * ui) as f32,
-            (mid - 10 * ui) as f32,
-            (240 * ui) as f32,
-            (60 * ui) as f32,
-        );
-        c.round_rect(b, 6.0 * ui as f32, SHADE);
-        c.text_centred(cx, mid, "click to play", 2 * ui, GOLD);
-        c.text_centred(
-            cx,
-            mid + 24 * ui,
-            "WASD move - space jump - click cast",
-            ui,
-            INK,
-        );
-        c.text_centred(cx, mid + 36 * ui, "last wizard standing wins", ui, DIM);
     }
     if let Some(p) = &v.perf {
         let tw = pixels::text_width(p, ui);

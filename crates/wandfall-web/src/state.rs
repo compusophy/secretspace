@@ -36,6 +36,8 @@ pub struct State {
     pub shows: Vec<(f64, Ev)>,
     /// When you last levelled, and to what.
     pub levelled: (f64, u8),
+    /// Your hits, to show their numbers: (when, on whom, how much).
+    pub numbers: Vec<(f64, u16, u16)>,
 }
 
 impl State {
@@ -71,9 +73,10 @@ impl State {
     pub fn events(&mut self, list: Vec<Ev>, now: f64) {
         for e in list {
             match e {
-                Ev::Hit { by, to, .. } => {
+                Ev::Hit { by, to, amount } => {
                     if by == self.you {
                         self.hit_at = now;
+                        self.numbers.push((now, to, amount));
                     }
                     if to == self.you {
                         self.hurt_at = now;
@@ -115,6 +118,7 @@ impl State {
         }
         self.bursts.retain(|b| now - b.0 < 600.0);
         self.shows.retain(|s| now - s.0 < 1600.0);
+        self.numbers.retain(|n| now - n.0 < 900.0);
     }
 
     /// Everyone as they were a moment ago, smoothly between frames.

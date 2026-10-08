@@ -67,6 +67,17 @@ impl Link {
         self.0.borrow().up
     }
 
+    /// Close for good: events from the socket are ignored from now on
+    /// (and nothing reconnects once the page stops polling).
+    pub fn close(&self) {
+        let mut i = self.0.borrow_mut();
+        i.gen += 1;
+        i.up = false;
+        if let Some(ws) = i.ws.take() {
+            let _ = ws.close();
+        }
+    }
+
     pub fn send(&self, bytes: &[u8]) {
         let inner = self.0.borrow();
         if let Some(ws) = inner.ws.as_ref().filter(|_| inner.up) {

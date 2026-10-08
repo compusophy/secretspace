@@ -8,6 +8,7 @@ pub mod bar;
 pub mod fx;
 pub mod hud;
 pub mod look;
+pub mod menu;
 pub mod state;
 pub mod touch;
 

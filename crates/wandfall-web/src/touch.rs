@@ -27,6 +27,7 @@ enum Button {
     Aim,
     Slot(usize),
     Take,
+    Menu,
 }
 
 /// A point in CSS pixels.
@@ -42,6 +43,8 @@ pub struct Touch {
     asked: u8,
     /// A scroll underfoot that needs asking for (shows the take button).
     pub can_take: bool,
+    /// The menu button was tapped (the page takes it).
+    pub menu: bool,
 }
 
 /// Where each button is, in CSS pixels: (button, x, y, radius).
@@ -65,6 +68,7 @@ fn layout(w: f64, h: f64, take: bool) -> Vec<(Button, f64, f64, f64)> {
     if take {
         v.push((Button::Take, w / 2.0, h * 0.62 + 40.0, 28.0));
     }
+    v.push((Button::Menu, w / 2.0, 58.0, 18.0));
     v
 }
 
@@ -84,6 +88,7 @@ impl Touch {
                         match b {
                             Button::Aim => self.aim = !self.aim,
                             Button::Slot(k) => self.asked |= cast::SLOT[k],
+                            Button::Menu => self.menu = true,
                             _ => {}
                         }
                         self.held.push((id, b));
@@ -218,6 +223,7 @@ impl Touch {
                 Button::Jump => label(c, "jump"),
                 Button::Aim => label(c, "aim"),
                 Button::Take => label(c, "take"),
+                Button::Menu => label(c, "menu"),
                 Button::Slot(k) => {
                     let Some((sp, rank)) = own.and_then(|o| o.slots[k]) else {
                         label(c, KEYS[k]);

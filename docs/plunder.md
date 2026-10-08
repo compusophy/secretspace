@@ -102,6 +102,17 @@ owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
       an arc about cast (icons, cooldowns), take when a scroll is underfoot.
       Health, level, XP and the feed move to the top left.
 
+### The practice range and the title (October 2026)
+- [x] A title screen (play online, or the practice range) over the island.
+- [x] The practice range runs in the page itself (the same core as the
+      server, no server needed): nine dummies about a ruin (some stand,
+      some strafe, two spar when asked), no storm, you are hurt only when
+      sparring, dummies stand again, chests are set out again.
+- [x] The spellbook (B): any spell at any rank in any slot, your level, no
+      cooldowns, dummies that fight back. Damage numbers on every hit.
+- [x] Online: the lobby lists who is waiting; Esc (or the touch menu
+      button) pauses, with leave to the title.
+
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.
 - The hub card (live preview), a results screen, a season of names.

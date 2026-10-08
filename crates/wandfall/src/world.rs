@@ -14,6 +14,7 @@ use crate::laws::*;
 use crate::loot::{self, Chest, Scroll};
 use crate::map::Map;
 use crate::motion::{self, cast, keys, Body, Input};
+use crate::practice::{self, Practice};
 use crate::spells::{self, Zone};
 use crate::storm::{self, Storm};
 use crate::trig;
@@ -156,6 +157,8 @@ pub struct World {
     /// Names changed: the room sends the roster again; and the loot.
     pub roster_dirty: bool,
     pub loot_dirty: bool,
+    /// The practice range (a page's own world): its tools and rules.
+    pub practice: Option<Practice>,
     pub(crate) rng: Rng,
     next_id: u16,
     pub(crate) next_bolt: u16,
@@ -180,6 +183,7 @@ impl World {
             matches: 0,
             roster_dirty: true,
             loot_dirty: true,
+            practice: None,
             rng: Rng::new(seed ^ 0xbad5eed),
             next_id: 1,
             next_bolt: 1,
@@ -214,7 +218,7 @@ impl World {
         }
     }
 
-    fn player(&mut self, name: &str, soul: u64, bot: bool) -> Player {
+    pub(crate) fn player(&mut self, name: &str, soul: u64, bot: bool) -> Player {
         let id = self.fresh_id();
         let body = self.standing();
         Player {
@@ -254,10 +258,13 @@ impl World {
 
     /// A person arrives: warming up in the lobby, or watching a fight.
     pub fn join(&mut self, name: &str, soul: u64) -> u16 {
+        if self.practice.is_some() {
+            return practice::arrive(self, name);
+        }
         let mut p = self.player(name, soul, false);
         p.alive = self.phase == Phase::Lobby;
         if p.alive {
-            practice(&mut p, &mut self.rng);
+            warmup(&mut p, &mut self.rng);
         }
         let id = p.id;
         self.players.push(p);
@@ -302,7 +309,7 @@ impl World {
 
     pub fn storm_now(&self) -> storm::Now {
         match self.phase {
-            Phase::Fight => self.storm.at(self.tick - self.began),
+            Phase::Fight if self.practice.is_none() => self.storm.at(self.tick - self.began),
             _ => storm::Now {
                 r: STORM_START,
                 next: ([0.0, 0.0], STORM_START),
@@ -357,7 +364,7 @@ impl World {
             p.alive = true;
             p.entrant = false;
             fresh(p);
-            practice(p, &mut self.rng);
+            warmup(p, &mut self.rng);
         }
         self.bolts.clear();
         self.zones.clear();
@@ -375,6 +382,9 @@ impl World {
     }
 
     fn out(&mut self, who: u16, by: u16, ev: &mut Vec<Event>) {
+        if self.practice.is_some() {
+            return practice::fallen(self, who, by, ev);
+        }
         let place = self.alive() as u16;
         let mut level = 1;
         if let Some(k) = self.players.iter().position(|p| p.id == who) {
@@ -401,6 +411,12 @@ impl World {
         if self.phase != Phase::Fight || amount <= 0 {
             return;
         }
+        // On the practice range you are hurt only when sparring.
+        if self.practice.as_ref().is_some_and(|r| !r.sparring)
+            && self.find(to).is_some_and(|p| !p.bot)
+        {
+            return;
+        }
         let tick = self.tick;
         let Some(p) = self
             .players
@@ -409,6 +425,8 @@ impl World {
         else {
             return;
         };
+        // What was really taken (not past the last of it) earns XP.
+        let dealt = amount.min(p.hp.max(0) + p.shield);
         let soaked = amount.min(p.shield);
         p.shield -= soaked;
         p.hp -= amount - soaked;
@@ -420,7 +438,7 @@ impl World {
                 to,
                 amount: amount as u16,
             });
-            loot::gain(self, by, (amount / XP_DAMAGE) as u32, ev);
+            loot::gain(self, by, (dealt / XP_DAMAGE) as u32, ev);
         }
         if dead {
             self.out(to, by, ev);
@@ -431,7 +449,11 @@ impl World {
     pub fn step(&mut self) -> Vec<Event> {
         let mut ev = Vec::new();
         self.tick += 1;
+        if self.practice.is_some() {
+            practice::step(self, &mut ev);
+        }
         match self.phase {
+            _ if self.practice.is_some() => {}
             Phase::Lobby if self.until != 0 && self.tick >= self.until => {
                 if self.humans() > 0 {
                     self.begin(&mut ev);
@@ -654,7 +676,7 @@ fn fresh(p: &mut Player) {
 }
 
 /// In the lobby, a spell of every slot to practise with (unhurt).
-fn practice(p: &mut Player, rng: &mut Rng) {
+pub(crate) fn warmup(p: &mut Player, rng: &mut Rng) {
     let mut pick = |from: &[u8]| from[(rng.next_u64() % from.len() as u64) as usize];
     let off = [spell::LANCE, spell::COMET, spell::CHAIN, spell::STARFALL];
     let util = [

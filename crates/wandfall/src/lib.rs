@@ -9,6 +9,7 @@ pub mod laws;
 pub mod loot;
 pub mod map;
 pub mod motion;
+pub mod practice;
 pub mod predict;
 pub mod proto;
 pub mod room;

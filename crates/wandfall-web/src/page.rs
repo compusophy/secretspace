@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 
+use engine::room::{Outbox, Room, Who};
 use engine::who::{Seen as Named, Status};
 use kit::input::{Hand, Hands};
 use kit::link::Net;
@@ -9,14 +10,17 @@ use render::{Camera, Frame, Renderer};
 use wandfall::laws::{BOLT_COOLDOWN, EYE, TICK_HZ};
 use wandfall::map::Map;
 use wandfall::motion::{cast, keys, Body, Input};
+use wandfall::practice;
 use wandfall::predict::Predict;
 use wandfall::proto::{self, flag, Up, PROTO};
+use wandfall::room::Wandfall;
 use wandfall::trig;
 use wasm_bindgen::prelude::*;
 
 use crate::fx::{self, Draw};
 use crate::hud;
 use crate::look::{self, Look};
+use crate::menu::{self, Act, Spots};
 use crate::state::State;
 use crate::touch::Touch;
 
@@ -29,6 +33,17 @@ const FOV: f32 = 1.2;
 /// The field of view aiming down the wand.
 const AIM_FOV: f32 = 0.72;
 const VERSION_EVERY: f64 = 5.0 * 60_000.0;
+/// The practice range's island (and the title's).
+const PRACTICE_SEED: u64 = 0x5eed_0007;
+/// The page's own connection to its practice world.
+const ME: u32 = 1;
+
+/// Where the page is: the title, a match online, or its own practice range.
+enum Mode {
+    Title,
+    Online(kit::Link),
+    Practice(Box<Wandfall>),
+}
 
 struct Island {
     map: Map,
@@ -61,7 +76,16 @@ struct Page {
     cast_at: f64,
     cool: u32,
     hands: Hands,
-    link: kit::Link,
+    mode: Mode,
+    /// Messages from the practice world, to read like the server's.
+    inbox: Vec<Vec<u8>>,
+    /// Time not yet ticked in the practice world (ms).
+    local: f64,
+    spots: Spots,
+    /// The spellbook is open, at this slot; the pause menu is (touch).
+    book: bool,
+    book_slot: usize,
+    paused: bool,
     session: kit::Session,
     version: kit::Version,
     last: f64,
@@ -89,72 +113,239 @@ fn say(text: &str) {
     }
 }
 
-fn send(p: &Page, up: &Up) {
-    p.link.send(&up.encode());
+fn send(p: &mut Page, up: &Up) {
+    let bytes = up.encode();
+    match &mut p.mode {
+        Mode::Online(link) => link.send(&bytes),
+        Mode::Practice(room) => {
+            let mut out = Outbox::default();
+            room.message(ME, &bytes, &mut out);
+            p.inbox.extend(out.0.into_iter().map(|m| m.1));
+        }
+        Mode::Title => {}
+    }
 }
 
-fn net(p: &mut Page, now: f64) {
-    for ev in p.link.poll(now) {
-        match ev {
-            Net::Up => send(p, &Up::Join { proto: PROTO }),
-            Net::Holding => {}
-            Net::Message(b) => {
-                if let Some(seen) = Named::decode(&b) {
-                    if seen.status != Status::Taken && !seen.name.is_empty() {
-                        p.session.set_name(&seen.name);
-                        p.link.set_hello(p.session.hello(&seen.name, false));
-                    }
-                    continue;
-                }
-                if let Some((v, you, seed, _)) = proto::read_welcome(&b) {
-                    if v != PROTO {
-                        kit::version::reload();
-                        return;
-                    }
-                    p.st.you = you;
-                    p.st.joined = you != 0;
-                    if p.st.seed != Some(seed) {
-                        p.st.seed = Some(seed);
-                        let map = Map::new(seed);
-                        let look = Look::new(&mut p.r, &map);
-                        let mini = hud::island(&map);
-                        p.island = Some(Island { map, look, mini });
-                    }
-                    continue;
-                }
-                if let Some(list) = proto::read_roster(&b) {
-                    p.st.names = list
-                        .into_iter()
-                        .map(|(id, bot, n)| (id, (n, bot)))
-                        .collect();
-                    continue;
-                }
-                if let Some(list) = proto::read_events(&b) {
-                    p.st.events(list, now);
-                    continue;
-                }
-                if let Some(l) = proto::Loot::decode(&b) {
-                    p.st.loot = l;
-                    continue;
-                }
-                if let Some(f) = proto::Frame::decode(&b) {
-                    match (&f.you, &p.island) {
-                        (Some(own), Some(i)) => {
-                            if !p.alive {
-                                p.pred.reset(own.body);
-                                p.prev = own.body;
-                                p.alive = true;
-                            } else {
-                                p.pred.confirm(own.body, own.seq, &i.map);
-                            }
-                        }
-                        _ => p.alive = false,
-                    }
-                    p.st.take(f, now);
+fn net(p: &mut Page, now: f64, dt: f64) {
+    let mut got = std::mem::take(&mut p.inbox);
+    let mut up = false;
+    match &mut p.mode {
+        Mode::Online(link) => {
+            for ev in link.poll(now) {
+                match ev {
+                    Net::Up => up = true,
+                    Net::Holding => {}
+                    Net::Message(b) => got.push(b),
                 }
             }
         }
+        Mode::Practice(room) => {
+            p.local = (p.local + dt).min(MS_A_TICK * 6.0);
+            while p.local >= MS_A_TICK {
+                p.local -= MS_A_TICK;
+                let mut out = Outbox::default();
+                room.tick(&mut out);
+                got.extend(out.0.into_iter().map(|m| m.1));
+            }
+        }
+        Mode::Title => {}
     }
+    if up {
+        send(p, &Up::Join { proto: PROTO });
+    }
+    for b in got {
+        receive(p, &b, now);
+    }
+}
+
+fn receive(p: &mut Page, b: &[u8], now: f64) {
+    if let Some(seen) = Named::decode(b) {
+        if seen.status != Status::Taken && !seen.name.is_empty() {
+            p.session.set_name(&seen.name);
+            if let Mode::Online(link) = &p.mode {
+                link.set_hello(p.session.hello(&seen.name, false));
+            }
+        }
+        return;
+    }
+    if let Some((v, you, seed, _)) = proto::read_welcome(b) {
+        if v != PROTO {
+            kit::version::reload();
+            return;
+        }
+        p.st.you = you;
+        p.st.joined = you != 0;
+        island(p, seed);
+        return;
+    }
+    if let Some(list) = proto::read_roster(b) {
+        p.st.names = list
+            .into_iter()
+            .map(|(id, bot, n)| (id, (n, bot)))
+            .collect();
+        return;
+    }
+    if let Some(list) = proto::read_events(b) {
+        p.st.events(list, now);
+        return;
+    }
+    if let Some(l) = proto::Loot::decode(b) {
+        p.st.loot = l;
+        return;
+    }
+    if let Some(f) = proto::Frame::decode(b) {
+        match (&f.you, &p.island) {
+            (Some(own), Some(i)) => {
+                if !p.alive {
+                    p.pred.reset(own.body);
+                    p.prev = own.body;
+                    p.alive = true;
+                } else {
+                    p.pred.confirm(own.body, own.seq, &i.map);
+                }
+            }
+            _ => p.alive = false,
+        }
+        p.st.take(f, now);
+    }
+}
+
+/// The island of this seed, built if it is not the one already here.
+fn island(p: &mut Page, seed: u64) {
+    if p.st.seed == Some(seed) && p.island.is_some() {
+        return;
+    }
+    p.st.seed = Some(seed);
+    if let Some(old) = p.island.take() {
+        old.look.free(&mut p.r);
+    }
+    let map = Map::new(seed);
+    let look = Look::new(&mut p.r, &map);
+    let mini = hud::island(&map);
+    p.island = Some(Island { map, look, mini });
+}
+
+/// Start over in a new place: nothing known, nobody you.
+fn fresh(p: &mut Page) {
+    let seed = p.st.seed;
+    p.st = State::default();
+    p.st.seed = seed;
+    p.alive = false;
+    p.book = false;
+    p.paused = false;
+    p.inbox.clear();
+    p.pred.reset(Body::default());
+}
+
+fn leave(p: &mut Page) {
+    if let Mode::Online(link) = &p.mode {
+        link.close();
+    }
+    p.mode = Mode::Title;
+    fresh(p);
+    island(p, PRACTICE_SEED);
+    kit::input::unlock();
+}
+
+fn online(p: &mut Page) {
+    leave(p);
+    let link = kit::Link::open("wandfall", p.session.hello(&p.session.name(), false), false);
+    p.mode = Mode::Online(link);
+    if !p.touch {
+        kit::input::lock(p.g.canvas());
+    }
+}
+
+fn practise(p: &mut Page) {
+    leave(p);
+    let mut room = Box::new(Wandfall::practice(PRACTICE_SEED));
+    let name = Some(p.session.name())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "you".to_string());
+    let who = Who {
+        name,
+        ..Who::default()
+    };
+    let mut out = Outbox::default();
+    room.open(ME, &who, &mut out);
+    p.inbox.extend(out.0.into_iter().map(|m| m.1));
+    p.mode = Mode::Practice(room);
+    send(p, &Up::Join { proto: PROTO });
+    if !p.touch {
+        kit::input::lock(p.g.canvas());
+    }
+}
+
+/// A menu button pressed.
+fn act(p: &mut Page, a: Act) {
+    let you = p.st.you;
+    let own = p.st.frame.as_ref().and_then(|f| f.you);
+    match a {
+        Act::Online => online(p),
+        Act::Practice => practise(p),
+        Act::Leave => leave(p),
+        Act::Resume => {
+            p.paused = false;
+            if !p.touch {
+                kit::input::lock(p.g.canvas());
+            }
+        }
+        Act::Book => {
+            p.book = true;
+            p.paused = false;
+            kit::input::unlock();
+        }
+        Act::CloseBook => {
+            p.book = false;
+            if !p.touch {
+                kit::input::lock(p.g.canvas());
+            }
+        }
+        Act::Slot(k) => p.book_slot = k,
+        _ => {
+            let Mode::Practice(room) = &mut p.mode else {
+                return;
+            };
+            let w = room.world();
+            let slot = p.book_slot;
+            let held = own.and_then(|o| o.slots[slot]);
+            match a {
+                Act::Spell(sp) => {
+                    practice::equip(w, you, slot, sp, held.map_or(1, |h| h.1));
+                }
+                Act::Rank(r) => {
+                    if let Some((sp, _)) = held {
+                        practice::equip(w, you, slot, sp, r);
+                    }
+                }
+                Act::Level(d) => {
+                    let level = own.map_or(1, |o| o.level) as i8;
+                    let to = if d == 20 {
+                        20
+                    } else {
+                        (level + d).clamp(1, 20)
+                    };
+                    practice::set_level(w, you, to as u8);
+                }
+                Act::NoCooldowns => {
+                    if let Some(r) = w.practice.as_mut() {
+                        r.no_cooldowns = !r.no_cooldowns;
+                    }
+                }
+                Act::Sparring => {
+                    if let Some(r) = w.practice.as_mut() {
+                        r.sparring = !r.sparring;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Whether a menu is up (the title, the spellbook, or paused).
+fn in_menu(p: &Page) -> bool {
+    matches!(p.mode, Mode::Title) || p.book || p.paused || (!p.touch && !kit::input::locked())
 }
 
 fn hands(p: &mut Page) {
@@ -170,6 +361,17 @@ fn hands(p: &mut Page) {
             Hand::Button {
                 button: 2, down, ..
             } => p.aiming = down && locked,
+            Hand::Finger {
+                kind: kit::input::Kind::Down,
+                x,
+                y,
+                ..
+            } if p.touch && in_menu(p) => {
+                let (lx, ly) = p.g.to_px(x, y);
+                if let Some(a) = p.spots.hit(lx, ly) {
+                    act(p, a);
+                }
+            }
             Hand::Finger { id, kind, x, y, .. } if p.touch => {
                 let (dy, dp) = p.pad.finger(id, kind, x, y, p.g.css);
                 let k = p.fov / FOV;
@@ -177,10 +379,22 @@ fn hands(p: &mut Page) {
                 p.pitch = (p.pitch + dp * k).clamp(-1.5, 1.5);
             }
             Hand::Button {
-                button: 0, down, ..
+                button: 0,
+                down,
+                x,
+                y,
+                ..
             } => {
                 if down && !locked && !p.touch {
-                    kit::input::lock(p.g.canvas());
+                    let (lx, ly) = p.g.to_px(x, y);
+                    match p.spots.hit(lx, ly) {
+                        Some(a) => act(p, a),
+                        // Off the buttons, in a game, with no book open: play.
+                        None if !matches!(p.mode, Mode::Title) && !p.book => {
+                            kit::input::lock(p.g.canvas());
+                        }
+                        None => {}
+                    }
                 } else {
                     p.firing = down && locked;
                 }
@@ -194,7 +408,14 @@ fn hands(p: &mut Page) {
         p.firing = false;
         p.aiming = false;
     }
+    if std::mem::take(&mut p.pad.menu) {
+        p.paused = !p.paused;
+    }
     for code in p.hands.pressed() {
+        if code == "KeyB" && matches!(p.mode, Mode::Practice(_)) {
+            act(p, if p.book { Act::CloseBook } else { Act::Book });
+            continue;
+        }
         let slot = match code.as_str() {
             "KeyQ" | "Digit1" => 0,
             "KeyE" | "Digit2" => 1,
@@ -215,7 +436,12 @@ fn inputs(p: &mut Page, dt: f64) {
         return;
     };
     p.acc = (p.acc + dt).min(MS_A_TICK * 6.0);
-    let held = |k: &str| p.hands.held(k);
+    if matches!(p.mode, Mode::Title) {
+        p.acc = 0.0;
+        return;
+    }
+    let busy = p.book || p.paused;
+    let held = |k: &str| p.hands.held(k) && !busy;
     let mut k = 0;
     if held("KeyW") || held("ArrowUp") {
         k |= keys::FWD;
@@ -239,7 +465,7 @@ fn inputs(p: &mut Page, dt: f64) {
         k |= keys::AIM;
     }
     let mut take = if held("KeyG") { cast::TAKE } else { 0 };
-    if p.touch {
+    if p.touch && !busy {
         k |= p.pad.keys();
         take |= p.pad.casts();
     }
@@ -265,7 +491,8 @@ fn inputs(p: &mut Page, dt: f64) {
         }
         p.outbox.push(i);
     }
-    for chunk in std::mem::take(&mut p.outbox).chunks(proto::MAX_INPUTS) {
+    let out = std::mem::take(&mut p.outbox);
+    for chunk in out.chunks(proto::MAX_INPUTS) {
         send(p, &Up::Inputs(chunk.to_vec()));
     }
 }
@@ -276,7 +503,7 @@ fn frame(p: &mut Page, now: f64) {
     if dt > 0.0 {
         p.fps += (1000.0 / dt - p.fps) * 0.05;
     }
-    net(p, now);
+    net(p, now, dt);
     hands(p);
     inputs(p, dt);
     p.version.poll(now, false);
@@ -383,7 +610,7 @@ fn frame(p: &mut Page, now: f64) {
         };
         fx::shows(&i.look, &mut d, &p.st.shows, now, at_of);
         if let Some(f) = &p.st.frame {
-            if f.phase == 1 {
+            if f.phase == 1 && !matches!(p.mode, Mode::Practice(_)) {
                 i.look.storm(&mut d.items, f.storm.0, f.storm.1);
                 let e = cam.eye;
                 in_storm = p.alive
@@ -431,42 +658,74 @@ fn frame(p: &mut Page, now: f64) {
     let ui = p.g.ui();
     let me = p.alive.then_some((p.pred.body.p, p.yaw));
     p.g.hud.wipe();
-    if let Some(i) = &p.island {
-        let view = hud::View {
-            st: &p.st,
-            frame: p.st.frame.as_ref(),
-            others: &others,
-            vp,
-            me,
-            own: p.st.frame.as_ref().and_then(|f| f.you.as_ref()),
-            watching,
-            locked: kit::input::locked(),
-            in_storm,
-            now,
-            ui,
-            perf: perf.clone(),
-            touch: p.touch,
-        };
-        hud::draw(&mut p.g.hud, &i.mini, &view);
-        if p.touch && p.alive {
-            let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
-            let me = p.pred.body.p;
-            p.pad.can_take =
-                p.st.loot
-                    .scrolls
-                    .iter()
-                    .any(|s| (s.3[0] - me[0]).powi(2) + (s.3[2] - me[2]).powi(2) < 2.5);
-            p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);
+    p.spots = Spots::default();
+    let practice = matches!(p.mode, Mode::Practice(_));
+    match (&p.island, &p.mode) {
+        (Some(_), Mode::Title) => {
+            let note = "the island is drawn by the secretspace engine, on WebGPU";
+            menu::title(&mut p.g.hud, &mut p.spots, ui, note);
         }
-    } else {
-        let c = &mut p.g.hud;
-        c.text_centred(
-            c.w / 2,
-            c.h / 2,
-            "finding the island...",
-            2 * ui,
-            pixels::Rgba::rgb(250, 246, 236),
-        );
+        (Some(i), _) => {
+            let view = hud::View {
+                st: &p.st,
+                frame: p.st.frame.as_ref(),
+                others: &others,
+                vp,
+                me,
+                own: p.st.frame.as_ref().and_then(|f| f.you.as_ref()),
+                watching,
+                locked: kit::input::locked(),
+                in_storm,
+                now,
+                ui,
+                perf: perf.clone(),
+                touch: p.touch,
+                practice,
+            };
+            hud::draw(&mut p.g.hud, &i.mini, &view);
+            let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
+            if p.touch && p.alive && !p.book && !p.paused {
+                let me = p.pred.body.p;
+                p.pad.can_take =
+                    p.st.loot
+                        .scrolls
+                        .iter()
+                        .any(|s| (s.3[0] - me[0]).powi(2) + (s.3[2] - me[2]).powi(2) < 2.5);
+                p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);
+            }
+            // The online lobby: who is waiting.
+            if !practice && p.st.frame.as_ref().is_some_and(|f| f.phase == 0) {
+                let names: Vec<String> =
+                    p.st.names
+                        .values()
+                        .filter(|n| !n.1)
+                        .map(|n| n.0.clone())
+                        .collect();
+                menu::lobby(&mut p.g.hud, ui, &names);
+            }
+            if p.book {
+                if let (Some(o), Mode::Practice(room)) = (own, &mut p.mode) {
+                    let rules = room
+                        .world()
+                        .practice
+                        .as_ref()
+                        .map_or((false, false), |r| (r.no_cooldowns, r.sparring));
+                    menu::book(&mut p.g.hud, &mut p.spots, ui, o, p.book_slot, rules);
+                }
+            } else if p.paused || (!p.touch && !kit::input::locked()) {
+                menu::pause(&mut p.g.hud, &mut p.spots, ui, practice, p.touch);
+            }
+        }
+        (None, _) => {
+            let c = &mut p.g.hud;
+            c.text_centred(
+                c.w / 2,
+                c.h / 2,
+                "finding the island...",
+                2 * ui,
+                pixels::Rgba::rgb(250, 246, 236),
+            );
+        }
     }
     p.g.present(fr);
     if let Some(line) = perf {
@@ -492,7 +751,6 @@ pub fn start() {
         };
         let r = Renderer::new(&g.device, &g.queue, g.format());
         let session = kit::Session::load();
-        let link = kit::Link::open("wandfall", session.hello(&session.name(), false), false);
         let hands = Hands::attach(g.canvas());
         PAGE.with(|p| {
             *p.borrow_mut() = Some(Page {
@@ -516,7 +774,13 @@ pub fn start() {
                 cast_at: -1e9,
                 cool: 0,
                 hands,
-                link,
+                mode: Mode::Title,
+                inbox: Vec::new(),
+                local: 0.0,
+                spots: Spots::default(),
+                book: false,
+                book_slot: 0,
+                paused: false,
                 session,
                 version: kit::Version::watch(VERSION_EVERY),
                 last: kit::now(),
@@ -524,6 +788,15 @@ pub fn start() {
                 perf: query("perf=1"),
                 touch: kit::touch(),
             })
+        });
+        PAGE.with(|p| {
+            if let Some(p) = p.borrow_mut().as_mut() {
+                island(p, PRACTICE_SEED);
+                // `?practice` goes straight to the range.
+                if query("practice") {
+                    practise(p);
+                }
+            }
         });
         kit::frames(|now| {
             PAGE.with(|p| {

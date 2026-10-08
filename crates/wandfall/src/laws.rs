@@ -251,3 +251,22 @@ pub const MEND_TICKS: u32 = 120;
 pub const GUST_RADIUS: f32 = 6.5;
 pub const GUST_PUSH: f32 = 15.0;
 pub const GUST_LIFT: f32 = 7.0;
+
+// The practice range: dummies about where you start (metres away,
+// degrees round, and how they behave: 1 stands, 2 strafes, 3 spars when
+// sparring is on), how soon they stand again, and how soon a hurt one is
+// whole; chests are set out again this often.
+pub const DUMMIES: [(f32, f32, u8); 9] = [
+    (12.0, 0.0, 1),
+    (16.0, 40.0, 1),
+    (22.0, 80.0, 1),
+    (30.0, 120.0, 1),
+    (14.0, 200.0, 2),
+    (20.0, 250.0, 2),
+    (26.0, 300.0, 2),
+    (34.0, 160.0, 3),
+    (34.0, 340.0, 3),
+];
+pub const DUMMY_RESPAWN: u32 = 60;
+pub const DUMMY_WHOLE: u32 = 60;
+pub const PRACTICE_CHESTS_EVERY: u32 = 120 * TICK_HZ;

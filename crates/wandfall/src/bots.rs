@@ -27,6 +27,9 @@ pub struct Mind {
     pub goal_at: u32,
     /// Where it stood a second ago (to know when it is stuck).
     pub was: [f32; 3],
+    /// A practice dummy: 0 not one, 1 stands, 2 strafes, 3 spars when
+    /// sparring is on (and strafes when not).
+    pub dummy: u8,
 }
 
 impl Mind {
@@ -47,6 +50,44 @@ fn unit(seed: u64, tick: u32, k: u64) -> f32 {
 pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
     let me = &w.players[k];
     let mut m = me.mind;
+    let sparring = w.practice.as_ref().is_some_and(|p| p.sparring);
+    match m.dummy {
+        1 => {
+            return (
+                Input {
+                    yaw: me.yaw,
+                    ..Input::default()
+                },
+                m,
+            )
+        }
+        2 | 3 if !(m.dummy == 3 && sparring) => {
+            // Side to side, turning now and then.
+            if tick >= m.strafe_until {
+                m.strafe = if m.strafe > 0 { -1 } else { 1 };
+                m.strafe_until = tick + 35 + (unit(m.seed, tick, 30) * 40.0) as u32;
+            }
+            let keys = if m.strafe > 0 {
+                keys::RIGHT
+            } else {
+                keys::LEFT
+            };
+            let jump = if unit(m.seed, tick, 31) < 0.01 {
+                keys::JUMP
+            } else {
+                0
+            };
+            return (
+                Input {
+                    yaw: me.yaw,
+                    keys: keys | jump,
+                    ..Input::default()
+                },
+                m,
+            );
+        }
+        _ => {}
+    }
     let eye = me.eye();
     let chest = |p: &crate::world::Player| [p.body.p[0], p.body.p[1] + 1.1, p.body.p[2]];
     // Who it can see.

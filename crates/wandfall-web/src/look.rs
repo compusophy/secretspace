@@ -23,6 +23,8 @@ pub struct Look {
     pub chest: Mesh,
     pub lid: Mesh,
     pub roots: Mesh,
+    /// The island's own meshes (ground, trees, rocks, pillars).
+    pub held: Vec<Mesh>,
 }
 
 /// A wizard's colour from its id.
@@ -190,7 +192,11 @@ impl Look {
             }
         }
         r.statics(statics);
+        let mut held = vec![ground, trunk, pines, pillar, cap];
+        held.extend(crowns);
+        held.extend(rocks);
         Look {
+            held,
             sea: one(r, |g| {
                 g.floor((-1.0, -1.0), (1.0, 1.0), 0.0, rgb(60, 120, 160), 0.15)
             }),
@@ -299,6 +305,27 @@ impl Look {
                 g.column([0.0; 3], 64, (1.0, 1.0), 1.0, 0.0, STORM, 0.5, false);
             }),
         }
+    }
+
+    /// Let every mesh go (another island takes this one's place).
+    pub fn free(self, r: &mut Renderer) {
+        let all = [
+            self.sea,
+            self.robe,
+            self.hat,
+            self.body,
+            self.glider,
+            self.orb,
+            self.rod,
+            self.wall,
+            self.chest,
+            self.lid,
+            self.roots,
+        ];
+        for m in all.into_iter().chain(self.held) {
+            r.free(m);
+        }
+        r.statics(Vec::new());
     }
 
     pub fn sea(&self, items: &mut Vec<Item>, t: f32) {
