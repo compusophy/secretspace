@@ -312,7 +312,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     }
     // The feed: under the island map, or (on a touch screen, whose right
     // side is the thumb's) under your health.
-    let mut y = if v.touch { 74 * ui } else { my + s + 8 * ui };
+    let mut y = if v.touch { 74 * ui } else { my + s + 20 * ui };
     for (at, line) in &v.st.feed {
         let age = v.now - at;
         if age > 8000.0 {
