@@ -213,11 +213,12 @@ impl Map {
             })
     }
 
-    /// Move a wizard at `p` (feet) out of anything standing there.
-    pub fn push_out(&self, p: &mut [f32; 3]) {
+    /// Move a wizard at `p` (feet), `tall` metres tall, out of anything
+    /// standing there.
+    pub fn push_out(&self, p: &mut [f32; 3], tall: f32) {
         let hits: Vec<Prop> = self.near(p[0], p[2], RADIUS).copied().collect();
         for q in hits {
-            if p[1] > q.y + q.h || p[1] + HEIGHT < q.y {
+            if p[1] > q.y + q.h || p[1] + tall < q.y {
                 continue;
             }
             let (dx, dz) = (p[0] - q.x, p[2] - q.z);
@@ -318,7 +319,7 @@ mod tests {
         let m = Map::new(3);
         let q = *m.props.iter().find(|p| p.kind == Kind::Rock).unwrap();
         let mut p = [q.x + 0.1, q.y + 0.2, q.z];
-        m.push_out(&mut p);
+        m.push_out(&mut p, HEIGHT);
         let d = ((p[0] - q.x).powi(2) + (p[2] - q.z).powi(2)).sqrt();
         assert!(d >= q.r + RADIUS - 1e-4);
         let a = [q.x - 3.0, q.y + q.h * 0.5, q.z];

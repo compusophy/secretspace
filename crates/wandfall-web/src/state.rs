@@ -41,6 +41,8 @@ pub struct State {
     pub out_with: u8,
     /// Yourself as you last were alive (for the card when you are out).
     pub last_own: Option<proto::Own>,
+    /// Dust where wizards landed: (when, where, how hard).
+    pub dust: Vec<(f64, [f32; 3], f32)>,
     /// Where wizards fell: (when, where, who, facing which way).
     pub falls: Vec<(f64, [f32; 3], u16, u16)>,
     /// What last hurt each wizard.
@@ -177,6 +179,7 @@ impl State {
         self.shows.retain(|s| now - s.0 < 4000.0);
         self.numbers.retain(|n| now - n.0 < 900.0);
         self.falls.retain(|f| now - f.0 < 4000.0);
+        self.dust.retain(|d| now - d.0 < 800.0);
     }
 
     /// Everyone as they were a moment ago, smoothly between frames.

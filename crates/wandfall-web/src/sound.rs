@@ -33,6 +33,8 @@ pub struct Sounds {
     level: usize,
     chest: usize,
     take: usize,
+    hop: usize,
+    thud: usize,
 }
 
 fn wand() -> Vec<f32> {
@@ -501,6 +503,44 @@ fn chest() -> Vec<f32> {
     s.done(0.45)
 }
 
+fn hop() -> Vec<f32> {
+    let mut s = Synth::new(0.22);
+    s.noise(
+        (0.0, 0.2),
+        Env::new(0.8, 0.01, 0.05),
+        (500.0, 900.0),
+        (1800.0, 3200.0),
+        0.0,
+    )
+    .tone(
+        Sine,
+        (220.0, 420.0),
+        (0.0, 0.12),
+        Env::new(0.3, 0.005, 0.04),
+        STILL,
+    );
+    s.done(0.35)
+}
+
+fn thud() -> Vec<f32> {
+    let mut s = Synth::new(0.3);
+    s.tone(
+        Sine,
+        (130.0, 45.0),
+        (0.0, 0.2),
+        Env::new(1.0, 0.002, 0.05),
+        STILL,
+    )
+    .noise(
+        (0.0, 0.18),
+        Env::new(0.7, 0.002, 0.04),
+        (60.0, 60.0),
+        (900.0, 300.0),
+        0.2,
+    );
+    s.done(0.6)
+}
+
 fn take() -> Vec<f32> {
     let mut s = Synth::new(0.35);
     s.tone(
@@ -560,6 +600,8 @@ impl Sounds {
             level: add(level()),
             chest: add(chest()),
             take: add(take()),
+            hop: add(hop()),
+            thud: add(thud()),
             audio,
         }
     }
@@ -646,6 +688,16 @@ impl Sounds {
 
     pub fn take(&self) {
         self.audio.play(self.take, 0.7, 0.0, 1.0);
+    }
+
+    /// Your feet leave the ground; meet it again, `hard` (0 to 1) hard.
+    pub fn hop(&self) {
+        self.audio.play(self.hop, 0.45, 0.0, 1.0);
+    }
+
+    pub fn thud(&self, hard: f32) {
+        self.audio
+            .play(self.thud, 0.3 + 0.7 * hard, 0.0, 1.1 - 0.25 * hard);
     }
 
     /// What these events sound like, heard by `me` (`alive`: your own

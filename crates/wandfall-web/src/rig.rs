@@ -111,13 +111,26 @@ pub struct Anim {
     pub side: f32,
     /// 0 on the ground, 1 in the air.
     pub air: f32,
+    /// Crouched (0 to 1, eased), and the squat of a landing (1 a hard
+    /// one, easing away).
+    pub crouch: f32,
+    pub land: f32,
+    /// Seconds in the air so far.
+    aloft: f32,
     last: V3,
     seen: bool,
 }
 
 impl Anim {
-    /// Watch it at `p`, facing `yaw`, `dt` seconds on.
-    pub fn step(&mut self, p: V3, yaw: f32, ground: bool, dt: f32) {
+    /// Watch it at `p`, facing `yaw`, crouched or not, `dt` seconds on.
+    /// A landing says how hard it was (0 to 1).
+    pub fn step(
+        &mut self,
+        p: V3,
+        yaw: f32,
+        (ground, crouch): (bool, bool),
+        dt: f32,
+    ) -> Option<f32> {
         if !self.seen {
             self.last = p;
             self.seen = true;
@@ -140,8 +153,27 @@ impl Anim {
         }
         let up = if ground { 0.0 } else { 1.0 };
         self.air += (up - self.air) * (1.0 - (-dt * 8.0).exp());
+        let low = if crouch { 1.0 } else { 0.0 };
+        self.crouch += (low - self.crouch) * (1.0 - (-dt * 12.0).exp());
+        self.land *= (-dt * 9.0).exp();
         self.last = p;
+        // Down again after a while up: how hard, by how long it fell.
+        let landed = if ground && self.aloft > 0.25 {
+            let hard = ((self.aloft - 0.2) / 0.8).clamp(0.15, 1.0);
+            self.land = self.land.max(hard);
+            Some(hard)
+        } else {
+            None
+        };
+        self.aloft = if ground { 0.0 } else { self.aloft + dt };
+        landed
     }
+}
+
+/// How far the hips must drop for the feet to stay on the ground with the
+/// thighs forward by `thigh` and the knees bent by `knee`.
+fn drop(thigh: f32, knee: f32) -> f32 {
+    HIP - THIGH * thigh.cos() - 0.48 * (thigh - knee).cos()
 }
 
 /// What it is doing this frame, besides moving.
@@ -484,13 +516,20 @@ impl Rig {
             walk(k * (0.12 + 0.85 * c.max(0.0))) + air * 1.0 + 0.04,
             walk(k * (0.12 + 0.85 * (-c).max(0.0))) + air * 0.8 + 0.04,
         ];
+        // Crouched, and squatting from a landing: bent low, feet planted.
+        let low = (a.crouch + a.land * 0.7).min(1.4);
+        let (bend_t, bend_k) = (1.2 * low, 2.0 * low);
+        let stride = 1.0 - 0.4 * a.crouch;
+        let thigh = [thigh[0] * stride + bend_t, thigh[1] * stride + bend_t];
+        let knee = [knee[0] * stride + bend_k, knee[1] * stride + bend_k];
+        let sink = drop(bend_t, bend_k) * (1.0 - air);
         let flinch = p.flash;
         let rest = 0.5;
         let up = FRAC_PI_2 + p.aim.clamp(-1.0, 1.0);
         let cast = rest + (up - rest) * p.arm.clamp(0.0, 1.0) + 0.25 * p.tip.1;
         Joints {
-            bob: walk(0.045 * k * (0.5 + 0.5 * (2.0 * ph).cos())) + air * 0.05,
-            lean: 0.16 * (a.fwd / 7.0).clamp(-0.6, 1.0) - 0.35 * flinch,
+            bob: walk(0.045 * k * (0.5 + 0.5 * (2.0 * ph).cos())) + air * 0.05 - sink,
+            lean: 0.16 * (a.fwd / 7.0).clamp(-0.6, 1.0) - 0.35 * flinch + 0.3 * low,
             roll: -0.12 * (a.side / 7.0).clamp(-1.0, 1.0),
             breathe: 1.0 + 0.015 * (p.t * 2.4 + id as f32).sin(),
             thigh,
@@ -498,7 +537,10 @@ impl Rig {
             stride: a.side.atan2(a.fwd.abs().max(0.01)),
             skirt: (-0.14 * (a.fwd / 7.0).clamp(-0.6, 1.0), walk(0.05 * k * s)),
             arm: [
-                (0.12 - walk(0.5 * k * s) + air * 0.3, 0.12 + air * 0.6),
+                (
+                    0.12 - walk(0.5 * k * s) + air * 0.3 + 0.4 * low,
+                    0.12 + air * 0.6 + 0.25 * a.land,
+                ),
                 (cast + walk(0.2 * k * s) * (1.0 - p.arm), 0.05 + air * 0.3),
             ],
             nod: 0.5 * p.aim.clamp(-0.9, 0.9) - 0.3 * flinch,
@@ -687,7 +729,12 @@ mod tests {
         assert!(still.thigh[0].abs() < 1e-3 && still.thigh[1].abs() < 1e-3);
         // Run east for a second.
         for k in 0..60 {
-            a.step([k as f32 * 7.0 / 60.0, 0.0, 0.0], 0.0, true, 1.0 / 60.0);
+            a.step(
+                [k as f32 * 7.0 / 60.0, 0.0, 0.0],
+                0.0,
+                (true, false),
+                1.0 / 60.0,
+            );
         }
         assert!(a.fwd > 6.0 && a.side.abs() < 0.5, "{a:?}");
         let mut seen = (false, false);
@@ -736,6 +783,31 @@ mod tests {
         let tip = point(&f.arms[1], [0.0, -1.02, 0.0]);
         let shoulder = point(&f.arms[1], [0.0; 3]);
         assert!(tip[0] - shoulder[0] > 0.9, "the wand points ahead: {tip:?}");
+    }
+
+    #[test]
+    fn crouched_or_landing_its_feet_stay_on_the_ground() {
+        let mut a = Anim {
+            crouch: 1.0,
+            ..Anim::default()
+        };
+        let j = Rig::joints(&a, &pose(), 1);
+        let f = frames([0.0; 3], 0.0, &j);
+        let head = point(&f.head, [0.0, 0.14, 0.0]);
+        assert!(head[1] < 1.2, "crouched low: {head:?}");
+        for k in &f.knees {
+            let sole = point(k, [0.0, -0.48, 0.0]);
+            assert!(sole[1].abs() < 0.08, "feet down: {sole:?}");
+        }
+        // A fall, then the ground: a landing, squatting.
+        a.crouch = 0.0;
+        for k in 0..40 {
+            let y = 3.0 - k as f32 * 0.1;
+            a.step([0.0, y, 0.0], 0.0, (false, false), 1.0 / 60.0);
+        }
+        let hard = a.step([0.0; 3], 0.0, (true, false), 1.0 / 60.0);
+        assert!(hard.is_some_and(|h| h > 0.3), "{hard:?}");
+        assert!(a.land > 0.3);
     }
 
     #[test]

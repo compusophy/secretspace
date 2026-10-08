@@ -108,6 +108,10 @@ struct Page {
     stride: f32,
     /// `?hold=ms`: every effect held at that age.
     hold: Option<f64>,
+    /// When you last landed and how hard (0 to 1); your eyes' height,
+    /// easing between standing and crouching.
+    landed: (f64, f32),
+    eye_h: f32,
     /// How each wizard has been moving (for its stride).
     anims: HashMap<u16, rig::Anim>,
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
@@ -422,6 +426,9 @@ fn inputs(p: &mut Page, dt: f64) {
     if held("Space") {
         k |= keys::JUMP;
     }
+    if held("KeyC") {
+        k |= keys::CROUCH;
+    }
     if p.firing {
         k |= keys::FIRE;
     }
@@ -461,6 +468,19 @@ fn inputs(p: &mut Page, dt: f64) {
         };
         p.prev = p.pred.body;
         p.pred.push(i, &island.map);
+        // Feet leaving the ground, and meeting it again.
+        let (was, is) = (p.prev, p.pred.body);
+        if !was.ground && is.ground {
+            let hard = ((-was.v[1] - 3.0) / 17.0).clamp(0.0, 1.0);
+            if hard > 0.0 || was.glide {
+                let hard = if was.glide { 0.8 } else { hard };
+                p.landed = (kit::now(), hard);
+                p.sounds.thud(hard);
+                p.st.dust.push((kit::now(), is.p, hard));
+            }
+        } else if was.ground && !is.ground && is.v[1] > 1.0 {
+            p.sounds.hop();
+        }
         p.cool = p.cool.saturating_sub(1);
         if k & keys::FIRE != 0 && p.cool == 0 && !p.pred.body.glide {
             p.cool = BOLT_COOLDOWN;
@@ -555,10 +575,19 @@ fn frame(p: &mut Page, now: f64) {
         let bob = p.stride.sin().abs() * 0.035 * (speed / 7.0).min(1.0);
         let hurt = (1.0 - (now - p.st.hurt_at) / 220.0).max(0.0) as f32;
         let shake = |k: f32| (now as f32 * k).sin() * 0.012 * hurt;
+        // Crouching lowers your eyes; a landing dips them, harder lower.
+        let want = p.pred.body.eye();
+        p.eye_h += (want - p.eye_h) * (1.0 - (-(dt as f32) / 70.0).exp());
+        let since = ((now - p.landed.0) / 1000.0) as f32;
+        let dip = if since < 0.32 {
+            (since / 0.32 * std::f32::consts::PI).sin() * p.landed.1
+        } else {
+            0.0
+        };
         Camera {
-            eye: [at[0], at[1] + EYE - 0.02 + bob, at[2]],
+            eye: [at[0], at[1] + p.eye_h - 0.02 + bob - 0.22 * dip, at[2]],
             yaw: p.yaw + shake(0.09),
-            pitch: p.pitch + shake(0.13),
+            pitch: p.pitch + shake(0.13) - 0.05 * dip,
             fov: p.fov,
             aspect,
         }
@@ -624,7 +653,10 @@ fn frame(p: &mut Page, now: f64) {
                 };
                 let yaw = trig::radians(s.yaw);
                 let a = p.anims.entry(s.id).or_default();
-                a.step(s.p, yaw, s.flags & flag::GROUND != 0, dt as f32 / 1000.0);
+                let stance = (s.flags & flag::GROUND != 0, s.flags & flag::CROUCH != 0);
+                if let Some(hard) = a.step(s.p, yaw, stance, dt as f32 / 1000.0) {
+                    p.st.dust.push((now, s.p, hard));
+                }
                 i.look.rig.wizard(&mut d, s.id, s.p, yaw, a, &pose);
             }
             fx::on_wizard(&i.look, &mut d, s, t, p.alive && s.id == p.st.you);
@@ -697,6 +729,7 @@ fn frame(p: &mut Page, now: f64) {
             }
         }
         fx::falls(&i.look, &mut d, &falls, now);
+        fx::dust(&i.look, &mut d, &p.st.dust, now);
         p.anims.retain(|id, _| others.iter().any(|s| s.id == *id));
         if let Some(f) = &p.st.frame {
             if f.phase == 1 && !matches!(p.mode, Mode::Practice(_)) {
@@ -901,6 +934,8 @@ pub fn start() {
                 stride: 0.0,
                 hold: query_value("hold").and_then(|v| v.parse().ok()),
                 anims: HashMap::new(),
+                landed: (-1e9, 0.0),
+                eye_h: EYE,
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,
                 ear: ([0.0; 3], 0.0),

@@ -33,6 +33,7 @@ pub mod keys {
     pub const FIRE: u8 = 32;
     /// Aiming down the wand.
     pub const AIM: u8 = 64;
+    pub const CROUCH: u8 = 128;
 }
 
 /// A wizard's body: feet, velocity, and whether it stands.
@@ -45,6 +46,31 @@ pub struct Body {
     pub glide: bool,
     /// Ticks left chilled (by Frost): slower.
     pub chill: u16,
+    /// Crouching: lower, slower, harder to hit.
+    pub crouch: bool,
+    /// Ticks a jump still works since the ground was left; ticks an early
+    /// jump waits for the ground.
+    pub coyote: u8,
+    pub buffer: u8,
+}
+
+impl Body {
+    /// How tall it stands (crouching or not), and where its eyes are.
+    pub fn tall(&self) -> f32 {
+        if self.crouch {
+            CROUCH_HEIGHT
+        } else {
+            HEIGHT
+        }
+    }
+
+    pub fn eye(&self) -> f32 {
+        if self.crouch {
+            CROUCH_EYE
+        } else {
+            EYE
+        }
+    }
 }
 
 fn toward(v: f32, want: f32, step: f32) -> f32 {
@@ -84,6 +110,10 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     if i.keys & keys::AIM != 0 && !b.glide {
         speed *= AIM_SLOW;
     }
+    b.crouch = has(keys::CROUCH) && !b.glide;
+    if b.crouch && b.ground {
+        speed *= CROUCH_SLOW;
+    }
     b.chill = b.chill.saturating_sub(1);
     let accel = if b.ground || b.glide {
         ACCEL_GROUND
@@ -92,11 +122,30 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     } * DT;
     b.v[0] = toward(b.v[0], wx * speed, accel);
     b.v[2] = toward(b.v[2], wz * speed, accel);
-    if b.ground && has(keys::JUMP) {
+    // A jump pressed a moment early waits for the ground; one a moment
+    // after running off an edge still goes.
+    b.buffer = if has(keys::JUMP) {
+        JUMP_BUFFER
+    } else {
+        b.buffer.saturating_sub(1)
+    };
+    b.coyote = if b.ground {
+        COYOTE
+    } else {
+        b.coyote.saturating_sub(1)
+    };
+    if b.buffer > 0 && (b.ground || b.coyote > 0) && b.v[1] <= 0.5 && !b.glide {
         b.v[1] = JUMP;
         b.ground = false;
+        b.coyote = 0;
+        b.buffer = 0;
     }
-    b.v[1] -= GRAVITY * DT;
+    let pull = if b.v[1] > 0.0 && has(keys::JUMP) {
+        GRAVITY_UP
+    } else {
+        GRAVITY
+    };
+    b.v[1] -= pull * DT;
     if b.glide && b.v[1] < -GLIDE_FALL {
         b.v[1] = -GLIDE_FALL;
     }
@@ -109,7 +158,7 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     let lim = MAP_HALF - 1.0;
     p[0] = p[0].clamp(-lim, lim);
     p[2] = p[2].clamp(-lim, lim);
-    map.push_out(&mut p);
+    map.push_out(&mut p, b.tall());
     // The ground (the sea floor too: you wade, you do not swim).
     let floor = map.height(p[0], p[2]).max(SEA - 0.9);
     if p[1] <= floor || (was && b.v[1] <= 0.0 && p[1] - floor < STEP) {
@@ -174,6 +223,58 @@ mod tests {
             step(&mut b, &Input::default(), &map);
         }
         assert!(b.ground, "down again");
+    }
+
+    #[test]
+    fn crouching_is_lower_and_slower_and_jumps_forgive() {
+        let map = Map::new(11);
+        let mut walk = stand(&map);
+        let mut low = walk;
+        let start = walk.p;
+        let go = |k| Input {
+            keys: k,
+            ..Input::default()
+        };
+        for _ in 0..30 {
+            step(&mut walk, &go(keys::FWD), &map);
+            step(&mut low, &go(keys::FWD | keys::CROUCH), &map);
+        }
+        assert!(low.crouch && low.tall() < walk.tall() && low.eye() < walk.eye());
+        assert!(low.p[0] - start[0] < (walk.p[0] - start[0]) * 0.7, "slower");
+        // Held, a jump rises higher than tapped.
+        let top = |hold: bool| {
+            let mut b = stand(&map);
+            step(&mut b, &go(keys::JUMP), &map);
+            let mut best = b.p[1];
+            for _ in 0..40 {
+                step(&mut b, &go(if hold { keys::JUMP } else { 0 }), &map);
+                best = best.max(b.p[1]);
+                if b.ground {
+                    break;
+                }
+            }
+            best - stand(&map).p[1]
+        };
+        assert!(top(true) > top(false) * 1.2, "{} {}", top(true), top(false));
+        // Pressed a moment before landing, it still jumps on landing.
+        let mut b = stand(&map);
+        b.p[1] += 0.15;
+        b.ground = false;
+        step(&mut b, &go(keys::JUMP), &map);
+        let mut jumped = false;
+        for _ in 0..JUMP_BUFFER {
+            step(&mut b, &go(0), &map);
+            jumped |= b.v[1] > 1.0;
+        }
+        assert!(jumped, "the early press counted");
+        // Just off an edge (in the air, no longer on the ground), it still
+        // jumps.
+        let mut b = stand(&map);
+        step(&mut b, &go(0), &map);
+        b.ground = false;
+        b.v[1] = 0.0;
+        step(&mut b, &go(keys::JUMP), &map);
+        assert!(b.v[1] > 1.0, "coyote time");
     }
 
     #[test]

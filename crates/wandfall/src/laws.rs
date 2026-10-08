@@ -23,9 +23,20 @@ pub const RUINS: usize = 14;
 pub const RUN: f32 = 7.0;
 pub const WADE: f32 = 0.55;
 pub const ACCEL_GROUND: f32 = 70.0;
-pub const ACCEL_AIR: f32 = 10.0;
-pub const GRAVITY: f32 = 24.0;
+pub const ACCEL_AIR: f32 = 16.0;
+/// Falling is quicker than rising; holding jump rises on the lighter
+/// pull, so a held jump goes higher than a tapped one.
+pub const GRAVITY: f32 = 30.0;
+pub const GRAVITY_UP: f32 = 20.0;
 pub const JUMP: f32 = 8.0;
+/// Ticks after running off an edge that a jump still works, and ticks a
+/// jump pressed early waits for the ground.
+pub const COYOTE: u8 = 4;
+pub const JUMP_BUFFER: u8 = 4;
+/// Crouching: this much of the speed, eyes this high, a body this tall.
+pub const CROUCH_SLOW: f32 = 0.5;
+pub const CROUCH_EYE: f32 = 1.05;
+pub const CROUCH_HEIGHT: f32 = 1.25;
 /// A wizard: how wide, how tall, where the eyes are.
 pub const RADIUS: f32 = 0.45;
 pub const HEIGHT: f32 = 1.85;

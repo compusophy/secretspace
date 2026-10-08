@@ -416,7 +416,12 @@ pub fn sight(
         .iter()
         .filter(|s| s.id != me && s.flags & wandfall::proto::flag::ALIVE != 0)
     {
-        if let Some(t) = wandfall::world::through(eye, end, s.p) {
+        let tall = if s.flags & wandfall::proto::flag::CROUCH != 0 {
+            wandfall::laws::CROUCH_HEIGHT
+        } else {
+            wandfall::laws::HEIGHT
+        };
+        if let Some(t) = wandfall::world::through(eye, end, s.p, tall) {
             if t < first.0 {
                 first = (t, Some(s.id));
             }
@@ -680,6 +685,44 @@ pub fn falls(look: &Look, d: &mut Draw, list: &[(f64, V3, u16)], now: f64) {
             seed,
         );
         light(d, [at[0], at[1] + 1.2, at[2]], 8.0, c, 3.0 * f * f);
+    }
+}
+
+/// Dust thrown up where wizards landed, more the harder.
+pub fn dust(look: &Look, d: &mut Draw, list: &[(f64, V3, f32)], now: f64) {
+    let c = rgb(214, 204, 176);
+    for &(when, at, hard) in list {
+        let t = ((now - when) / 1000.0) as f32;
+        let f = 1.0 - t / 0.6;
+        if f <= 0.0 {
+            continue;
+        }
+        let seed = when as i32 ^ (at[0] * 31.0) as i32;
+        let n = (8.0 + 16.0 * hard) as i32;
+        for k in 0..n {
+            let a = k as f32 / n as f32 * std::f32::consts::TAU + unit(hash(seed, k, 81));
+            let r = 0.3 + t * (1.5 + 2.5 * hard) * (0.6 + 0.4 * unit(hash(seed, k, 82)));
+            d.sparks.push(Spark {
+                p: [
+                    at[0] + a.cos() * r,
+                    at[1] + 0.08 + t * 0.6,
+                    at[2] + a.sin() * r,
+                ],
+                size: 0.1 + 0.12 * hard,
+                c: [c[0], c[1], c[2], 0.35 * f],
+            });
+        }
+        if hard > 0.5 {
+            ring(
+                look,
+                d,
+                [at[0], at[1] + 0.05, at[2]],
+                0.4 + t * 4.0,
+                c,
+                0.3 * f,
+                0.0,
+            );
+        }
     }
 }
 

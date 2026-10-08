@@ -40,7 +40,7 @@ pub fn sight(w: &World, by: u16, eye: [f32; 3], d: [f32; 3], range: f32) -> ([f3
         if p.id == by || !p.alive || p.entrant != fight {
             continue;
         }
-        if let Some(t) = through(eye, end, p.body.p) {
+        if let Some(t) = through(eye, end, p.body.p, p.body.tall()) {
             if t < first.0 {
                 first = (t, p.id);
             }
@@ -350,7 +350,7 @@ mod tests {
             let mut more = Vec::new();
             for b in std::mem::take(&mut w.bolts) {
                 let e = ahead(b.p, b.v, DT);
-                match through(b.p, e, w.players[1].body.p) {
+                match through(b.p, e, w.players[1].body.p, HEIGHT) {
                     Some(_) => impact(w, &b, e, w.players[1].id, &mut more),
                     None if b.life > 1 => w.bolts.push(Bolt {
                         p: e,

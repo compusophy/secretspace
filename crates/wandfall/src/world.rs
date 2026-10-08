@@ -81,7 +81,8 @@ pub struct Player {
 
 impl Player {
     pub fn eye(&self) -> [f32; 3] {
-        [self.body.p[0], self.body.p[1] + EYE, self.body.p[2]]
+        let b = &self.body;
+        [b.p[0], b.p[1] + b.eye(), b.p[2]]
     }
 
     pub fn max_hp(&self) -> i32 {
@@ -628,7 +629,7 @@ impl World {
                 if p.id == b.by || !p.alive || p.entrant != fight {
                     continue;
                 }
-                if let Some(t) = through(a, e, p.body.p) {
+                if let Some(t) = through(a, e, p.body.p, p.body.tall()) {
                     if first.is_none_or(|f| t < f.0) {
                         first = Some((t, p.id));
                     }
@@ -708,10 +709,10 @@ pub(crate) fn warmup(p: &mut Player, rng: &mut Rng) {
 }
 
 /// Where along a bolt's step from `a` to `e` (0..1) it passes through a
-/// wizard standing at `feet`, if it does.
-pub fn through(a: [f32; 3], e: [f32; 3], feet: [f32; 3]) -> Option<f32> {
+/// wizard standing at `feet`, `tall` metres tall, if it does.
+pub fn through(a: [f32; 3], e: [f32; 3], feet: [f32; 3], tall: f32) -> Option<f32> {
     // The wizard as a segment from shin to crown, `RADIUS` thick.
-    let (lo, hi) = (feet[1] + RADIUS * 0.5, feet[1] + HEIGHT - RADIUS * 0.5);
+    let (lo, hi) = (feet[1] + RADIUS * 0.5, feet[1] + tall - RADIUS * 0.5);
     let d = [e[0] - a[0], e[1] - a[1], e[2] - a[2]];
     let reach = RADIUS + BOLT_RADIUS;
     // Closest approach on the ground's plane, then the height there.

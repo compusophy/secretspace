@@ -9,7 +9,7 @@ use engine::wire::{Reader, Writer};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 3;
+pub const PROTO: u8 = 4;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -128,6 +128,7 @@ pub mod flag {
     pub const GROUND: u8 = 4;
     pub const BOT: u8 = 8;
     pub const ENTRANT: u8 = 16;
+    pub const CROUCH: u8 = 32;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -208,7 +209,9 @@ impl Frame {
                 w.u8(1);
                 f32s(&mut w, o.body.p);
                 f32s(&mut w, o.body.v);
-                w.u8(o.body.ground as u8 | (o.body.glide as u8) << 1)
+                let b = &o.body;
+                w.u8(b.ground as u8 | (b.glide as u8) << 1 | (b.crouch as u8) << 2)
+                    .u8(b.coyote.min(15) | b.buffer.min(15) << 4)
                     .u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
@@ -273,12 +276,16 @@ impl Frame {
             let p = read_f32s(&mut r)?;
             let v = read_f32s(&mut r)?;
             let g = r.u8()?;
+            let jump = r.u8()?;
             let mut o = Own {
                 body: Body {
                     p,
                     v,
                     ground: g & 1 != 0,
                     glide: g & 2 != 0,
+                    crouch: g & 4 != 0,
+                    coyote: jump & 15,
+                    buffer: jump >> 4,
                     chill: r.u16()?,
                 },
                 seq: r.u16()?,
@@ -601,6 +608,9 @@ mod tests {
                     ground: false,
                     glide: true,
                     chill: 7,
+                    crouch: true,
+                    coyote: 3,
+                    buffer: 2,
                 },
                 seq: 65535,
                 hp: 252,

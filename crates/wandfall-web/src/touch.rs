@@ -23,6 +23,7 @@ const REACH: f64 = 60.0;
 enum Button {
     Fire,
     Jump,
+    Crouch,
     Aim,
     Slot(usize),
     Take,
@@ -39,6 +40,8 @@ pub struct Touch {
     look: Option<(i32, (f64, f64))>,
     held: Vec<(i32, Button)>,
     pub aim: bool,
+    /// Crouching (a toggle, as aim is).
+    pub crouch: bool,
     asked: u8,
     /// A scroll underfoot that needs asking for (shows the take button).
     pub can_take: bool,
@@ -52,6 +55,7 @@ fn layout(w: f64, h: f64, take: bool) -> Vec<(Button, f64, f64, f64)> {
     let mut v = vec![
         (Button::Fire, fx, fy, 38.0),
         (Button::Jump, w - 196.0, h - 38.0, 24.0),
+        (Button::Crouch, w - 252.0, h - 34.0, 20.0),
         (Button::Aim, w - 36.0, h - 214.0, 20.0),
     ];
     // The spells in an arc about the wand's button, in reach of a thumb.
@@ -86,6 +90,7 @@ impl Touch {
                     Some((b, ..)) => {
                         match b {
                             Button::Aim => self.aim = !self.aim,
+                            Button::Crouch => self.crouch = !self.crouch,
                             Button::Slot(k) => self.asked |= cast::SLOT[k],
                             Button::Menu => self.menu = true,
                             _ => {}
@@ -174,6 +179,9 @@ impl Touch {
         if self.aim {
             k |= keys::AIM;
         }
+        if self.crouch {
+            k |= keys::CROUCH;
+        }
         k
     }
 
@@ -200,7 +208,9 @@ impl Touch {
             c.circle(px(o.0 + dx * k), px(o.1 + dy * k), px(22.0), ink.fade(0.45));
         }
         for (b, x, y, r) in layout(css.0, css.1, self.can_take) {
-            let held = self.holding(b) || (b == Button::Aim && self.aim);
+            let held = self.holding(b)
+                || (b == Button::Aim && self.aim)
+                || (b == Button::Crouch && self.crouch);
             c.circle(
                 px(x),
                 px(y),
@@ -223,6 +233,7 @@ impl Touch {
                 Button::Aim => label(c, "aim"),
                 Button::Take => label(c, "take"),
                 Button::Menu => label(c, "menu"),
+                Button::Crouch => label(c, "duck"),
                 Button::Slot(k) => {
                     let Some((sp, rank)) = own.and_then(|o| o.slots[k]) else {
                         label(c, KEYS[k]);
