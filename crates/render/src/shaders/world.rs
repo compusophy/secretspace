@@ -105,7 +105,7 @@ fn sea(pos: vec3<f32>, alpha: f32) -> vec4<f32> {
     let fres = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
     let refl = sky(reflect(-v, n));
     let depth = max(pos.y - ground(p), 0.0);
-    let light = g.sky.rgb * 0.7 + g.sun.rgb * max(g.sun_dir.y, 0.0) * 0.2;
+    let light = g.sky.rgb * 0.9 + g.sun.rgb * max(g.sun_dir.y, 0.0) * 0.3;
     let body = mix(vec3<f32>(0.03, 0.22, 0.20), g.water.rgb, smoothstep(0.0, 6.0, depth)) * light;
     let lit = sunlit(pos, vec3<f32>(0.0, 1.0, 0.0));
     let glint = ggx(n, v, g.sun_dir.xyz, 0.05, vec3<f32>(0.02)) * g.sun.rgb * max(dot(n, g.sun_dir.xyz), 0.0) * lit;

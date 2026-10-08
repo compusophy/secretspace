@@ -90,6 +90,10 @@ struct Page {
     version: kit::Version,
     last: f64,
     fps: f64,
+    /// Watching the frame time to step the quality down: (frames counted,
+    /// ms they took), and whether a tier was asked for (then it stays).
+    pace: (u32, f64),
+    fixed: bool,
     perf: bool,
     touch: bool,
 }
@@ -497,12 +501,36 @@ fn inputs(p: &mut Page, dt: f64) {
     }
 }
 
+/// Too slow for this tier (over 2.5 s of play, frames over 30 ms on
+/// average): one tier down, the island built again on it.
+fn pace(p: &mut Page, dt: f64) {
+    if p.fixed || !p.alive || dt <= 0.0 {
+        return;
+    }
+    p.pace.0 += 1;
+    p.pace.1 += dt;
+    if p.pace.1 < 2500.0 {
+        return;
+    }
+    let slow = p.pace.1 / p.pace.0 as f64 > 30.0;
+    p.pace = (0, 0.0);
+    let Some(q) = p.r.quality().lower().filter(|_| slow) else {
+        return;
+    };
+    p.r = Renderer::new(&p.g.device, &p.g.queue, p.g.format(), q);
+    p.island = None;
+    if let Some(seed) = p.st.seed.take() {
+        island(p, seed);
+    }
+}
+
 fn frame(p: &mut Page, now: f64) {
     let dt = (now - p.last).clamp(0.0, 250.0);
     p.last = now;
     if dt > 0.0 {
         p.fps += (1000.0 / dt - p.fps) * 0.05;
     }
+    pace(p, dt);
     net(p, now, dt);
     hands(p);
     inputs(p, dt);
@@ -748,14 +776,8 @@ pub fn start() {
                 return;
             }
         };
-        let q = match kit::window().location().search().unwrap_or_default() {
-            s if s.contains("q=low") => render::Quality::LOW,
-            s if s.contains("q=medium") => render::Quality::MEDIUM,
-            s if s.contains("q=high") => render::Quality::HIGH,
-            _ if g.caps.software => render::Quality::LOW,
-            _ if kit::touch() => render::Quality::MEDIUM,
-            _ => render::Quality::HIGH,
-        };
+        let search = kit::window().location().search().unwrap_or_default();
+        let q = render::Quality::pick(&search, g.caps.software, kit::touch());
         let r = Renderer::new(&g.device, &g.queue, g.format(), q);
         let session = kit::Session::load();
         let hands = Hands::attach(g.canvas());
@@ -792,6 +814,8 @@ pub fn start() {
                 version: kit::Version::watch(VERSION_EVERY),
                 last: kit::now(),
                 fps: 60.0,
+                pace: (0, 0.0),
+                fixed: query("q=low") || query("q=medium") || query("q=high"),
                 perf: query("perf=1"),
                 touch: kit::touch(),
             })

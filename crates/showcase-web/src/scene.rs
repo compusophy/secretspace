@@ -241,7 +241,7 @@ impl Scene {
             exposure: 1.25,
             bloom: 0.08,
             vignette: 0.3,
-            sea: Some(WATER),
+            sea: Some(WATER - 0.9),
             water: rgb(10, 40, 60),
             waves: 0.3,
             wind: [0.6, 0.3],

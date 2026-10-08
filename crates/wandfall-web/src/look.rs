@@ -444,7 +444,7 @@ pub fn sky(in_storm: bool) -> render::Look {
         zenith: [0.09, 0.22, 0.58],
         horizon: [0.58, 0.68, 0.82],
         deep: [0.08, 0.12, 0.18],
-        fog: 0.0016,
+        fog: 0.0011,
         fog_falloff: 0.015,
         clouds: 0.5,
         stars: 0.0,
@@ -452,7 +452,7 @@ pub fn sky(in_storm: bool) -> render::Look {
         bloom: 0.05,
         vignette: 0.28,
         sea: Some(SEA),
-        water: rgb(10, 52, 74),
+        water: rgb(16, 76, 106),
         waves: 0.4,
         wind: [0.9, 0.35],
     };

@@ -254,6 +254,30 @@ pub struct Quality {
 }
 
 impl Quality {
+    /// The tier a page asked for (`?q=low|medium|high`), else one for
+    /// this device: software adapters Low, touch screens Medium, else High.
+    pub fn pick(query: &str, software: bool, touch: bool) -> Quality {
+        match query {
+            q if q.contains("q=low") => Quality::LOW,
+            q if q.contains("q=medium") => Quality::MEDIUM,
+            q if q.contains("q=high") => Quality::HIGH,
+            _ if software => Quality::LOW,
+            _ if touch => Quality::MEDIUM,
+            _ => Quality::HIGH,
+        }
+    }
+
+    /// One tier down (None at the bottom).
+    pub fn lower(self) -> Option<Quality> {
+        if self == Quality::HIGH {
+            Some(Quality::MEDIUM)
+        } else if self == Quality::MEDIUM {
+            Some(Quality::LOW)
+        } else {
+            None
+        }
+    }
+
     pub const HIGH: Quality = Quality {
         msaa: 4,
         cascades: 3,

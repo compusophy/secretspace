@@ -48,11 +48,8 @@ thread_local! {
 
 impl OnGpu {
     fn new(g: gpu::Gpu) -> OnGpu {
-        let q = if g.caps.software {
-            render::Quality::LOW
-        } else {
-            render::Quality::HIGH
-        };
+        let query = kit::window().location().search().unwrap_or_default();
+        let q = render::Quality::pick(&query, g.caps.software, kit::touch());
         let mut r = render::Renderer::new(&g.device, &g.queue, g.format(), q);
         let scene = Scene::new(&mut r);
         OnGpu { g, r, scene }
