@@ -1,6 +1,7 @@
 //! The page itself: start, the frame loop, the network, the hands.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use engine::room::{Outbox, Room};
 use engine::who::{Seen as Named, Status};
@@ -20,6 +21,7 @@ use crate::fx::{self, Draw};
 use crate::hud;
 use crate::look::{self, Look};
 use crate::menu::{self, Act, Spots};
+use crate::rig;
 use crate::sound::Sounds;
 use crate::state::State;
 use crate::touch::Touch;
@@ -106,6 +108,11 @@ struct Page {
     stride: f32,
     /// `?hold=ms`: every effect held at that age.
     hold: Option<f64>,
+    /// How each wizard has been moving (for its stride).
+    anims: HashMap<u16, rig::Anim>,
+    /// `?orbit=ID`: the camera turns about that wizard (0: you).
+    orbit: Option<u16>,
+    orbit_at: Option<[f32; 3]>,
     /// Where sound is heard from (the camera) and which way it faces.
     ear: ([f32; 3], f32),
 }
@@ -520,7 +527,24 @@ fn frame(p: &mut Page, now: f64) {
         ]
     };
     let mut watching = None;
-    let cam = if p.alive {
+    // `?orbit=ID`: turn slowly about a wizard (0: yourself), to look at it.
+    let orbit = p.orbit.and_then(|id| {
+        let id = if id == 0 { p.st.you } else { id };
+        let at = others.iter().find(|s| s.id == id).map(|s| s.p);
+        // Still where it was when it falls.
+        p.orbit_at = at.or(p.orbit_at);
+        p.orbit_at
+    });
+    let cam = if let Some(o) = orbit {
+        let a = (now / 5000.0) as f32;
+        Camera {
+            eye: [o[0] + a.cos() * 3.6, o[1] + 1.2, o[2] + a.sin() * 3.6],
+            yaw: a + std::f32::consts::PI,
+            pitch: -0.08,
+            fov: FOV,
+            aspect,
+        }
+    } else if p.alive {
         let at = body(p.prev.p, p.pred.body.p);
         // A step's bob as you walk; a shake when you are hurt.
         let v = p.pred.body.v;
@@ -578,31 +602,30 @@ fn frame(p: &mut Page, now: f64) {
             if s.flags & flag::ALIVE == 0 {
                 continue;
             }
-            if !(p.alive && s.id == p.st.you) {
-                // Walking bobs it; casting (or firing) raises its arm.
+            if !(p.alive && s.id == p.st.you) || orbit.is_some() {
+                // Casting (or firing) raises its arm; a hit flinches it.
                 let tip = fx::tip(&p.st.shows, s.id, now);
                 let fired = p.st.fired.get(&s.id).map_or(1e9, |&f| now - f);
-                let speed = (p.st.speed(s.id) / 7.0).min(1.0);
-                let ground = s.flags & flag::GROUND != 0;
-                let step = ((now / 1000.0) as f32 * 9.0 + s.id as f32).sin().abs();
                 let hit =
                     p.st.bursts
                         .iter()
                         .filter(|b| b.1 == s.id)
                         .map(|b| now - b.0)
                         .fold(1e9, f64::min);
-                let pose = look::Pose {
-                    bob: if ground { step * 0.06 * speed } else { 0.0 },
-                    flash: (1.0 - hit / 160.0).max(0.0) as f32,
+                let pose = rig::Pose {
+                    flash: (1.0 - hit / 200.0).max(0.0) as f32,
                     arm: (tip.1 * 2.0)
                         .max((1.0 - fired as f32 / 450.0) * 1.5)
                         .min(1.0),
                     aim: s.pitch as f32 / 65536.0 * std::f32::consts::TAU,
                     tip,
                     glide: s.flags & flag::GLIDE != 0,
+                    t,
                 };
-                i.look
-                    .wizard(&mut d, s.id, s.p, trig::radians(s.yaw), &pose);
+                let yaw = trig::radians(s.yaw);
+                let a = p.anims.entry(s.id).or_default();
+                a.step(s.p, yaw, s.flags & flag::GROUND != 0, dt as f32 / 1000.0);
+                i.look.rig.wizard(&mut d, s.id, s.p, yaw, a, &pose);
             }
             fx::on_wizard(&i.look, &mut d, s, t, p.alive && s.id == p.st.you);
         }
@@ -621,8 +644,12 @@ fn frame(p: &mut Page, now: f64) {
                 );
             }
         }
+        // Dropping, you ride a broom.
+        if p.alive && p.pred.body.glide && orbit.is_none() {
+            i.look.rig.first_broom(&mut d, &cam, t);
+        }
         // Your wand: kicked by a bolt, flaring in a spell's colour.
-        let tip = p.alive.then(|| {
+        let tip = (p.alive && orbit.is_none()).then(|| {
             let kick = (1.0 - (now - p.cast_at) / 180.0).clamp(0.0, 1.0) as f32;
             let flare = (1.0 - (now - p.spell_at.0) / 320.0).clamp(0.0, 1.0) as f32;
             let c = render::geo::mix(look::GOLD, fx::colour(p.spell_at.1), flare.min(1.0).sqrt());
@@ -656,12 +683,21 @@ fn frame(p: &mut Page, now: f64) {
             None => &p.st.shows,
         };
         fx::shows(&i.look, &mut d, shows, now, (p.st.you, tip), at_of);
+        // The knocked out fall, and burst into sparks.
         let falls: Vec<_> =
             p.st.falls
                 .iter()
-                .map(|&(w, at, who)| (hold.map_or(w, |ms| w.max(now - ms)), at, who))
+                .map(|&(w, at, who, _)| (hold.map_or(w, |ms| w.max(now - ms)), at, who))
                 .collect();
+        for &(when, at, who, yaw) in &p.st.falls {
+            if !(p.alive && who == p.st.you) {
+                let when = hold.map_or(when, |ms| when.max(now - ms));
+                let age = ((now - when) / 1000.0) as f32;
+                i.look.rig.fallen(&mut d, who, at, trig::radians(yaw), age);
+            }
+        }
         fx::falls(&i.look, &mut d, &falls, now);
+        p.anims.retain(|id, _| others.iter().any(|s| s.id == *id));
         if let Some(f) = &p.st.frame {
             if f.phase == 1 && !matches!(p.mode, Mode::Practice(_)) {
                 i.look.storm(&mut d, f.storm.0, f.storm.1, cam.eye, t);
@@ -749,7 +785,9 @@ fn frame(p: &mut Page, now: f64) {
                 practice,
                 on_target,
             };
-            hud::draw(&mut p.g.hud, &i.mini, &view);
+            if p.orbit.is_none() {
+                hud::draw(&mut p.g.hud, &i.mini, &view);
+            }
             let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
             if p.touch && p.alive && !p.book && !p.paused {
                 let me = p.pred.body.p;
@@ -779,7 +817,7 @@ fn frame(p: &mut Page, now: f64) {
                         .map_or((false, false), |r| (r.no_cooldowns, r.sparring));
                     menu::book(&mut p.g.hud, &mut p.spots, ui, o, p.book_slot, rules);
                 }
-            } else if p.paused || (!p.touch && !kit::input::locked()) {
+            } else if (p.paused || (!p.touch && !kit::input::locked())) && p.orbit.is_none() {
                 menu::pause(&mut p.g.hud, &mut p.spots, ui, practice, p.touch);
             }
         }
@@ -862,6 +900,9 @@ pub fn start() {
                 sounds: Sounds::new(),
                 stride: 0.0,
                 hold: query_value("hold").and_then(|v| v.parse().ok()),
+                anims: HashMap::new(),
+                orbit: query_value("orbit").and_then(|v| v.parse().ok()),
+                orbit_at: None,
                 ear: ([0.0; 3], 0.0),
             })
         });

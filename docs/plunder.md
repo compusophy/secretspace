@@ -177,6 +177,17 @@ of combat styles and all varieties to counter all varieties".
       wizards flash white; your view bobs as you walk and shakes when you
       are hurt. The title shows the eight spells. The storm's wall burns at
       its edge and crackles near you.
+- [x] **Wizards in full animation** (`rig.rs`), on the owner's word ("this
+      is just like having a pill move around"): every wizard is jointed
+      (hips, knees, waist, neck, shoulders) under a robe to the knee, its
+      boots showing. It strides the way it moves (forward, back, to the
+      side), knees bending through each step, arms swinging against its
+      legs, leaning into a run; breathes standing; tucks its legs and opens
+      its arms in the air; flinches when hit; nods with its aim; raises and
+      thrusts its wand to cast; falls on its back when knocked out. The
+      drop is ridden on a **broomstick** (sitting, sparks trailing from the
+      bristles), and in first person its handle reaches ahead below you.
+      `?orbit=ID` turns the camera about a wizard (0 is you) to look.
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half

@@ -5,7 +5,8 @@
 //! pixels over it. Hooks: `?perf=1` (numbers in the title and the HUD),
 //! `?practice` (straight to the range), `?spells=0,1,4,5` (its four
 //! slots), `?nocd` (no cooldowns), `?spar` (the dummies fight back),
-//! `?look=yaw,pitch` (degrees, where you face), `?q=low|medium|high`, `?hold=ms`
+//! `?look=yaw,pitch` (degrees, where you face), `?orbit=ID` (the camera
+//! turns about a wizard; 0 is you), `?q=low|medium|high`, `?hold=ms`
 //! (every effect held at that age, to look at it).
 
 pub mod bar;
@@ -13,6 +14,7 @@ pub mod fx;
 pub mod hud;
 pub mod look;
 pub mod menu;
+pub mod rig;
 pub mod sound;
 pub mod state;
 pub mod touch;

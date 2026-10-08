@@ -41,8 +41,8 @@ pub struct State {
     pub out_with: u8,
     /// Yourself as you last were alive (for the card when you are out).
     pub last_own: Option<proto::Own>,
-    /// Where wizards fell: (when, where, who).
-    pub falls: Vec<(f64, [f32; 3], u16)>,
+    /// Where wizards fell: (when, where, who, facing which way).
+    pub falls: Vec<(f64, [f32; 3], u16, u16)>,
     /// What last hurt each wizard.
     last_hit: HashMap<u16, u8>,
     pub joined: bool,
@@ -145,9 +145,9 @@ impl State {
                     let at = self
                         .snaps
                         .back()
-                        .and_then(|s| s.1.iter().find(|s| s.id == who).map(|s| s.p));
-                    if let Some(at) = at {
-                        self.falls.push((now, at, who));
+                        .and_then(|s| s.1.iter().find(|s| s.id == who).map(|s| (s.p, s.yaw)));
+                    if let Some((at, yaw)) = at {
+                        self.falls.push((now, at, who, yaw));
                     }
                 }
                 Ev::Win { who } => {

@@ -390,7 +390,7 @@ pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
             d,
             ([p[0], p[1], p[2]], [p[0], p[1] + top, p[2]]),
             0.09 + 0.03 * rank as f32,
-            (c, 0.8),
+            (c, 0.45),
             true,
         );
         ring(look, d, [p[0], p[1] + 0.06, p[2]], 0.55, c, 0.7, t);
