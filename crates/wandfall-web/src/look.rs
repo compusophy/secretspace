@@ -518,19 +518,49 @@ impl Look {
     }
 
     /// The storm's wall: a circle of violet light from the sea to the sky.
-    pub fn storm(&self, items: &mut Vec<Item>, centre: [f32; 2], r: f32) {
+    /// Its edge glows where you see it side on; where it meets the ground
+    /// it burns; nearest you, it crackles (`eye`, `t` seconds).
+    pub fn storm(&self, d: &mut Draw, centre: [f32; 2], r: f32, eye: V3, t: f32) {
         if r <= 0.5 {
             return;
         }
-        items.push(
-            Item::new(
-                self.wall,
-                m4::place([centre[0], SEA - 6.0, centre[1]], 0.0, [r, 75.0, r]),
-            )
-            .tint([1.0; 3], 0.34)
-            .glow(0.7)
-            .pass(Pass::Faint),
+        let at = [centre[0], SEA - 6.0, centre[1]];
+        d.items.push(
+            Item::new(self.wall, m4::place(at, 0.0, [r, 75.0, r]))
+                .tint([1.0; 3], 0.34)
+                .glow(0.7)
+                .pass(Pass::Faint),
         );
+        d.items.push(
+            Item::new(self.wall, m4::place(at, t * 0.05, [r + 0.4, 75.0, r + 0.4]))
+                .tint(STORM, 0.7)
+                .glow(0.5)
+                .material(Material::Rim)
+                .pass(Pass::Glow),
+        );
+        let foot = [centre[0], SEA - 0.5, centre[1]];
+        d.items.push(
+            Item::new(self.wall, m4::place(foot, 0.0, [r + 0.2, 3.0, r + 0.2]))
+                .tint(rgb(220, 160, 255), 0.5)
+                .glow(1.0)
+                .pass(Pass::Glow),
+        );
+        // Crackling, along the stretch of wall nearest you.
+        let (dx, dz) = (eye[0] - centre[0], eye[2] - centre[1]);
+        if (dx * dx + dz * dz).sqrt() > r + 60.0 {
+            return;
+        }
+        let a0 = dz.atan2(dx);
+        let flick = (t * 14.0) as i32;
+        for n in 0..36 {
+            let a = a0 + (unit(hash(flick, n, 71)) - 0.5) * (40.0 / r.max(10.0)).min(3.0);
+            let y = eye[1] - 4.0 + 16.0 * unit(hash(flick, n, 72));
+            d.sparks.push(Spark {
+                p: [centre[0] + a.cos() * r, y, centre[1] + a.sin() * r],
+                size: 0.2 + 0.25 * unit(hash(flick, n, 73)),
+                c: [0.85, 0.6, 1.0, 0.9],
+            });
+        }
     }
 
     /// Your wand before you: where its tip is, given the camera, and the

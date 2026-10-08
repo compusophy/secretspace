@@ -664,7 +664,7 @@ fn frame(p: &mut Page, now: f64) {
         fx::falls(&i.look, &mut d, &falls, now);
         if let Some(f) = &p.st.frame {
             if f.phase == 1 && !matches!(p.mode, Mode::Practice(_)) {
-                i.look.storm(&mut d.items, f.storm.0, f.storm.1);
+                i.look.storm(&mut d, f.storm.0, f.storm.1, cam.eye, t);
                 let e = cam.eye;
                 in_storm = p.alive
                     && (e[0] - f.storm.0[0]).powi(2) + (e[2] - f.storm.0[1]).powi(2)
