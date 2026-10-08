@@ -44,7 +44,10 @@ pub(super) fn practise(p: &mut Page) {
     }
     // `?look=yaw,pitch` (degrees) faces you a way to start.
     if let Some(v) = query_value("look") {
-        let mut it = v.split(',').filter_map(|x| x.parse::<f32>().ok());
+        let mut it = v
+            .split(',')
+            .filter_map(|x| x.parse::<f32>().ok())
+            .filter(|x| x.is_finite());
         p.yaw = it.next().unwrap_or(0.0).to_radians();
         p.pitch = it.next().unwrap_or(0.0).to_radians();
     }
