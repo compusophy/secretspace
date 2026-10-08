@@ -139,14 +139,17 @@ fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
     var metal = 0.0;
     var through = 0.0;
     var ao = 1.0;
-    let glow = i.col.a + i.extra.x;
+    var glow = i.col.a + i.extra.x;
     if (i.extra.w > 0.0) {
         n = bump(i.pos, n, i.extra.w, 1.6);
     }
     if (mat == TERRAIN) {
+        // The ground, and the game's paint over it (alpha is how much).
         let m = earth(i.pos, n);
-        base = m.rgb * linear(i.tint.rgb);
-        rough = m.a;
+        let paint = linear(i.col.rgb) * (0.8 + 0.4 * noise3(i.pos * 0.9));
+        base = mix(m.rgb, paint, clamp(i.col.a, 0.0, 1.0)) * linear(i.tint.rgb);
+        rough = mix(m.a, 0.8, clamp(i.col.a, 0.0, 1.0));
+        glow = i.extra.x + max(i.col.a - 1.0, 0.0) * (0.7 + 0.6 * noise3(i.pos * 1.3 + g.eye.w * 0.2));
         n = bump(i.pos, n, 0.35, 0.9);
     } else if (mat == FOLIAGE) {
         through = 0.45;
@@ -269,7 +272,8 @@ fn grass_vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
         * (1.0 - smoothstep(reach * 0.7, reach, dist))
         * (1.0 - smoothstep(0.35, 0.6, slope))
         * smoothstep(g.deep.w + 0.7, g.deep.w + 1.4, gh)
-        * smoothstep(0.2, 0.45, noise2(xz * 0.09));
+        * smoothstep(0.2, 0.45, noise2(xz * 0.09))
+        * lush(xz);
     var o: GrassOut;
     if (height < 0.04 || g.grass.w < 0.5) {
         o.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);

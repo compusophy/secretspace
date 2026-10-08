@@ -14,10 +14,23 @@ pub const SHORE: f32 = 140.0;
 /// Hills: how tall, and how wide one is.
 pub const HILLS: f32 = 9.0;
 pub const HILL_SIZE: f32 = 48.0;
-/// Trees, rocks and ruined pillars on the island.
-pub const TREES: usize = 420;
-pub const ROCKS: usize = 140;
-pub const RUINS: usize = 14;
+/// Trees, rocks, giant mushrooms and ruined pillars on the island.
+pub const TREES: usize = 400;
+pub const ROCKS: usize = 130;
+pub const SHROOMS: usize = 40;
+pub const RUINS: usize = 8;
+/// The Spire at the centre: a plaza this high and this wide, falling to
+/// the hills over this far, and its tower.
+pub const PLATEAU_TOP: f32 = 7.0;
+pub const PLATEAU: f32 = 20.0;
+pub const PLATEAU_FALL: f32 = 16.0;
+pub const TOWER_RADIUS: f32 = 4.6;
+pub const TOWER_HEIGHT: f32 = 30.0;
+/// The places about it (a stone circle, a demon rift, a crystal grove):
+/// this far out, this wide; how deep the rift's bowl is.
+pub const POI_RING: f32 = 76.0;
+pub const POI_RADIUS: f32 = 16.0;
+pub const RIFT_DEPTH: f32 = 3.5;
 
 // Moving.
 pub const RUN: f32 = 7.0;

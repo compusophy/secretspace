@@ -56,6 +56,19 @@ pub(super) fn practise(p: &mut Page) {
     }
 }
 
+/// `?cam=x,y,z,yaw,pitch` (metres, degrees): the camera held there, to
+/// look at the island (with `?orbit`, which hides the HUD).
+pub(super) fn fixed() -> Option<[f32; 5]> {
+    thread_local! {
+        static CAM: Option<[f32; 5]> = query_value("cam").and_then(|v| {
+            let n: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+            (n.len() == 5 && n.iter().all(|x| x.is_finite()))
+                .then(|| [n[0], n[1], n[2], n[3].to_radians(), n[4].to_radians()])
+        });
+    }
+    CAM.with(|c| *c)
+}
+
 /// A menu button pressed.
 pub(super) fn act(p: &mut Page, a: Act) {
     let you = p.st.you;

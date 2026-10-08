@@ -318,12 +318,12 @@ mod tests {
         let mut w = World::new(21);
         let a = w.join("a", 0);
         let b = w.join("b", 0);
-        // Into the fight, then side by side on open ground.
+        // Into the fight, then side by side on the Spire's open plaza.
         while w.phase != Phase::Fight {
             w.step();
         }
         w.players.retain(|p| !p.bot);
-        let [x, z] = [0.0f32, 0.0];
+        let [x, z] = [-gap / 2.0, -12.0];
         for (k, dx) in [(0usize, 0.0f32), (1, gap)] {
             let p = &mut w.players[k];
             p.body.glide = false;

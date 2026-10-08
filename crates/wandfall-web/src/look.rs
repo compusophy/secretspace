@@ -1,15 +1,15 @@
-//! How Wandfall looks, drawn by the engine: the island (its ground in
-//! one mesh, the sea, trees, rocks and ruined pillars as statics), every
+//! How Wandfall looks, drawn by the engine: the island (`land`), every
 //! wizard (jointed, in `rig`), bolts of light, bursts where they strike,
 //! the storm's wall, and your own wand.
 
-use render::geo::{self, hash, mix, rgb, unit, Geo, V3};
-use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark, Terrain};
+use render::geo::{self, hash, rgb, unit, Geo, V3};
+use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark};
 
 use crate::fx::Draw;
+use crate::land::Land;
 use crate::rig::Rig;
-use wandfall::laws::{MAP_HALF, SEA};
-use wandfall::map::{Kind, Map};
+use wandfall::laws::SEA;
+use wandfall::map::Map;
 
 pub const GOLD: V3 = rgb(255, 214, 128);
 const STORM: V3 = rgb(150, 70, 230);
@@ -30,8 +30,8 @@ pub struct Look {
     pub ring: Mesh,
     pub shard: Mesh,
     pub beam: Mesh,
-    /// The island's own meshes (ground, trees, rocks, pillars).
-    pub held: Vec<Mesh>,
+    /// The island (`land`).
+    pub land: Land,
 }
 
 pub use crate::rig::hue;
@@ -50,144 +50,11 @@ fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
     r.mesh(&g)
 }
 
-/// Metres between the ground's samples.
-const TERRAIN_CELL: f32 = 1.25;
-
 impl Look {
     /// Build the island's meshes and set it down as statics.
     pub fn new(r: &mut Renderer, map: &Map) -> Look {
-        let t = Terrain::sample(
-            [-MAP_HALF, -MAP_HALF],
-            MAP_HALF * 2.0,
-            TERRAIN_CELL,
-            |x, z| map.height(x, z),
-        );
-        r.terrain(&t);
-        let ground = r.mesh(&t.mesh(SEA - 4.0, |_, _, _| [1.0; 3]));
-        let bark = rgb(96, 74, 56);
-        let trunk = smooth(r, |g| {
-            let profile = [
-                (0.46, -0.3),
-                (0.36, 0.4),
-                (0.27, 1.6),
-                (0.2, 3.2),
-                (0.1, 4.4),
-            ];
-            g.lathe([0.0; 3], &profile, 9, bark, 0.0);
-        });
-        let crowns = [11u32, 29, 47].map(|s| {
-            smooth(r, |g| {
-                let c = mix(
-                    rgb(60, 104, 42),
-                    rgb(98, 132, 54),
-                    unit(hash(s as i32, 1, 7)),
-                );
-                let dark = mix(c, rgb(38, 76, 34), 0.45);
-                g.sphere([0.0, 3.9, 0.0], [2.1, 1.8, 2.1], (2, s, 0.3), c, 0.0);
-                g.sphere(
-                    [0.6, 5.1, -0.3],
-                    [1.5, 1.3, 1.5],
-                    (2, s + 1, 0.3),
-                    mix(c, rgb(136, 160, 72), 0.3),
-                    0.0,
-                );
-                g.sphere([-0.8, 4.6, 0.6], [1.3, 1.1, 1.3], (2, s + 2, 0.3), c, 0.0);
-                g.sphere([0.3, 3.3, 1.1], [1.2, 1.0, 1.2], (2, s + 3, 0.3), dark, 0.0);
-            })
-        });
-        let pines = smooth(r, |g| {
-            for (y, w, h) in [
-                (1.5, 2.3, 2.5),
-                (2.9, 1.85, 2.3),
-                (4.1, 1.4, 2.1),
-                (5.2, 0.95, 1.9),
-            ] {
-                g.lathe(
-                    [0.0, y, 0.0],
-                    &[(w, 0.0), (w * 0.5, h * 0.45), (0.0, h)],
-                    12,
-                    rgb(36, 80, 52),
-                    0.0,
-                );
-            }
-        });
-        let rocks = [5u32, 17, 23].map(|s| {
-            smooth(r, |g| {
-                g.sphere(
-                    [0.0, 0.35, 0.0],
-                    [1.0, 0.85, 1.0],
-                    (3, s, 0.34),
-                    rgb(130, 126, 120),
-                    0.0,
-                )
-            })
-        });
-        let stone = rgb(208, 200, 184);
-        let pillar = smooth(r, |g| {
-            let profile = [
-                (0.66, 0.0),
-                (0.66, 0.06),
-                (0.54, 0.12),
-                (0.5, 0.5),
-                (0.47, 0.94),
-                (0.53, 0.97),
-                (0.53, 1.0),
-            ];
-            g.lathe([0.0; 3], &profile, 16, stone, 0.0);
-        });
-        let cap = one(r, |g| {
-            g.block(
-                [0.0; 3],
-                [1.35, 0.32, 1.35],
-                0.0,
-                stone,
-                rgb(176, 168, 154),
-                0.0,
-            )
-        });
-        let mut statics = vec![Item::new(ground, m4::ID).material(Material::Terrain)];
-        for (k, p) in map.props.iter().enumerate() {
-            let at = [p.x, p.y, p.z];
-            match p.kind {
-                Kind::Tree => {
-                    let s = p.scale;
-                    statics.push(
-                        Item::new(trunk, m4::place(at, p.yaw, [s; 3]))
-                            .rough(0.9)
-                            .detail(0.4),
-                    );
-                    let crown = if k % 3 == 0 { pines } else { crowns[k % 3] };
-                    statics.push(
-                        Item::new(crown, m4::place(at, p.yaw, [s; 3]))
-                            .material(Material::Foliage)
-                            .rough(0.7),
-                    );
-                }
-                Kind::Rock => {
-                    let s = p.scale;
-                    let m = m4::place(at, p.yaw, [s * 1.2, s * 1.4, s * 1.1]);
-                    statics.push(Item::new(rocks[k % 3], m).rough(0.85).detail(0.6));
-                }
-                Kind::Pillar => {
-                    let m = m4::place(at, p.yaw, [1.0, p.h, 1.0]);
-                    statics.push(Item::new(pillar, m).rough(0.7).detail(0.3));
-                    if k % 2 == 0 {
-                        let top = [p.x, p.y + p.h, p.z];
-                        statics.push(
-                            Item::new(cap, m4::place(top, p.yaw, [1.0; 3]))
-                                .rough(0.75)
-                                .detail(0.3),
-                        );
-                    }
-                }
-            }
-        }
-        r.statics(statics);
-        let mut held = vec![ground, trunk, pines, pillar, cap];
-        held.extend(crowns);
-        held.extend(rocks);
         Look {
-            held,
+            land: Land::new(r, map),
             rig: Rig::new(r),
             ball: smooth(r, |g| {
                 g.sphere([0.0; 3], [1.0; 3], (2, 3, 0.0), [1.0; 3], 0.0)
@@ -273,7 +140,7 @@ impl Look {
             self.shard,
             self.beam,
         ];
-        for m in all.into_iter().chain(self.held) {
+        for m in all.into_iter().chain(self.land.held) {
             r.free(m);
         }
         self.rig.free(r);

@@ -555,7 +555,16 @@ fn frame(p: &mut Page, now: f64) {
         p.orbit_at = at.or(p.orbit_at);
         p.orbit_at
     });
-    let cam = if let Some(o) = orbit {
+    let cam = if let Some(c) = range::fixed() {
+        let (eye, yaw, pitch) = ([c[0], c[1], c[2]], c[3], c[4]);
+        Camera {
+            eye,
+            yaw,
+            pitch,
+            fov: FOV,
+            aspect,
+        }
+    } else if let Some(o) = orbit {
         let a = (now / 5000.0) as f32;
         Camera {
             eye: [o[0] + a.cos() * 3.6, o[1] + 1.2, o[2] + a.sin() * 3.6],
@@ -627,6 +636,7 @@ fn frame(p: &mut Page, now: f64) {
     let mut in_storm = false;
     if let Some(i) = &p.island {
         fx::loot(&i.look, &mut d, &p.st.loot, t, cam.eye);
+        i.look.places(&mut d, t);
         for s in &others {
             if s.flags & flag::ALIVE == 0 {
                 continue;

@@ -106,7 +106,7 @@ pub fn tiny_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Float,
+        format: wgpu::TextureFormat::Rg32Float,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -117,10 +117,10 @@ pub fn tiny_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &[0; 4],
+        &[0; 8],
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(4),
+            bytes_per_row: Some(8),
             rows_per_image: Some(1),
         },
         wgpu::Extent3d {

@@ -1,17 +1,31 @@
 //! The island, from its seed alone, the same on the server and the page:
-//! rolling hills falling to the sea at the shore, and trees, rocks and
-//! ruined rings of pillars on it. Heights use arithmetic only (no library
-//! calls), so both ends agree to the bit.
+//! rolling hills falling to the sea at the shore, its places (`places`:
+//! the Spire at the centre, a stone circle, a demon rift, a crystal
+//! grove), and trees, rocks, giant mushrooms and ruined rings of pillars
+//! between them. Heights use arithmetic only (no library calls), so both
+//! ends agree to the bit.
 
 use engine::rng::{splitmix, Rng};
 
 use crate::laws::*;
+use crate::places::{self, Poi};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Tree,
     Rock,
     Pillar,
+    Shroom,
+    /// The Spire's tower, and the lamps about its plaza.
+    Tower,
+    Lamp,
+    /// The stone circle's stones and altar.
+    Stone,
+    Altar,
+    /// The rift's gate and its obsidian.
+    Portal,
+    Spike,
+    Crystal,
 }
 
 /// One thing standing on the island. Its trunk, body or shaft blocks
@@ -36,10 +50,13 @@ const CELLS: i32 = (MAP_HALF * 2.0 / CELL) as i32;
 pub struct Map {
     pub seed: u64,
     pub props: Vec<Prop>,
+    /// The places, the Spire first; where their chests wait.
+    pub pois: Vec<Poi>,
+    pub caches: Vec<[f32; 2]>,
     grid: Vec<Vec<u16>>,
 }
 
-fn smooth(t: f32) -> f32 {
+pub fn smooth(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
@@ -64,28 +81,56 @@ fn noise(seed: u64, x: f32, z: f32) -> f32 {
     top + (bottom - top) * tz
 }
 
+/// The bare hills at (x, z), falling to the sea at the shore.
+fn hills(s: u64, x: f32, z: f32) -> f32 {
+    let k = 1.0 / HILL_SIZE;
+    let n = noise(s, x * k, z * k)
+        + 0.45 * noise(s ^ 1, x * k * 2.3, z * k * 2.3)
+        + 0.12 * noise(s ^ 2, x * k * 6.1, z * k * 6.1);
+    let hills = 1.5 + (n - 0.55) * HILLS;
+    let r = (x * x + z * z).sqrt();
+    let shore = smooth((r - (SHORE - 30.0)) / 30.0);
+    hills * (1.0 - shore) + (SEA - 4.0) * shore
+}
+
 impl Map {
     pub fn new(seed: u64) -> Map {
         let mut m = Map {
             seed,
             props: Vec::new(),
+            pois: places::find(seed, |x, z| hills(seed, x, z)),
+            caches: Vec::new(),
             grid: vec![Vec::new(); (CELLS * CELLS) as usize],
         };
+        places::set(&mut m);
         m.scatter();
         m
     }
 
-    /// The ground's height at (x, z).
+    /// The ground's height at (x, z): the hills, as the places shape them.
     pub fn height(&self, x: f32, z: f32) -> f32 {
-        let s = self.seed;
-        let k = 1.0 / HILL_SIZE;
-        let n = noise(s, x * k, z * k)
-            + 0.45 * noise(s ^ 1, x * k * 2.3, z * k * 2.3)
-            + 0.12 * noise(s ^ 2, x * k * 6.1, z * k * 6.1);
-        let hills = 1.5 + (n - 0.55) * HILLS;
-        let r = (x * x + z * z).sqrt();
-        let shore = smooth((r - (SHORE - 30.0)) / 30.0);
-        hills * (1.0 - shore) + (SEA - 4.0) * shore
+        let mut h = hills(self.seed, x, z);
+        for p in &self.pois {
+            h = p.shape(h, x, z);
+        }
+        h
+    }
+
+    /// Whether (x, z) is clear of the places, `pad` metres to spare.
+    pub fn wild(&self, x: f32, z: f32, pad: f32) -> bool {
+        self.pois.iter().all(|p| p.dist(x, z) > p.r * 1.15 + pad)
+    }
+
+    /// Set a prop down, in the grid of every cell it touches.
+    pub fn put(&mut self, p: Prop) {
+        let i = self.props.len() as u16;
+        self.props.push(p);
+        let c = |v: f32| (((v + MAP_HALF) / CELL).floor() as i32).clamp(0, CELLS - 1);
+        for cz in c(p.z - p.r)..=c(p.z + p.r) {
+            for cx in c(p.x - p.r)..=c(p.x + p.r) {
+                self.grid[(cz * CELLS + cx) as usize].push(i);
+            }
+        }
     }
 
     /// Whether a point is on land (not the sea, not past the edge).
@@ -96,16 +141,7 @@ impl Map {
     fn scatter(&mut self) {
         let mut rng = Rng::new(self.seed ^ 0x51ab);
         let mut unit = move || (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
-        let put = |m: &mut Map, p: Prop| {
-            let i = m.props.len() as u16;
-            m.props.push(p);
-            let c = |v: f32| (((v + MAP_HALF) / CELL).floor() as i32).clamp(0, CELLS - 1);
-            for cz in c(p.z - p.r)..=c(p.z + p.r) {
-                for cx in c(p.x - p.r)..=c(p.x + p.r) {
-                    m.grid[(cz * CELLS + cx) as usize].push(i);
-                }
-            }
-        };
+        let put = |m: &mut Map, p: Prop| m.put(p);
         // Ruins first: rings of pillars, the island's landmarks.
         let mut ruins = 0;
         while ruins < RUINS {
@@ -113,7 +149,7 @@ impl Map {
                 (unit() * 2.0 - 1.0) * SHORE * 0.8,
                 (unit() * 2.0 - 1.0) * SHORE * 0.8,
             );
-            if !self.land(x, z) {
+            if !self.land(x, z) || !self.wild(x, z, 10.0) {
                 continue;
             }
             ruins += 1;
@@ -154,14 +190,14 @@ impl Map {
             while n < count && tries < count * 20 {
                 tries += 1;
                 let (x, z) = ((unit() * 2.0 - 1.0) * SHORE, (unit() * 2.0 - 1.0) * SHORE);
-                if !m.land(x, z) || m.height(x, z) < SEA + 1.0 {
+                if !m.land(x, z) || m.height(x, z) < SEA + 1.0 || !m.wild(x, z, 3.0) {
                     continue;
                 }
                 let s = 0.8 + unit() * 0.6;
                 let (r, h) = match kind {
-                    Kind::Tree => (0.35 * s, 6.0 * s),
                     Kind::Rock => (1.1 * s, 1.3 * s),
-                    Kind::Pillar => (0.55, 3.0),
+                    Kind::Shroom => (0.4 * s, 3.5 * s),
+                    _ => (0.35 * s, 6.0 * s),
                 };
                 // Not inside another.
                 if m.near(x, z, r + 1.2).next().is_some() {
@@ -187,6 +223,7 @@ impl Map {
         };
         place(self, Kind::Tree, TREES, &mut unit);
         place(self, Kind::Rock, ROCKS, &mut unit);
+        place(self, Kind::Shroom, SHROOMS, &mut unit);
     }
 
     /// Props whose cylinder comes within `d` of (x, z) on the ground.
@@ -312,6 +349,34 @@ mod tests {
         assert!(trees > TREES / 2, "trees: {trees}");
         assert!(m.props.iter().any(|p| p.kind == Kind::Pillar));
         assert_eq!(Map::new(7).props, m.props, "the same seed, the same island");
+    }
+
+    #[test]
+    fn the_places_shape_the_island() {
+        use crate::places::Place;
+        for seed in 0..24 {
+            let m = Map::new(seed);
+            assert_eq!(m.pois.len(), 4);
+            // The Spire: a level plaza, its tower at the centre.
+            assert_eq!(m.height(0.0, 0.0), PLATEAU_TOP);
+            assert_eq!(m.height(PLATEAU - 1.0, 0.0), PLATEAU_TOP);
+            let mut p = [0.5, PLATEAU_TOP, 0.0];
+            m.push_out(&mut p, HEIGHT);
+            assert!(p[0] >= TOWER_RADIUS + RADIUS - 1e-3, "the tower blocks");
+            for q in &m.pois {
+                assert!(m.land(q.x, q.z), "seed {seed}: {:?} on land", q.place);
+                if q.place == Place::Rift {
+                    let rim = m.height(q.x + q.r, q.z);
+                    assert!(m.height(q.x, q.z) < rim - 2.0, "seed {seed}: a bowl");
+                    assert!(m.height(q.x + 4.0, q.z) > SEA + 1.0, "not flooded");
+                }
+            }
+            let kinds = [Kind::Tower, Kind::Stone, Kind::Spike, Kind::Crystal];
+            for k in kinds {
+                assert!(m.props.iter().any(|p| p.kind == k), "seed {seed}: {k:?}");
+            }
+            assert!(m.caches.len() >= 8);
+        }
     }
 
     #[test]

@@ -42,6 +42,24 @@ impl Mind {
     }
 }
 
+/// A heading `a` from `at` that steps around whatever stands just ahead.
+fn around(w: &World, at: [f32; 3], a: f32) -> f32 {
+    let (dx, dz) = (a.cos(), a.sin());
+    for q in w.map.near(at[0], at[2], 6.0) {
+        if at[1] > q.y + q.h {
+            continue;
+        }
+        let (ox, oz) = (q.x - at[0], q.z - at[2]);
+        let ahead = ox * dx + oz * dz;
+        // Which side of the path its centre is (left positive), and how near.
+        let side = oz * dx - ox * dz;
+        if ahead > 0.0 && ahead < q.r + 4.0 && side.abs() < q.r + RADIUS + 0.4 {
+            return a + if side > 0.0 { -1.1 } else { 1.1 };
+        }
+    }
+    a
+}
+
 fn unit(seed: u64, tick: u32, k: u64) -> f32 {
     (splitmix(seed ^ (tick as u64) << 8 ^ k) >> 40) as f32 / (1u64 << 24) as f32
 }
@@ -189,7 +207,7 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
             (false, Some((p, _))) => [p[0], p[2]],
             (false, None) => m.goal,
         };
-        walk = Some(walk_to(to));
+        walk = Some(around(w, me.body.p, walk_to(to)));
     }
     if let Some(a) = walk {
         // Turn toward where it walks, a little at a time.

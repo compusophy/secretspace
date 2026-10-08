@@ -104,10 +104,12 @@ pub fn drop_scroll(w: &mut World, spell: u8, rank: u8, at: [f32; 3], spread: f32
     w.loot_dirty = true;
 }
 
-/// Chests across the island, a third of them at the ruins.
+/// Chests across the island: those the places keep first, then a third
+/// of the rest at the ruins.
 pub fn scatter(w: &mut World) {
     w.chests.clear();
     w.scrolls.clear();
+    let caches = w.map.caches.clone();
     let ruins: Vec<[f32; 3]> = w
         .map
         .props
@@ -118,7 +120,9 @@ pub fn scatter(w: &mut World) {
     let mut tries = 0;
     while w.chests.len() < CHESTS && tries < CHESTS * 30 {
         tries += 1;
-        let [x, z] = if !ruins.is_empty() && w.chests.len().is_multiple_of(3) {
+        let [x, z] = if let Some(&at) = caches.get(tries - 1) {
+            at
+        } else if !ruins.is_empty() && w.chests.len().is_multiple_of(3) {
             let r = ruins[(w.rng.next_u64() % ruins.len() as u64) as usize];
             let a = unit(w) * std::f32::consts::TAU;
             [r[0] + a.cos() * 2.5, r[2] + a.sin() * 2.5]

@@ -95,7 +95,7 @@ impl Scene {
             ground: {
                 let t = render::Terrain::sample([-HALF, -HALF], HALF * 2.0, 1.0, height);
                 r.terrain(&t);
-                r.mesh(&t.mesh(-50.0, |_, _, _| [1.0; 3]))
+                r.mesh(&t.mesh(-50.0, |_, _, _| ([1.0; 3], 0.0)))
             },
             trunk: one(r, |g| {
                 g.column(

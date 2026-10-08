@@ -11,8 +11,10 @@ pub struct Terrain {
     pub origin: [f32; 2],
     pub cell: f32,
     pub n: usize,
-    /// Heights, row by row (z), `n` by `n`.
+    /// Heights, row by row (z), `n` by `n`; how much grass grows at
+    /// each (0 to 1, all 1 unless a game says otherwise).
     pub heights: Vec<f32>,
+    pub lush: Vec<f32>,
 }
 
 impl Terrain {
@@ -38,7 +40,21 @@ impl Terrain {
             origin,
             cell,
             n,
+            lush: vec![1.0; heights.len()],
             heights,
+        }
+    }
+
+    /// Set how much grass grows at each sample, from (x, z).
+    pub fn grow(&mut self, lush: impl Fn(f32, f32) -> f32) {
+        for j in 0..self.n {
+            for i in 0..self.n {
+                let (x, z) = (
+                    self.origin[0] + i as f32 * self.cell,
+                    self.origin[1] + j as f32 * self.cell,
+                );
+                self.lush[j * self.n + i] = lush(x, z).clamp(0.0, 1.0);
+            }
         }
     }
 
@@ -58,9 +74,10 @@ impl Terrain {
     }
 
     /// The mesh: a smooth grid, its normals from the heights about each
-    /// sample; squares wholly below `floor` are left out. `tint` colours
-    /// each sample (white leaves the material as it is).
-    pub fn mesh(&self, floor: f32, tint: impl Fn(f32, f32, f32) -> V3) -> Geo {
+    /// sample; squares wholly below `floor` are left out. `paint` gives
+    /// each sample (x, z, height) a colour and how much of it covers the
+    /// ground the material would draw (0 leaves the ground as it is).
+    pub fn mesh(&self, floor: f32, paint: impl Fn(f32, f32, f32) -> (V3, f32)) -> Geo {
         let n = self.n;
         let mut g = Geo::default();
         let mut ids = vec![u32::MAX; n * n];
@@ -73,7 +90,8 @@ impl Terrain {
                 let dx = self.at(i + 1, j) - self.at(i.saturating_sub(1), j);
                 let dz = self.at(i, j + 1) - self.at(i, j.saturating_sub(1));
                 let nrm = geo::norm([-dx, 2.0 * self.cell, -dz]);
-                ids[j * n + i] = g.vertex([x, h, z], nrm, tint(x, z, h), 0.0);
+                let (c, cover) = paint(x, z, h);
+                ids[j * n + i] = g.vertex([x, h, z], nrm, c, cover);
             }
         }
         for j in 0..n - 1 {
@@ -101,7 +119,7 @@ mod tests {
         let t = Terrain::sample([-10.0, -10.0], 20.0, 1.0, |x, z| x * 0.5 + z * 0.25);
         assert_eq!(t.n, 21);
         assert!((t.height(2.5, -3.0) - (1.25 - 0.75)).abs() < 1e-4);
-        let g = t.mesh(-100.0, |_, _, _| [1.0; 3]);
+        let g = t.mesh(-100.0, |_, _, _| ([1.0; 3], 0.0));
         assert_eq!(g.triangles(), 20 * 20 * 2);
         // Every triangle faces up.
         let p = |k: u32| {

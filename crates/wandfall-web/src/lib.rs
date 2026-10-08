@@ -12,6 +12,7 @@
 pub mod bar;
 pub mod fx;
 pub mod hud;
+pub mod land;
 pub mod look;
 pub mod menu;
 pub mod rig;

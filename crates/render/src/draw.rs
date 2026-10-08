@@ -489,7 +489,8 @@ impl Renderer {
         self.statics_dirty = true;
     }
 
-    /// The ground's heights, for the GPU (grass, the sea's shallows).
+    /// The ground's heights and grass, for the GPU (grass, the sea's
+    /// shallows).
     pub fn terrain(&mut self, t: &Terrain) {
         let n = t.n as u32;
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -502,11 +503,17 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
+            format: wgpu::TextureFormat::Rg32Float,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let bytes: Vec<u8> = t.heights.iter().flat_map(|h| h.to_le_bytes()).collect();
+        let bytes: Vec<u8> = t
+            .heights
+            .iter()
+            .zip(&t.lush)
+            .flat_map(|(h, l)| [h.to_le_bytes(), l.to_le_bytes()])
+            .flatten()
+            .collect();
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &tex,
@@ -517,7 +524,7 @@ impl Renderer {
             &bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(n * 4),
+                bytes_per_row: Some(n * 8),
                 rows_per_image: Some(n),
             },
             wgpu::Extent3d {

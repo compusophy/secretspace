@@ -65,7 +65,7 @@ owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
 
 ### Stage A: the first playable (done, October 2026)
 - [x] `crates/wandfall` (engine only): an island from a seed (hills by
-      arithmetic-only noise, the shore, 420 trees, 140 rocks, 14 ruined
+      arithmetic-only noise, the shore, 400 trees, 130 rocks, 8 ruined
       rings of pillars, all blocking wizards and bolts); movement (run,
       jump, wade, step up, glide in the drop) in arithmetic only, so the
       page predicts its wizard to the bit (`the_page_predicts_its_wizard_exactly`).
@@ -188,6 +188,24 @@ of combat styles and all varieties to counter all varieties".
       drop is ridden on a **broomstick** (sitting, sparks trailing from the
       bristles), and in first person its handle reaches ahead below you.
       `?orbit=ID` turns the camera about a wizard (0 is you) to look.
+- [x] **Jumps and landings you feel; crouching.** Coyote time (4 ticks off
+      a ledge) and a buffered press (4 ticks before landing) forgive the
+      jump; holding it rises higher (lighter pull going up). Landings squat
+      the rig, dip the camera, throw dust and thud, harder the harder you
+      fall. Crouch (C, "duck" on phones): half speed, eyes at 1.05 m, a
+      body 1.25 m tall, so bolts pass over. The wire carries it (PROTO 4).
+- [x] **A wizard's island** (`places.rs`, `land.rs`), on the owner's word
+      ("not wizardy enough... a wizard tower at the centre"): the **Spire**,
+      a tower in a wizard's hat on a paved plaza raised 7 m, lamps about
+      it, a beacon of light over it seen from anywhere, four chests at its
+      foot; on a ring 76 m out, a **stone circle** (runed menhirs about an
+      altar, an orb and runes turning over it), a **demon rift** (a
+      scorched bowl, lava cracks, obsidian, a gate burning with runes,
+      embers), a **crystal grove** (glowing clusters, giant mushrooms,
+      glimmer). Each shapes the ground, blocks as trees do, and keeps two
+      chests. Between them: violet and teal wizard-wood, mushrooms, ruins;
+      islets float over it all. Bots step around what stands ahead.
+      `?cam=x,y,z,yaw,pitch` holds the camera to look (with `?orbit`).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half

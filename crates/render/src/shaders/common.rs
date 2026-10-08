@@ -90,6 +90,22 @@ fn ground(xz: vec2<f32>) -> f32 {
     return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
 }
 
+/// How much grass grows at `xz` (0 to 1), as the game painted it.
+fn lush(xz: vec2<f32>) -> f32 {
+    let n = i32(g.terrain.w);
+    if (n < 2) {
+        return 0.0;
+    }
+    let f = clamp((xz - g.terrain.xy) / g.terrain.z, vec2<f32>(0.0), vec2<f32>(f32(n - 1) - 0.001));
+    let i = vec2<i32>(floor(f));
+    let t = f - floor(f);
+    let a = textureLoad(heights, i, 0).g;
+    let b = textureLoad(heights, i + vec2<i32>(1, 0), 0).g;
+    let c = textureLoad(heights, i + vec2<i32>(0, 1), 0).g;
+    let d = textureLoad(heights, i + vec2<i32>(1, 1), 0).g;
+    return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+}
+
 /// How much of the sun reaches `pos` (0 in shadow, 1 lit), softened.
 fn sunlit(pos: vec3<f32>, n: vec3<f32>) -> f32 {
     let count = i32(g.view.w);
