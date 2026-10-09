@@ -206,15 +206,16 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
     }
 }
 
-/// The spellbook: your four slots (pick one), every spell (put it in),
-/// the slot's rank, your level, and the range's rules.
+/// The spellbook: your four slots (pick one), the spells of its kind
+/// (put one you know in), the slot's rank; on the range (`rules`), every
+/// spell at any rank, your level, and the range's rules.
 pub fn book(
     c: &mut Canvas,
     spots: &mut Spots,
     ui: i32,
     own: &Own,
     sel: usize,
-    rules: (bool, bool),
+    rules: Option<(bool, bool)>,
 ) {
     let (w, h) = (c.w, c.h);
     // As large as fits: a short screen gets a smaller book, not a cut one.
@@ -259,17 +260,22 @@ pub fn book(
         spots.0.push((b, Act::Slot(k)));
     }
     y += s + 8.0 * u;
-    // The slot's rank.
+    // The slot's rank (on the range, any).
     let rank = own.slots[sel].map_or(1, |s| s.1);
     c.text_shadowed(x0 as i32, y as i32 + 4 * ui, "rank", ui, DIM);
-    for r in 1..=MAX_RANK {
-        let b = Rect::new(
-            x0 + 40.0 * u + (r - 1) as f32 * 24.0 * u,
-            y,
-            20.0 * u,
-            16.0 * u,
-        );
-        button(c, spots, b, &format!("{r}"), r == rank, Act::Rank(r), ui);
+    if rules.is_some() {
+        for r in 1..=MAX_RANK {
+            let b = Rect::new(
+                x0 + 40.0 * u + (r - 1) as f32 * 24.0 * u,
+                y,
+                20.0 * u,
+                16.0 * u,
+            );
+            button(c, spots, b, &format!("{r}"), r == rank, Act::Rank(r), ui);
+        }
+    } else if own.slots[sel].is_some() {
+        let t = "I".repeat(rank as usize);
+        c.text_shadowed((x0 + 40.0 * u) as i32, y as i32 + 4 * ui, &t, ui, GOLD);
     }
     y += 24.0 * u;
     // Every spell of the slot's kind.
@@ -292,19 +298,34 @@ pub fn book(
             rh,
         );
         let have = own.slots[sel].is_some_and(|s| s.0 == sp);
+        let known = own.book[sp as usize];
         c.round_rect(b, 3.0 * u, if have { LIT } else { BUTTON });
-        icon(
-            c,
-            sp,
-            Rect::new(b.x + 3.0 * u, b.y + 3.0 * u, rh - 6.0 * u, rh - 6.0 * u),
-        );
+        let tile = Rect::new(b.x + 3.0 * u, b.y + 3.0 * u, rh - 6.0 * u, rh - 6.0 * u);
+        icon(c, sp, tile);
+        let name = SPELLS[sp as usize].name;
+        let tx = (b.x + rh + 2.0 * u) as i32;
+        if known == 0 {
+            // Not found yet: dimmed, and not to be chosen.
+            c.round_rect(b, 3.0 * u, Rgba(6, 8, 16, 170));
+            c.text_shadowed(
+                tx,
+                (b.y + rh / 2.0) as i32 - 3 * ui,
+                name,
+                ui,
+                DIM.fade(0.5),
+            );
+            continue;
+        }
         c.text_shadowed(
-            (b.x + rh + 2.0 * u) as i32,
+            tx,
             (b.y + rh / 2.0) as i32 - 3 * ui,
-            SPELLS[sp as usize].name,
+            name,
             ui,
             if have { GOLD } else { INK },
         );
+        if rules.is_none() {
+            pips(c, b.x + b.w - 12.0 * u, b.y + rh / 2.0, known, ui);
+        }
         spots.0.push((b, Act::Spell(sp)));
     }
     y += ((list.len() + 1) / cols) as f32 * (rh + 4.0 * u) + 6.0 * u;
@@ -324,6 +345,12 @@ pub fn book(
         }
     }
     y += 6.0 * u;
+    let Some(rules) = rules else {
+        let help = "run over spell cubes to learn them; pick a slot, then a spell";
+        let k = pixels::fit_scale(help, pw as i32 - 20 * ui, ui);
+        c.text_shadowed(x0 as i32, y as i32, help, k, DIM);
+        return;
+    };
     // Your level, and the rules.
     c.text_shadowed(
         x0 as i32,

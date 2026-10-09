@@ -123,12 +123,19 @@ pub const XP_CHEST: u32 = 45;
 pub const XP_KNOCKOUT: u32 = 110;
 /// More for knocking out someone of a higher level, a level.
 pub const XP_KNOCKOUT_LEVEL: u32 = 12;
+/// And the fallen's own XP joins the victor's (percent of it).
+pub const XP_SHARE: u32 = 100;
 /// One XP for this much damage dealt.
 pub const XP_DAMAGE: i32 = 3;
 
-// Loot: chests across the island; scrolls of spells in them.
-pub const CHESTS: usize = 40;
-/// How close opens a chest, and picks up a scroll.
+// Loot: spell cubes lying loose across the island, more in chests, and
+// every spell the fallen held. Running over a cube learns its spell or
+// ranks it up; the spellbook puts what you know in your four slots.
+pub const CHESTS: usize = 28;
+pub const LOOSE_CUBES: usize = 36;
+/// Ticks a spell put in a slot waits before it can be cast.
+pub const EQUIP_COOLDOWN: u32 = 2 * TICK_HZ;
+/// How close opens a chest, and picks up a cube.
 pub const CHEST_REACH: f32 = 1.7;
 pub const SCROLL_REACH: f32 = 1.4;
 pub const SCROLLS_A_CHEST: usize = 2;

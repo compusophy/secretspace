@@ -8,7 +8,7 @@ use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark};
 use crate::fx::Draw;
 use crate::land::Land;
 use crate::rig::Rig;
-use wandfall::laws::SEA;
+use wandfall::laws::{SEA, SPELLS};
 use wandfall::map::Map;
 
 pub const GOLD: V3 = rgb(255, 214, 128);
@@ -30,6 +30,8 @@ pub struct Look {
     pub ring: Mesh,
     pub shard: Mesh,
     pub beam: Mesh,
+    /// A spell cube a unit across for each spell, its icon on every face.
+    pub cubes: Vec<Mesh>,
     /// The island (`land`).
     pub land: Land,
 }
@@ -39,6 +41,62 @@ pub use crate::rig::hue;
 fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
     let mut g = Geo::default();
     f(&mut g);
+    r.mesh(&g)
+}
+
+/// A spell cube a unit across, centred: its icon (as the bar draws it) on
+/// every face, a quad for each run of one colour in a row, its bright
+/// parts glowing, about a dark core.
+fn cube(r: &mut Renderer, sp: u8) -> Mesh {
+    const N: i32 = 20;
+    let mut c = pixels::Canvas::new(N, N);
+    crate::bar::icon(&mut c, sp, pixels::Rect::new(0.0, 0.0, N as f32, N as f32));
+    let core = rgb(16, 14, 26);
+    let px = |i: i32, j: i32| {
+        let o = ((j * N + i) * 4) as usize;
+        let a = c.data[o + 3] as f32 / 255.0;
+        let col = rgb(c.data[o], c.data[o + 1], c.data[o + 2]);
+        let col = geo::mix(core, col, a);
+        let lum = 0.3 * col[0] + 0.55 * col[1] + 0.15 * col[2];
+        // Quantised a little, so a row runs into few quads.
+        let q = |v: f32| (v * 24.0).round() / 24.0;
+        (
+            [q(col[0]), q(col[1]), q(col[2])],
+            ((lum - 0.45) * 3.0).clamp(0.0, 1.6),
+        )
+    };
+    let mut g = Geo::default();
+    g.block([0.0, -0.49, 0.0], [0.98; 3], 0.0, core, core, 0.0);
+    // Each face: right, down (as the icon's rows run), out.
+    let faces: [(V3, V3, V3); 6] = [
+        ([1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
+        ([-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]),
+        ([0.0, 0.0, -1.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        ([0.0, 0.0, 1.0], [0.0, -1.0, 0.0], [-1.0, 0.0, 0.0]),
+        ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+        ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]),
+    ];
+    for (u, v, n) in faces {
+        let at = |i: i32, j: i32| {
+            let (a, b) = (i as f32 / N as f32 - 0.5, j as f32 / N as f32 - 0.5);
+            geo::add(
+                geo::scale(n, 0.502),
+                geo::add(geo::scale(u, a), geo::scale(v, b)),
+            )
+        };
+        for j in 0..N {
+            let mut i = 0;
+            while i < N {
+                let (col, glow) = px(i, j);
+                let mut e = i + 1;
+                while e < N && px(e, j) == (col, glow) {
+                    e += 1;
+                }
+                g.quad(at(i, j), at(i, j + 1), at(e, j + 1), at(e, j), col, glow);
+                i = e;
+            }
+        }
+    }
     r.mesh(&g)
 }
 
@@ -123,6 +181,7 @@ impl Look {
             wall: one(r, |g| {
                 g.column([0.0; 3], 64, (1.0, 1.0), 1.0, 0.0, STORM, 0.5, false);
             }),
+            cubes: (0..SPELLS.len() as u8).map(|sp| cube(r, sp)).collect(),
         }
     }
 
@@ -140,7 +199,7 @@ impl Look {
             self.shard,
             self.beam,
         ];
-        for m in all.into_iter().chain(self.land.held) {
+        for m in all.into_iter().chain(self.land.held).chain(self.cubes) {
             r.free(m);
         }
         self.rig.free(r);

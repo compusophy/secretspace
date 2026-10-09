@@ -364,33 +364,26 @@ pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
         if far(p) {
             continue;
         }
+        // A spell cube, turning and bobbing, tipped to show its top.
         let c = colour(s);
-        let bob = 0.8 + 0.12 * (t * 2.2 + id as f32).sin();
+        let bob = 0.85 + 0.12 * (t * 2.2 + id as f32).sin();
         let at = [p[0], p[1] + bob, p[2]];
-        let a = t * 1.6 + id as f32;
-        let side = [a.cos(), 0.0, a.sin()];
-        let k = 0.15 + 0.03 * rank as f32;
-        let m = m4::basis(
-            at,
-            [0.0, k * 2.2, 0.0],
-            geo::scale(side, k),
-            geo::scale([-side[2], 0.0, side[0]], k),
-        );
-        glow(d, look.shard, m, c, 1.0);
-        glow(
-            d,
-            look.orb,
-            m4::place(at, 0.0, [k * 0.45; 3]),
-            mix(c, WHITE, 0.8),
-            1.0,
-        );
-        let top = 2.5 + 1.5 * rank as f32;
+        let a = t * 1.1 + id as f32;
+        let k = 0.5 + 0.06 * rank as f32;
+        let (st, ct) = (0.42f32.sin(), 0.42f32.cos());
+        let tip = m4::basis([0.0; 3], [1.0, 0.0, 0.0], [0.0, ct, st], [0.0, -st, ct]);
+        let m = m4::mul(&m4::place(at, a, [k; 3]), &tip);
+        if let Some(&cube) = look.cubes.get(s as usize) {
+            d.items.push(Item::new(cube, m).rough(0.45));
+        }
+        // Its light rises from above it (higher, the higher its rank).
+        let top = 3.0 + 1.5 * rank as f32;
         beam(
             look,
             d,
-            ([p[0], p[1], p[2]], [p[0], p[1] + top, p[2]]),
-            0.09 + 0.03 * rank as f32,
-            (c, 0.45),
+            ([at[0], at[1] + k * 0.9, at[2]], [p[0], p[1] + top, p[2]]),
+            0.05 + 0.02 * rank as f32,
+            (c, 0.3),
             true,
         );
         ring(look, d, [p[0], p[1] + 0.06, p[2]], 0.55, c, 0.7, t);

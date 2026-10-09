@@ -1,8 +1,7 @@
 //! Playing with fingers: the left half of the screen is a stick (put a
 //! thumb down anywhere and push), the right half turns the view, and
-//! buttons on the right cast: the wand (held), jump, aim (a toggle), the
-//! four spells with their icons and cooldowns, and take (when a scroll
-//! lies underfoot).
+//! buttons on the right cast: the wand (held), jump, duck and aim (two
+//! toggles), and the four spells with their icons and cooldowns.
 
 use kit::input::Kind;
 use pixels::{Canvas, Rect, Rgba};
@@ -26,7 +25,6 @@ enum Button {
     Crouch,
     Aim,
     Slot(usize),
-    Take,
     Menu,
 }
 
@@ -43,14 +41,12 @@ pub struct Touch {
     /// Crouching (a toggle, as aim is).
     pub crouch: bool,
     asked: u8,
-    /// A scroll underfoot that needs asking for (shows the take button).
-    pub can_take: bool,
     /// The menu button was tapped (the page takes it).
     pub menu: bool,
 }
 
 /// Where each button is, in CSS pixels: (button, x, y, radius).
-fn layout(w: f64, h: f64, take: bool) -> Vec<(Button, f64, f64, f64)> {
+fn layout(w: f64, h: f64) -> Vec<(Button, f64, f64, f64)> {
     let (fx, fy) = (w - 62.0, h - 70.0);
     let mut v = vec![
         (Button::Fire, fx, fy, 38.0),
@@ -68,9 +64,6 @@ fn layout(w: f64, h: f64, take: bool) -> Vec<(Button, f64, f64, f64)> {
             21.0,
         ));
     }
-    if take {
-        v.push((Button::Take, w / 2.0, h * 0.62 + 40.0, 28.0));
-    }
     v.push((Button::Menu, w / 2.0, 58.0, 18.0));
     v
 }
@@ -80,12 +73,9 @@ impl Touch {
     pub fn finger(&mut self, id: i32, kind: Kind, x: f64, y: f64, css: (f64, f64)) -> (f32, f32) {
         match kind {
             Kind::Down => {
-                let hit =
-                    layout(css.0, css.1, self.can_take)
-                        .into_iter()
-                        .find(|&(_, bx, by, r)| {
-                            (x - bx).powi(2) + (y - by).powi(2) < (r + 8.0).powi(2)
-                        });
+                let hit = layout(css.0, css.1).into_iter().find(|&(_, bx, by, r)| {
+                    (x - bx).powi(2) + (y - by).powi(2) < (r + 8.0).powi(2)
+                });
                 match hit {
                     Some((b, ..)) => {
                         match b {
@@ -185,14 +175,9 @@ impl Touch {
         k
     }
 
-    /// Spells tapped since the last call, and take held.
+    /// Spells tapped since the last call.
     pub fn casts(&mut self) -> u8 {
-        let take = if self.holding(Button::Take) {
-            cast::TAKE
-        } else {
-            0
-        };
-        std::mem::take(&mut self.asked) | take
+        std::mem::take(&mut self.asked)
     }
 
     /// The stick and the buttons, over the HUD (`scale` CSS pixels a
@@ -207,7 +192,7 @@ impl Touch {
             let k = len.min(REACH) / len;
             c.circle(px(o.0 + dx * k), px(o.1 + dy * k), px(22.0), ink.fade(0.45));
         }
-        for (b, x, y, r) in layout(css.0, css.1, self.can_take) {
+        for (b, x, y, r) in layout(css.0, css.1) {
             let held = self.holding(b)
                 || (b == Button::Aim && self.aim)
                 || (b == Button::Crouch && self.crouch);
@@ -231,7 +216,6 @@ impl Touch {
                 Button::Fire => label(c, "cast"),
                 Button::Jump => label(c, "jump"),
                 Button::Aim => label(c, "aim"),
-                Button::Take => label(c, "take"),
                 Button::Menu => label(c, "menu"),
                 Button::Crouch => label(c, "duck"),
                 Button::Slot(k) => {

@@ -7,7 +7,7 @@
 use engine::rng::splitmix;
 
 use crate::laws::*;
-use crate::loot;
+
 use crate::motion::{cast, keys, Input};
 use crate::storm::Now;
 use crate::trig;
@@ -236,15 +236,10 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
     (input, m)
 }
 
-/// Whether a bot would take this scroll: a spell it has, a free slot of
-/// its kind, or better than its weakest.
-fn wants(me: &Player, spell: u8, rank: u8) -> bool {
-    let [a, b] = loot::slots_of(spell);
-    me.slots.iter().flatten().any(|s| s.spell == spell)
-        || me.slots[a]
-            .map_or(0, |s| s.rank)
-            .min(me.slots[b].map_or(0, |s| s.rank))
-            < rank
+/// Whether a cube is worth a bot's detour: a spell it can still learn
+/// or rank up.
+fn wants(me: &Player, spell: u8, _rank: u8) -> bool {
+    me.book[spell as usize % SPELLS.len()] < MAX_RANK
 }
 
 /// The distance a bot likes to fight at: close with Frost, far with the

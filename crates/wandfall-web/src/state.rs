@@ -54,6 +54,9 @@ pub struct State {
     pub shows: Vec<(f64, Ev)>,
     /// When you last levelled, and to what.
     pub levelled: (f64, u8),
+    /// When you last learned a spell or ranked one up: the spell, its
+    /// rank now, and whether it is in a slot.
+    pub learned: (f64, u8, u8, bool),
     /// Your hits, to show their numbers: (when, on whom, how much, with
     /// what).
     pub numbers: Vec<(f64, u16, u16, u8)>,
@@ -89,6 +92,14 @@ impl State {
             _ => guess,
         });
         if let Some(o) = &f.you {
+            if let Some(old) = &self.last_own {
+                for (k, (&a, &b)) in old.book.iter().zip(&o.book).enumerate() {
+                    if b > a {
+                        let slotted = o.slots.iter().flatten().any(|s| s.0 == k as u8);
+                        self.learned = (now, k as u8, b, slotted);
+                    }
+                }
+            }
             self.last_own = Some(*o);
             for k in 0..4 {
                 if self.cds[k] > 0 && o.cds[k] == 0 {

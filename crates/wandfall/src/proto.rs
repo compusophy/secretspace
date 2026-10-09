@@ -6,14 +6,16 @@
 
 use engine::wire::{Reader, Writer};
 
+use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 4;
+pub const PROTO: u8 = 5;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
     pub const INPUT: u8 = 2;
+    pub const EQUIP: u8 = 3;
     pub const WELCOME: u8 = 1;
     pub const FRAME: u8 = 2;
     pub const ROSTER: u8 = 3;
@@ -26,8 +28,15 @@ pub const MAX_INPUTS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Up {
-    Join { proto: u8 },
+    Join {
+        proto: u8,
+    },
     Inputs(Vec<Input>),
+    /// The spellbook: put a spell you know in a slot.
+    Equip {
+        slot: u8,
+        spell: u8,
+    },
 }
 
 impl Up {
@@ -36,6 +45,9 @@ impl Up {
         match self {
             Up::Join { proto } => {
                 w.u8(tag::JOIN).u8(*proto);
+            }
+            Up::Equip { slot, spell } => {
+                w.u8(tag::EQUIP).u8(*slot).u8(*spell);
             }
             Up::Inputs(v) => {
                 w.u8(tag::INPUT).u8(v.len().min(MAX_INPUTS) as u8);
@@ -51,6 +63,10 @@ impl Up {
         let mut r = Reader::new(b);
         match r.u8()? {
             tag::JOIN => Some(Up::Join { proto: r.u8()? }),
+            tag::EQUIP => Some(Up::Equip {
+                slot: r.u8()?,
+                spell: r.u8()?,
+            }),
             tag::INPUT => {
                 let n = r.u8()? as usize;
                 if n == 0 || n > MAX_INPUTS {
@@ -99,6 +115,8 @@ pub struct Own {
     /// Each slot: (spell, rank), or None; ticks until it is ready.
     pub slots: [Option<(u8, u8)>; 4],
     pub cds: [u16; 4],
+    /// The spellbook: each spell's rank, 0 for one not known.
+    pub book: [u8; SPELLS.len()],
 }
 
 /// Another wizard (or you, as everyone sees you).
@@ -224,6 +242,10 @@ impl Frame {
                     let (spell, rank) = s.unwrap_or((255, 0));
                     w.u8(spell).u8(rank).u16(cd);
                 }
+                // Two ranks a byte.
+                for pair in o.book.chunks(2) {
+                    w.u8(pair[0] & 15 | (pair.get(1).copied().unwrap_or(0) & 15) << 4);
+                }
             }
         }
         let n = self.players.len().min(255);
@@ -301,6 +323,13 @@ impl Frame {
                 let (spell, rank) = (r.u8()?, r.u8()?);
                 o.slots[k] = (spell != 255).then_some((spell, rank));
                 o.cds[k] = r.u16()?;
+            }
+            for k in (0..o.book.len()).step_by(2) {
+                let b = r.u8()?;
+                o.book[k] = (b & 15).min(MAX_RANK);
+                if let Some(next) = o.book.get_mut(k + 1) {
+                    *next = (b >> 4).min(MAX_RANK);
+                }
             }
             f.you = Some(o);
         }
@@ -621,6 +650,7 @@ mod tests {
                 shield: 40,
                 slots: [Some((0, 3)), None, Some((7, 1)), None],
                 cds: [0, 300, 12, 0],
+                book: [3, 0, 1, 2, 0, 0, 0, 1],
             }),
             players: vec![Seen {
                 id: 4,

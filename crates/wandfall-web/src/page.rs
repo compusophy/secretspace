@@ -380,7 +380,7 @@ fn hands(p: &mut Page) {
             p.sounds.mute(on);
             continue;
         }
-        if code == "KeyB" && matches!(p.mode, Mode::Practice(_)) {
+        if code == "KeyB" && !matches!(p.mode, Mode::Title) {
             act(p, if p.book { Act::CloseBook } else { Act::Book });
             continue;
         }
@@ -435,10 +435,10 @@ fn inputs(p: &mut Page, dt: f64) {
     if p.aiming {
         k |= keys::AIM;
     }
-    let mut take = if held("KeyG") { cast::TAKE } else { 0 };
+    let mut tapped = 0;
     if p.touch && !busy {
         k |= p.pad.keys();
-        take |= p.pad.casts();
+        tapped |= p.pad.casts();
     }
     while p.acc >= MS_A_TICK {
         p.acc -= MS_A_TICK;
@@ -464,7 +464,7 @@ fn inputs(p: &mut Page, dt: f64) {
             yaw: trig::heading(p.yaw),
             pitch: trig::pitch(p.pitch),
             keys: k,
-            cast: asked | take,
+            cast: asked | tapped,
         };
         p.prev = p.pred.body;
         p.pred.push(i, &island.map);
@@ -833,12 +833,6 @@ fn frame(p: &mut Page, now: f64) {
             }
             let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
             if p.touch && p.alive && !p.book && !p.paused {
-                let me = p.pred.body.p;
-                p.pad.can_take =
-                    p.st.loot
-                        .scrolls
-                        .iter()
-                        .any(|s| (s.3[0] - me[0]).powi(2) + (s.3[2] - me[2]).powi(2) < 2.5);
                 p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);
             }
             // The online lobby: who is waiting.
@@ -852,12 +846,16 @@ fn frame(p: &mut Page, now: f64) {
                 menu::lobby(&mut p.g.hud, ui, &names);
             }
             if p.book {
-                if let (Some(o), Mode::Practice(room)) = (own, &mut p.mode) {
-                    let rules = room
+                // The range's tools (ranks, levels, rules) only there.
+                let rules = match &mut p.mode {
+                    Mode::Practice(room) => room
                         .world()
                         .practice
                         .as_ref()
-                        .map_or((false, false), |r| (r.no_cooldowns, r.sparring));
+                        .map(|r| (r.no_cooldowns, r.sparring)),
+                    _ => None,
+                };
+                if let Some(o) = own {
                     menu::book(&mut p.g.hud, &mut p.spots, ui, o, p.book_slot, rules);
                 }
             } else if (p.paused || (!p.touch && !kit::input::locked())) && p.orbit.is_none() {

@@ -67,6 +67,8 @@ pub struct Player {
     /// 1 to MAX_LEVEL, and XP toward the next.
     pub level: u8,
     pub xp: u32,
+    /// The spellbook: each spell's rank, 0 for one not known.
+    pub book: [u8; SPELLS.len()],
     /// Two offensive slots, then two utility; ticks until each is ready.
     pub slots: [Option<Slot>; 4],
     pub cds: [u32; 4],
@@ -75,8 +77,6 @@ pub struct Player {
     pub shield_until: u32,
     pub mend: i32,
     pub mend_until: u32,
-    /// Asked to take the scroll underfoot (over one already held).
-    pub take: bool,
 }
 
 impl Player {
@@ -255,7 +255,7 @@ impl World {
             shield_until: 0,
             mend: 0,
             mend_until: 0,
-            take: false,
+            book: [0; SPELLS.len()],
         }
     }
 
@@ -294,6 +294,14 @@ impl World {
     }
 
     /// A page's inputs, to apply one a tick. A flood is cut short.
+    /// The spellbook: put a spell `id` knows in one of its slots.
+    pub fn equip(&mut self, id: u16, slot: usize, spell: u8) -> bool {
+        let lobby = self.phase == Phase::Lobby;
+        self.find_mut(id)
+            .filter(|p| p.alive || lobby)
+            .is_some_and(|p| loot::equip(p, slot, spell))
+    }
+
     pub fn input(&mut self, id: u16, i: Input) {
         if let Some(p) = self.players.iter_mut().find(|p| p.id == id && !p.bot) {
             if p.queue.len() < 30 {
@@ -352,10 +360,7 @@ impl World {
             fresh(p);
             // Everyone drops with a spell to hurt with; the rest is loot.
             let first = spell::OFFENSE[(self.rng.next_u64() % 4) as usize];
-            p.slots[0] = Some(Slot {
-                spell: first,
-                rank: 1,
-            });
+            loot::learn(p, first, 1);
         }
         self.storm = Storm::plan(&self.map, &mut self.rng);
         self.bolts.clear();
@@ -399,9 +404,11 @@ impl World {
             return practice::fallen(self, who, by, ev);
         }
         let place = self.alive() as u16;
-        let mut level = 1;
+        let (mut level, mut xp) = (1, 0);
         if let Some(k) = self.players.iter().position(|p| p.id == who) {
             level = self.players[k].level;
+            // All it learned, its levels' too, go to the one who felled it.
+            xp = (level as u32 - 1) * XP_PER_LEVEL + self.players[k].xp;
             loot::drop_spells(self, k);
             let p = &mut self.players[k];
             p.alive = false;
@@ -414,7 +421,8 @@ impl World {
         });
         if let Some(mine) = killer {
             let more = level.saturating_sub(mine) as u32;
-            loot::gain(self, by, XP_KNOCKOUT + more * XP_KNOCKOUT_LEVEL, ev);
+            let share = xp * XP_SHARE / 100;
+            loot::gain(self, by, XP_KNOCKOUT + more * XP_KNOCKOUT_LEVEL + share, ev);
         }
         ev.push(Event::Out { who, by, place });
     }
@@ -538,7 +546,6 @@ impl World {
         let mut casts = Vec::new();
         for (k, p) in self.players.iter_mut().enumerate() {
             p.cool = p.cool.saturating_sub(1);
-            p.take = false;
             if !p.alive {
                 p.queue.clear();
                 continue;
@@ -569,7 +576,6 @@ impl World {
                 p.pitch = i.pitch.clamp(-16000, 16000);
                 motion::step(&mut p.body, &i, &self.map);
                 p.last = i;
-                p.take |= i.cast & cast::TAKE != 0;
                 for (slot, bit) in cast::SLOT.iter().enumerate() {
                     if i.cast & bit != 0 && !casts.contains(&(k, slot)) {
                         casts.push((k, slot));
@@ -688,6 +694,7 @@ impl World {
 fn fresh(p: &mut Player) {
     p.level = 1;
     p.xp = 0;
+    p.book = [0; SPELLS.len()];
     p.slots = [None; 4];
     p.cds = [0; 4];
     p.shield = 0;
@@ -706,6 +713,10 @@ pub(crate) fn warmup(p: &mut Player, rng: &mut Rng) {
     let [a, b] = two(spell::OFFENSE);
     let [c, d] = two(spell::UTILITY);
     p.slots = [a, b, c, d].map(|spell| Some(Slot { spell, rank: 1 }));
+    p.book = [0; SPELLS.len()];
+    for s in [a, b, c, d] {
+        p.book[s as usize] = 1;
+    }
 }
 
 /// Where along a bolt's step from `a` to `e` (0..1) it passes through a

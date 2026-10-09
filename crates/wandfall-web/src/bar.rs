@@ -8,8 +8,8 @@
 
 use pixels::{Canvas, Rect, Rgba};
 use render::V3;
-use wandfall::laws::{spell, MAX_LEVEL, MAX_RANK, SCROLL_REACH, SPELLS, TICK_HZ, XP_PER_LEVEL};
-use wandfall::loot::{cooldown, slots_of};
+use wandfall::laws::{spell, MAX_LEVEL, MAX_RANK, SPELLS, TICK_HZ, XP_PER_LEVEL};
+use wandfall::loot::cooldown;
 use wandfall::proto::Own;
 
 use crate::fx::colour;
@@ -334,11 +334,42 @@ pub fn draw(c: &mut Canvas, own: &Own, st: &State, now: f64, ui: i32, slots: boo
     let bottom = if slots { y - 22 * ui } else { 108 * ui };
     underfoot(c, own, st, bottom, ui);
     // A level gained.
+    learned(c, st, now, ui);
     let age = now - st.levelled.0;
     if age < 1800.0 && st.levelled.1 > 1 {
         let f = (1.0 - (age - 1200.0).max(0.0) / 600.0) as f32;
         let t = format!("level {}!", st.levelled.1);
         c.text_centred(w / 2, h / 3, &t, 3 * ui, GOLD.fade(f));
+    }
+}
+
+/// A spell just learned or ranked up, over the middle of the screen; a
+/// reminder of the spellbook when it is not in a slot.
+fn learned(c: &mut Canvas, st: &State, now: f64, ui: i32) {
+    let (at, sp, rank, slotted) = st.learned;
+    let age = now - at;
+    if rank == 0 || age > 2600.0 {
+        return;
+    }
+    let f = (1.0 - ((age - 1800.0) / 800.0).max(0.0)) as f32;
+    let col = rgba(colour(sp)).mix(INK, 0.25).fade(f);
+    let name = SPELLS[sp as usize % SPELLS.len()].name;
+    let t = if rank == 1 {
+        format!("learned {name}")
+    } else {
+        format!("{name} {}", "I".repeat(rank as usize))
+    };
+    let (w, y) = (c.w, c.h * 2 / 3 - 30 * ui);
+    let k = pixels::fit_scale(&t, w - 16 * ui, 2 * ui);
+    c.text_centred(w / 2, y, &t, k, col);
+    if !slotted {
+        c.text_centred(
+            w / 2,
+            y + 18 * ui,
+            "B: the spellbook, to use it",
+            ui,
+            DIM.fade(f),
+        );
     }
 }
 
@@ -353,35 +384,22 @@ fn underfoot(c: &mut Canvas, own: &Own, st: &State, y: i32, ui: i32) {
         .map(|s| (s, (s.3[0] - me[0]).powi(2) + (s.3[2] - me[2]).powi(2)))
         .filter(|(_, d2)| *d2 < 16.0)
         .min_by(|a, b| a.1.total_cmp(&b.1));
-    let Some((&(_, sp, rank, _), d2)) = near else {
+    let Some((&(_, sp, rank, _), _)) = near else {
         return;
     };
     let w = c.w;
     let info = &SPELLS[sp as usize % SPELLS.len()];
     let col = rgba(colour(sp));
-    let [a, b] = slots_of(sp);
-    let have = own.slots.iter().flatten().find(|s| s.0 == sp);
-    let free = own.slots[a].is_none() || own.slots[b].is_none();
-    let hint = if let Some(h) = have {
-        if h.1 >= MAX_RANK {
-            "yours is at its highest rank".to_string()
-        } else {
-            "walk over it: yours ranks up".to_string()
-        }
-    } else if free {
-        "walk over it to take it".to_string()
+    let known = own.book[sp as usize % SPELLS.len()];
+    let hint = if known == 0 {
+        "run over it to learn it".to_string()
+    } else if known >= MAX_RANK {
+        "yours is at its highest rank".to_string()
     } else {
-        let weak = if own.slots[a].map_or(0, |s| s.1) <= own.slots[b].map_or(0, |s| s.1) {
-            a
-        } else {
-            b
-        };
-        let old = own.slots[weak].map_or("", |s| SPELLS[s.0 as usize % SPELLS.len()].name);
-        if d2 < SCROLL_REACH * SCROLL_REACH {
-            format!("hold G to swap your {old} ({}) for it", KEYS[weak])
-        } else {
-            format!("stand on it and hold G to swap your {old}")
-        }
+        format!(
+            "run over it: yours ranks up to {}",
+            "I".repeat(known as usize + 1)
+        )
     };
     let u = ui as f32;
     let title = format!("{}  {}", info.name, "I".repeat(rank as usize));

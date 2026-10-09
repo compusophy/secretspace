@@ -156,6 +156,9 @@ impl Room for Wandfall {
                     self.world.input(you, i);
                 }
             }
+            Up::Equip { slot, spell } => {
+                self.world.equip(you, slot as usize, spell);
+            }
         }
     }
 

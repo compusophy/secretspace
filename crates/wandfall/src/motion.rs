@@ -15,13 +15,12 @@ pub struct Input {
     pub yaw: u16,
     pub pitch: i16,
     pub keys: u8,
-    /// Spells cast this input (a bit a slot) and taking a scroll.
+    /// Spells cast this input (a bit a slot).
     pub cast: u8,
 }
 
 pub mod cast {
     pub const SLOT: [u8; 4] = [1, 2, 4, 8];
-    pub const TAKE: u8 = 16;
 }
 
 pub mod keys {

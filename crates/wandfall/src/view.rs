@@ -29,6 +29,7 @@ pub fn frame(w: &World, you: u16) -> Frame {
         shield: p.shield.clamp(0, u16::MAX as i32) as u16,
         slots: p.slots.map(|s| s.map(|s| (s.spell, s.rank))),
         cds: p.cds.map(|c| c.min(u16::MAX as u32) as u16),
+        book: p.book,
     });
     Frame {
         tick: w.tick,

@@ -95,6 +95,11 @@ pub(super) fn act(p: &mut Page, a: Act) {
             }
         }
         Act::Slot(k) => p.book_slot = k,
+        // Online or on the range, the room puts a spell you know in.
+        Act::Spell(sp) => {
+            let slot = p.book_slot as u8;
+            send(p, &Up::Equip { slot, spell: sp });
+        }
         _ => {
             let Mode::Practice(room) = &mut p.mode else {
                 return;
@@ -103,9 +108,6 @@ pub(super) fn act(p: &mut Page, a: Act) {
             let slot = p.book_slot;
             let held = own.and_then(|o| o.slots[slot]);
             match a {
-                Act::Spell(sp) => {
-                    practice::equip(w, you, slot, sp, held.map_or(1, |h| h.1));
-                }
                 Act::Rank(r) => {
                     if let Some((sp, _)) = held {
                         practice::equip(w, you, slot, sp, r);

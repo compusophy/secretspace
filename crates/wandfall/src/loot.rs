@@ -1,10 +1,12 @@
-//! Loot and levels. Chests stand across the island when a match begins;
-//! walking into one opens it: XP, and scrolls of spells spill out around
-//! it. Walking over a scroll takes it: into a free slot of its kind, or
-//! ranking up the same spell if you have it; over a full set, only when
-//! asked (the page's take key), and the spell it replaces is dropped. The
-//! knocked out drop every spell they carried. XP from chests, damage and
-//! knockouts raises a wizard's level: more health, more power.
+//! Loot and levels. Spell cubes lie loose across the island when a match
+//! begins, and chests stand about it; walking into a chest opens it: XP,
+//! and cubes spill out around it. Running over a cube learns its spell
+//! into your spellbook, or ranks it up if you know it; a spell new to you
+//! goes into a free slot of its kind, and the spellbook (the page's B)
+//! puts any spell you know in any slot of its kind. The knocked out drop
+//! every spell they knew, each at its rank, and their XP goes to whoever
+//! felled them. XP from chests, damage and knockouts raises a wizard's
+//! level: more health, more power.
 
 use crate::laws::*;
 use crate::world::{Event, Phase, Player, Slot, World};
@@ -16,6 +18,7 @@ pub struct Chest {
     pub open: bool,
 }
 
+/// A spell cube lying on the island.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scroll {
     pub id: u16,
@@ -146,49 +149,89 @@ pub fn scatter(w: &mut World) {
             open: false,
         });
     }
+    // And cubes lying loose, away from the chests.
+    for _ in 0..LOOSE_CUBES {
+        let [x, z] = w.map.spot(&mut w.rng);
+        let spell = (w.rng.next_u64() % SPELLS.len() as u64) as u8;
+        let rank = if w.rng.next_u64().is_multiple_of(RARE_SCROLL) {
+            2
+        } else {
+            1
+        };
+        drop_scroll(w, spell, rank, [x, 0.0, z], 0.0);
+    }
     w.loot_dirty = true;
 }
 
-/// A knocked-out wizard's spells, lying where it fell.
+/// A knocked-out wizard's spells, every one it knew at its rank, lying
+/// where it fell.
 pub fn drop_spells(w: &mut World, k: usize) {
     let at = w.players[k].body.p;
-    let held: Vec<Slot> = w.players[k].slots.iter().flatten().copied().collect();
+    let book = std::mem::replace(&mut w.players[k].book, [0; SPELLS.len()]);
     w.players[k].slots = [None; 4];
-    for s in held {
-        drop_scroll(w, s.spell, s.rank, at, 1.8);
-    }
-}
-
-/// Take a scroll if it can be taken: what it replaced, if anything.
-/// `force` takes it over the weakest spell of its kind.
-pub fn take(p: &mut Player, spell: u8, rank: u8, force: bool) -> Option<Option<Slot>> {
-    if let Some(s) = p.slots.iter_mut().flatten().find(|s| s.spell == spell) {
-        s.rank = (s.rank + 1).max(rank).min(MAX_RANK);
-        return Some(None);
-    }
-    let [a, b] = slots_of(spell);
-    for k in [a, b] {
-        if p.slots[k].is_none() {
-            p.slots[k] = Some(Slot { spell, rank });
-            p.cds[k] = 0;
-            return Some(None);
+    for (spell, &rank) in book.iter().enumerate() {
+        if rank > 0 {
+            drop_scroll(w, spell as u8, rank, at, 2.2);
         }
     }
-    if !force {
-        return None;
-    }
-    let weakest = if p.slots[a].map_or(0, |s| s.rank) <= p.slots[b].map_or(0, |s| s.rank) {
-        a
-    } else {
-        b
-    };
-    let old = p.slots[weakest];
-    p.slots[weakest] = Some(Slot { spell, rank });
-    p.cds[weakest] = 0;
-    Some(old)
 }
 
-/// Chests opened and scrolls taken by whoever stands at them.
+/// Learn a spell from a cube, or rank it up if it is known: a spell new
+/// to you goes into a free slot of its kind. Bots keep the best of each
+/// kind in their slots.
+pub fn learn(p: &mut Player, spell: u8, rank: u8) {
+    let i = spell as usize % SPELLS.len();
+    let spell = i as u8;
+    let was = p.book[i];
+    p.book[i] = if was == 0 {
+        rank.clamp(1, MAX_RANK)
+    } else {
+        (was + 1).max(rank).min(MAX_RANK)
+    };
+    let now = p.book[i];
+    if let Some(s) = p.slots.iter_mut().flatten().find(|s| s.spell == spell) {
+        s.rank = now;
+        return;
+    }
+    let [a, b] = slots_of(spell);
+    if let Some(k) = [a, b].into_iter().find(|&k| p.slots[k].is_none()) {
+        p.slots[k] = Some(Slot { spell, rank: now });
+        p.cds[k] = 0;
+    } else if p.bot {
+        let rank_of = |k: usize| p.slots[k].map_or(0, |s| s.rank);
+        let k = if rank_of(a) <= rank_of(b) { a } else { b };
+        if rank_of(k) < now {
+            p.slots[k] = Some(Slot { spell, rank: now });
+        }
+    }
+}
+
+/// The spellbook: put a spell you know in a slot of its kind (if it is
+/// in the other slot, the two trade places). A spell put in waits a
+/// moment before it can be cast.
+pub fn equip(p: &mut Player, slot: usize, spell: u8) -> bool {
+    let i = spell as usize;
+    if slot > 3 || i >= SPELLS.len() || p.book[i] == 0 || !slots_of(spell).contains(&slot) {
+        return false;
+    }
+    if p.slots[slot].is_some_and(|s| s.spell == spell) {
+        return true;
+    }
+    let held = Some(Slot {
+        spell,
+        rank: p.book[i],
+    });
+    if let Some(k) = (0..4).find(|&k| k != slot && p.slots[k].is_some_and(|s| s.spell == spell)) {
+        p.slots.swap(k, slot);
+        p.cds.swap(k, slot);
+    } else {
+        p.slots[slot] = held;
+        p.cds[slot] = p.cds[slot].max(EQUIP_COOLDOWN);
+    }
+    true
+}
+
+/// Chests opened and cubes picked up by whoever stands at them.
 pub fn touch(w: &mut World, ev: &mut Vec<Event>) {
     if w.phase != Phase::Fight {
         return;
@@ -224,24 +267,9 @@ pub fn touch(w: &mut World, ev: &mut Vec<Event>) {
         let Some(s) = w.scrolls.iter().position(|s| near(s.p, SCROLL_REACH)) else {
             continue;
         };
-        let sc = w.scrolls[s];
-        let p = &mut w.players[k];
-        // Bots take what is better than their weakest of its kind.
-        let force = p.take
-            || (p.bot && {
-                let [a, b] = slots_of(sc.spell);
-                p.slots[a]
-                    .map_or(0, |x| x.rank)
-                    .min(p.slots[b].map_or(0, |x| x.rank))
-                    < sc.rank
-            });
-        if let Some(old) = take(p, sc.spell, sc.rank, force) {
-            w.scrolls.remove(s);
-            w.loot_dirty = true;
-            if let Some(o) = old {
-                drop_scroll(w, o.spell, o.rank, at, 1.5);
-            }
-        }
+        let sc = w.scrolls.remove(s);
+        learn(&mut w.players[k], sc.spell, sc.rank);
+        w.loot_dirty = true;
     }
 }
 
@@ -251,48 +279,54 @@ mod tests {
     use crate::world::World;
 
     #[test]
-    fn duplicates_rank_up_and_full_slots_need_asking() {
+    fn running_over_cubes_learns_and_ranks_up_and_the_book_equips() {
         let mut w = World::new(3);
         let id = w.join("t", 0);
         let p = w.find_mut(id).unwrap();
-        // Out of the lobby's practice set.
+        p.book = [0; SPELLS.len()];
         p.slots = [None; 4];
-        assert_eq!(take(p, spell::LANCE, 1, false), Some(None));
-        assert_eq!(take(p, spell::FIREBALL, 1, false), Some(None));
-        assert_eq!(take(p, spell::LANCE, 1, false), Some(None));
+        learn(p, spell::LANCE, 1);
+        learn(p, spell::FIREBALL, 1);
+        learn(p, spell::LANCE, 1);
+        let lance = Some(Slot {
+            spell: spell::LANCE,
+            rank: 2,
+        });
+        assert_eq!(p.slots[0], lance, "known: ranked up, in its slot");
+        learn(p, spell::FROST, 2);
         assert_eq!(
-            p.slots[0],
-            Some(Slot {
-                spell: spell::LANCE,
-                rank: 2
-            })
+            p.book[spell::FROST as usize],
+            2,
+            "learned though the slots are full"
         );
-        assert_eq!(
-            take(p, spell::FROST, 1, false),
-            None,
-            "both offensive slots are full"
-        );
-        let old = take(p, spell::FROST, 1, true).unwrap();
-        assert_eq!(
-            old,
-            Some(Slot {
-                spell: spell::FIREBALL,
-                rank: 1
-            }),
-            "the weaker goes"
-        );
-        assert_eq!(take(p, spell::WARD, 3, false), Some(None));
-        assert_eq!(
-            p.slots[2],
-            Some(Slot {
-                spell: spell::WARD,
-                rank: 3
-            })
-        );
+        assert!(!p.slots.iter().flatten().any(|s| s.spell == spell::FROST));
+        assert!(equip(p, 1, spell::FROST), "the book puts it in");
+        assert_eq!(p.slots[1].unwrap().spell, spell::FROST);
+        assert!(p.cds[1] >= EQUIP_COOLDOWN, "and it waits a moment");
+        assert!(!equip(p, 2, spell::FROST), "not in a utility slot");
+        assert!(!equip(p, 3, spell::WARD), "not a spell it knows");
+        assert!(equip(p, 0, spell::FROST), "in the other slot: they trade");
+        assert_eq!(p.slots[1], lance);
         for _ in 0..9 {
-            take(p, spell::WARD, 1, false);
+            learn(p, spell::LANCE, 1);
         }
-        assert_eq!(p.slots[2].unwrap().rank, MAX_RANK);
+        assert_eq!(p.book[spell::LANCE as usize], MAX_RANK);
+    }
+
+    #[test]
+    fn the_fallen_drop_every_spell_they_knew() {
+        let mut w = World::new(3);
+        let id = w.join("t", 0);
+        let k = w.players.iter().position(|p| p.id == id).unwrap();
+        w.players[k].book = [0; SPELLS.len()];
+        w.players[k].book[spell::LANCE as usize] = 3;
+        w.players[k].book[spell::WARD as usize] = 1;
+        w.scrolls.clear();
+        drop_spells(&mut w, k);
+        let mut dropped: Vec<(u8, u8)> = w.scrolls.iter().map(|s| (s.spell, s.rank)).collect();
+        dropped.sort();
+        assert_eq!(dropped, vec![(spell::LANCE, 3), (spell::WARD, 1)]);
+        assert_eq!(w.players[k].book, [0; SPELLS.len()]);
     }
 
     #[test]

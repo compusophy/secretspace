@@ -9,7 +9,7 @@ use crate::bots::Mind;
 use crate::laws::*;
 use crate::loot;
 use crate::map::Kind as PropKind;
-use crate::world::{Event, Phase, Slot, World};
+use crate::world::{Event, Phase, World};
 
 #[derive(Clone, Debug, Default)]
 pub struct Practice {
@@ -38,6 +38,7 @@ pub fn setup(w: &mut World) {
     let spawn = clear(w, spawn);
     w.practice = Some(Practice {
         spawn,
+        chests_at: w.tick + PRACTICE_CHESTS_EVERY,
         ..Practice::default()
     });
     w.phase = Phase::Fight;
@@ -56,6 +57,14 @@ pub fn setup(w: &mut World) {
         w.players.push(b);
     }
     loot::scatter(w);
+    // A few cubes just ahead of where you start, to learn by.
+    let first = [spell::FROST, spell::WARD, spell::LIGHTNING, spell::BLINK];
+    for (k, &sp) in first.iter().enumerate() {
+        let a = (k as f32 - 1.5) * 0.35;
+        let d = 4.5 + k as f32 * 1.2;
+        let at = clear(w, [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d]);
+        loot::drop_scroll(w, sp, 1, [at[0], 0.0, at[1]], 0.0);
+    }
     w.roster_dirty = true;
 }
 
@@ -80,6 +89,8 @@ pub fn arrive(w: &mut World, name: &str) -> u16 {
     p.alive = true;
     p.entrant = true;
     crate::world::warmup(&mut p, &mut w.rng);
+    // On the range every spell is known.
+    p.book = [1; SPELLS.len()];
     let id = p.id;
     w.players.push(p);
     w.roster_dirty = true;
@@ -147,27 +158,22 @@ pub fn fallen(w: &mut World, who: u16, by: u16, ev: &mut Vec<Event>) {
     ev.push(Event::Out { who, by, place: 0 });
 }
 
-/// The spellbook: put `spell` at `rank` in `slot` (if it is of that
-/// slot's kind).
+/// The range's spellbook: every spell is known, at any rank; put
+/// `spell` at `rank` in `slot` (if it is of that slot's kind), at once.
 pub fn equip(w: &mut World, id: u16, slot: usize, spell: u8, rank: u8) -> bool {
-    if slot > 3 || spell as usize >= SPELLS.len() || !loot::slots_of(spell).contains(&slot) {
-        return false;
-    }
-    let Some(p) = w.find_mut(id) else {
+    let i = spell as usize;
+    let Some(p) = w.find_mut(id).filter(|_| i < SPELLS.len()) else {
         return false;
     };
-    // Not the same spell twice: the other slot gives it up.
-    for (k, s) in p.slots.iter_mut().enumerate() {
-        if k != slot && s.is_some_and(|s| s.spell == spell) {
-            *s = None;
-        }
+    p.book[i] = rank.clamp(1, MAX_RANK);
+    for s in p.slots.iter_mut().flatten().filter(|s| s.spell == spell) {
+        s.rank = p.book[i];
     }
-    p.slots[slot] = Some(Slot {
-        spell,
-        rank: rank.clamp(1, MAX_RANK),
-    });
-    p.cds[slot] = 0;
-    true
+    let ok = loot::equip(p, slot, spell);
+    if ok {
+        p.cds[slot] = 0;
+    }
+    ok
 }
 
 /// The spellbook: your level.
@@ -183,7 +189,7 @@ pub fn set_level(w: &mut World, id: u16, level: u8) {
 mod tests {
     use super::*;
     use crate::motion::{keys, Input};
-    use crate::world::WAND;
+    use crate::world::{Slot, WAND};
 
     #[test]
     fn dummies_fall_and_stand_again_and_you_are_safe() {
@@ -290,7 +296,10 @@ mod tests {
                 rank: 2
             })
         );
-        assert_eq!(p.slots[0], None, "the same spell moved");
+        assert!(
+            p.slots[0].is_none_or(|s| s.spell != spell::FIREBALL),
+            "the same spell moved"
+        );
         set_level(&mut w, me, 20);
         assert_eq!(w.find(me).unwrap().hp, loot::max_hp(20));
     }

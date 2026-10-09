@@ -774,12 +774,8 @@ impl Sounds {
             }
         }
         if let (Some(a), Some(b)) = (old.and_then(|o| o.you.as_ref()), f.you.as_ref()) {
-            let more = (0..4).any(|k| match (a.slots[k], b.slots[k]) {
-                (None, Some(_)) => true,
-                (Some(x), Some(y)) => y.0 != x.0 || y.1 > x.1,
-                _ => false,
-            });
-            if more {
+            // A spell learned or ranked up.
+            if a.book.iter().zip(&b.book).any(|(x, y)| y > x) {
                 self.take();
             }
         }

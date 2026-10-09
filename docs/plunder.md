@@ -206,6 +206,17 @@ of combat styles and all varieties to counter all varieties".
       chests. Between them: violet and teal wizard-wood, mushrooms, ruins;
       islets float over it all. Bots step around what stands ahead.
       `?cam=x,y,z,yaw,pitch` holds the camera to look (with `?orbit`).
+- [x] **Spell cubes and the spellbook**, on the owner's word ("pick up and
+      rank up everything you run over, no button press... the spellbook B
+      to choose the spells... when players die they drop all their spells
+      at the highest rank and their XP combines with yours"). Spells lie as
+      cubes, their icon on every face: 36 loose across the island, more
+      from 28 chests. Running over one learns it into your spellbook, or
+      ranks it up (to III); a spell new to you takes a free slot of its
+      kind. B opens the book anywhere: pick a slot, then any spell of its
+      kind you know (it waits 2 s before it can be cast; two slots trade).
+      The fallen drop every spell they knew at its rank, and their XP joins
+      their victor's. The wire carries the book (PROTO 5, `Up::Equip`).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half
