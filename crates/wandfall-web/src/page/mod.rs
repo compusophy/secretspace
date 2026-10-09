@@ -28,7 +28,7 @@ use crate::menu::{self, Act, Spots};
 use crate::rig;
 use crate::scene;
 use crate::settings::Settings;
-use crate::sky::{Hour, Sky};
+use crate::sky::{Hour, Sky, Weather};
 use crate::sound::Sounds;
 use crate::state::State;
 use crate::touch::Touch;
@@ -128,6 +128,7 @@ struct Page {
     /// The sky, turning with the island's day; `?hour=` holds it at one.
     sky: Sky,
     hour: Option<Hour>,
+    weather: Option<Weather>,
     /// How each wizard has been moving (for its stride).
     anims: HashMap<u16, rig::Anim>,
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
@@ -318,6 +319,7 @@ pub fn start() {
                     .map(|n| (n, query_value("age").and_then(|v| v.parse().ok()))),
                 sky: Sky::default(),
                 hour: query_value("hour").and_then(|h| Hour::named(&h)),
+                weather: query_value("weather").and_then(|w| Weather::named(&w)),
                 anims: HashMap::new(),
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,

@@ -388,6 +388,12 @@ of combat styles and all varieties to counter all varieties".
   light changes. The world keeps the hour and every frame names it; the
   page turns its sky over six seconds, and eases into the storm's violet
   and out. The range stays at dusk; `?hour=dawn|day|dusk|night` holds any.
+  Each lobby also rolls the weather (its own dice from the seed and the
+  match's count, so the world's are untouched; PROTO 16): mostly clear,
+  mist about one match in five (thick, pale, low), rain about one in
+  four (grey, the sun and stars hidden, the wind up, drops streaking
+  about you, a hiss under everything, no crickets or birds). The sky
+  turns into it with the hour; `?weather=clear|mist|rain` holds any.
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.

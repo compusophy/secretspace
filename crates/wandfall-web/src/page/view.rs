@@ -109,16 +109,20 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             rift: at(wandfall::places::Place::Rift, -2.0),
             spire: at(wandfall::places::Place::Spire, 12.0),
             storm,
-            night: p.sky.weigh(now, |h| match h {
-                Hour::Night => 1.0,
-                Hour::Dusk => 0.35,
+            // No crickets nor birds in the rain: the rain instead.
+            night: p.sky.weigh(now, |h, w| match (h, w) {
+                (_, Weather::Rain) => 0.0,
+                (Hour::Night, _) => 1.0,
+                (Hour::Dusk, _) => 0.35,
                 _ => 0.0,
             }),
-            birds: p.sky.weigh(now, |h| match h {
-                Hour::Dawn => 1.0,
-                Hour::Day => 0.5,
+            birds: p.sky.weigh(now, |h, w| match (h, w) {
+                (_, Weather::Rain) => 0.0,
+                (Hour::Dawn, _) => 1.0,
+                (Hour::Day, _) => 0.5,
                 _ => 0.0,
             }),
+            rain: p.sky.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32),
         };
         p.sounds.ambience.tune(&p.sounds.audio, &here, false);
     }
@@ -158,9 +162,16 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     let hour = p
         .hour
         .unwrap_or_else(|| Hour::from(p.st.frame.as_ref().map_or(RANGE_HOUR, |f| f.hour)));
+    // And its weather, the same way (`?weather=`).
+    let weather = p
+        .weather
+        .unwrap_or_else(|| Weather::from(p.st.frame.as_ref().map_or(0, |f| f.weather)));
+    let look = p.sky.look((hour, weather), in_storm, now);
+    let wet = p.sky.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32);
+    fx::rain(&mut d, cam.eye, t, wet, look.wind);
     let scene = Frame {
         cam,
-        look: p.sky.look(hour, in_storm, now),
+        look,
         time: t,
         items: &d.items,
         lights: &d.lights,

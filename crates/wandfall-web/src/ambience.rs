@@ -185,6 +185,28 @@ fn birds() -> Vec<f32> {
     s.looped(0.45, 0.8)
 }
 
+/// Rain: a hiss of many drops, and nearer ones pattering through it.
+fn rain() -> Vec<f32> {
+    let secs = 8.0;
+    let mut s = Synth::new(secs);
+    s.noise((0.0, secs), HELD, (1800.0, 1800.0), (7500.0, 7500.0), 0.0)
+        .noise(
+            (0.0, secs),
+            Env::new(0.7, 0.0, 1e6),
+            (900.0, 900.0),
+            (5000.0, 5000.0),
+            0.92,
+        )
+        .noise(
+            (0.0, secs),
+            Env::new(0.35, 0.0, 1e6),
+            (120.0, 120.0),
+            (600.0, 600.0),
+            0.0,
+        );
+    s.looped(0.45, 1.0)
+}
+
 /// Where you are, for the island's sound: the ear (where, facing which
 /// way), how high over the ground, on a broom, how fast; the rift and the
 /// Spire's beacon; the storm's circle if it stands (centre, radius).
@@ -200,6 +222,8 @@ pub struct Here {
     /// the afternoon (birds), 0 to 1.
     pub night: f32,
     pub birds: f32,
+    /// How hard it is raining, 0 to 1.
+    pub rain: f32,
 }
 
 pub struct Ambience {
@@ -209,6 +233,7 @@ pub struct Ambience {
     storm: usize,
     crickets: usize,
     birds: usize,
+    rain: usize,
 }
 
 impl Ambience {
@@ -224,6 +249,7 @@ impl Ambience {
             storm: hum(roar()),
             crickets: hum(crickets()),
             birds: hum(birds()),
+            rain: hum(rain()),
         }
     }
 
@@ -269,6 +295,8 @@ impl Ambience {
         let calm = (1.0 - h.over / 25.0).clamp(0.0, 1.0) * (1.0 - roar).max(0.0);
         audio.tune(self.crickets, 0.3 * h.night * calm * k, 0.0);
         audio.tune(self.birds, 0.22 * h.birds * calm * k, 0.0);
+        // Rain all round, a little less inside the storm's roar.
+        audio.tune(self.rain, 0.5 * h.rain * (1.0 - 0.5 * roar) * k, 0.0);
     }
 }
 
@@ -285,6 +313,7 @@ mod tests {
             ("roar", roar()),
             ("crickets", crickets()),
             ("birds", birds()),
+            ("rain", rain()),
         ] {
             let top = v.iter().fold(0.0f32, |m, x| m.max(x.abs()));
             let rms = (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();

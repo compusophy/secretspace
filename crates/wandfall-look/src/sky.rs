@@ -63,24 +63,117 @@ impl Hour {
     }
 }
 
-/// The sky as it turns: the hour it is turning from and to, since when
-/// (s), and how far into the storm's look.
+/// The island's weather, a match at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Weather {
+    Clear,
+    Mist,
+    Rain,
+}
+
+impl Weather {
+    pub const ALL: [Weather; 3] = [Weather::Clear, Weather::Mist, Weather::Rain];
+
+    /// The weather a frame names.
+    pub fn from(n: u8) -> Weather {
+        match n {
+            1 => Weather::Mist,
+            2 => Weather::Rain,
+            _ => Weather::Clear,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Weather::Clear => "clear",
+            Weather::Mist => "mist",
+            Weather::Rain => "rain",
+        }
+    }
+
+    pub fn named(s: &str) -> Option<Weather> {
+        Weather::ALL.into_iter().find(|w| w.name() == s)
+    }
+}
+
+fn grey(c: V3) -> V3 {
+    let m = (c[0] + c[1] + c[2]) / 3.0;
+    [m; 3]
+}
+
+/// An hour's sky in this weather: mist lies thick and pale, rain greys
+/// and darkens it, hides the sun and the stars, and raises the wind.
+fn weathered(l: Look, w: Weather) -> Look {
+    let toward = |c: V3, k: f32, dim: f32| {
+        geo::scale(
+            geo::add(geo::scale(c, 1.0 - k), geo::scale(grey(c), k)),
+            dim,
+        )
+    };
+    match w {
+        Weather::Clear => l,
+        Weather::Mist => Look {
+            fog: l.fog * 4.0 + 0.004,
+            fog_falloff: l.fog_falloff * 0.7,
+            clouds: l.clouds.max(0.7),
+            stars: l.stars * 0.3,
+            sun: geo::scale(l.sun, 0.75),
+            horizon: toward(l.horizon, 0.5, 1.0),
+            grade: Grade {
+                saturation: l.grade.saturation * 0.88,
+                contrast: l.grade.contrast * 0.95,
+                ..l.grade
+            },
+            ..l
+        },
+        Weather::Rain => Look {
+            sun: geo::scale(l.sun, 0.3),
+            sky: toward(l.sky, 0.5, 0.8),
+            zenith: toward(l.zenith, 0.6, 0.7),
+            horizon: toward(l.horizon, 0.6, 0.75),
+            fog: l.fog * 2.5 + 0.002,
+            clouds: 0.97,
+            stars: 0.0,
+            exposure: l.exposure * 1.15,
+            waves: l.waves * 1.6,
+            wind: [l.wind[0] * 1.8, l.wind[1] * 1.8],
+            water: geo::scale(l.water, 0.8),
+            grade: Grade {
+                saturation: l.grade.saturation * 0.82,
+                ..l.grade
+            },
+            ..l
+        },
+    }
+}
+
+/// An hour in a weather.
+type Cond = (Hour, Weather);
+
+fn clear_of(c: Cond) -> Look {
+    weathered(c.0.clear(), c.1)
+}
+
+/// The sky as it turns: the hour and weather it is turning from and to,
+/// since when (s), and how far into the storm's look.
 #[derive(Clone, Debug, Default)]
 pub struct Sky {
-    turn: Option<(Hour, Hour, f64)>,
+    turn: Option<(Cond, Cond, f64)>,
     storm: f32,
     last: f64,
 }
 
 impl Sky {
-    /// The sky now (`now` in ms): turning to `hour` if that is new (at
-    /// once, the first time), closed in if you stand in the storm.
-    pub fn look(&mut self, hour: Hour, in_storm: bool, now: f64) -> Look {
+    /// The sky now (`now` in ms): turning to `hour` in `weather` if that
+    /// is new (at once, the first time), closed in if you stand in the
+    /// storm.
+    pub fn look(&mut self, (hour, weather): Cond, in_storm: bool, now: f64) -> Look {
         let s = now / 1000.0;
+        let to = (hour, weather);
         let (from, to, since) = match self.turn {
-            Some((_, to, _)) if to != hour => (to, hour, s),
+            Some((_, was, _)) if was != to => (was, to, s),
             Some(t) => t,
-            None => (hour, hour, s),
+            None => (to, to, s),
         };
         self.turn = Some((from, to, since));
         let dt = (s - self.last).clamp(0.0, 0.25) as f32;
@@ -89,21 +182,21 @@ impl Sky {
         let step = dt / INTO_STORM;
         self.storm += (aim - self.storm).clamp(-step, step);
         let t = smooth(((s - since) as f32 / TURN).clamp(0.0, 1.0));
-        let clear = blend(&from.clear(), &to.clear(), t);
-        let k = from.storm() + (to.storm() - from.storm()) * t;
+        let clear = blend(&clear_of(from), &clear_of(to), t);
+        let k = from.0.storm() + (to.0.storm() - from.0.storm()) * t;
         blend(&clear, &storm(&clear, k), smooth(self.storm))
     }
-}
 
-impl Sky {
-    /// A number for each hour (how loud the crickets are, ...), as the
-    /// sky is now, turning from one hour's to the next's.
-    pub fn weigh(&self, now: f64, f: impl Fn(Hour) -> f32) -> f32 {
+    /// A number for each hour and weather (how loud the crickets are,
+    /// how hard it rains), as the sky is now, turning from one to the
+    /// next.
+    pub fn weigh(&self, now: f64, f: impl Fn(Hour, Weather) -> f32) -> f32 {
         let Some((from, to, since)) = self.turn else {
-            return f(Hour::Dusk);
+            return f(Hour::Dusk, Weather::Clear);
         };
         let t = smooth(((now / 1000.0 - since) as f32 / TURN).clamp(0.0, 1.0));
-        f(from) + (f(to) - f(from)) * t
+        let (a, b) = (f(from.0, from.1), f(to.0, to.1));
+        a + (b - a) * t
     }
 }
 
@@ -346,20 +439,42 @@ mod tests {
     #[test]
     fn the_sky_turns_and_settles() {
         let mut s = Sky::default();
-        let night = s.look(Hour::Night, false, 1000.0);
+        let night = s.look((Hour::Night, Weather::Clear), false, 1000.0);
         assert_eq!(night, sky(Hour::Night, false), "at once, the first time");
-        let start = s.look(Hour::Dawn, false, 2000.0);
+        let start = s.look((Hour::Dawn, Weather::Clear), false, 2000.0);
         assert_eq!(start, night, "it turns from where it was");
-        let half = s.look(Hour::Dawn, false, 2000.0 + TURN as f64 * 500.0);
+        let half = s.look(
+            (Hour::Dawn, Weather::Clear),
+            false,
+            2000.0 + TURN as f64 * 500.0,
+        );
         assert!(half.exposure < night.exposure && half.exposure > sky(Hour::Dawn, false).exposure);
         let mut last = half;
         for k in 0..200 {
             last = s.look(
-                Hour::Dawn,
+                (Hour::Dawn, Weather::Clear),
                 k > 100,
                 2000.0 + TURN as f64 * 1000.0 + k as f64 * 50.0,
             );
         }
         assert_eq!(last, sky(Hour::Dawn, true), "settled, in the storm");
+    }
+
+    #[test]
+    fn rain_greys_and_hides_the_sun_and_turns_in_like_an_hour() {
+        for w in Weather::ALL {
+            assert_eq!(Weather::named(w.name()), Some(w));
+            assert_eq!(Weather::from(w as u8), w);
+        }
+        let dry = clear_of((Hour::Day, Weather::Clear));
+        let wet = clear_of((Hour::Day, Weather::Rain));
+        assert!(wet.sun[0] < dry.sun[0] * 0.5 && wet.clouds > dry.clouds);
+        assert!(clear_of((Hour::Day, Weather::Mist)).fog > dry.fog * 3.0);
+        let mut s = Sky::default();
+        s.look((Hour::Day, Weather::Clear), false, 0.0);
+        s.look((Hour::Day, Weather::Rain), false, 1000.0);
+        let rain = |s: &Sky, now| s.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32);
+        assert_eq!(rain(&s, 1000.0), 0.0);
+        assert_eq!(rain(&s, 1000.0 + TURN as f64 * 1000.0), 1.0);
     }
 }

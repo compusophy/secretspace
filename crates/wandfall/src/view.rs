@@ -47,6 +47,7 @@ pub fn frame(w: &World, you: u16) -> Frame {
         storm_phase: storm.phase as u8,
         winner: w.winner,
         hour: w.hour,
+        weather: w.weather,
         you: own,
         players: w
             .players

@@ -142,6 +142,10 @@ pub const LOBBY_SECS: u32 = 12;
 /// range stays at dusk.
 pub const HOURS: u8 = 4;
 pub const RANGE_HOUR: u8 = 2;
+/// And its weather, a match at a time (0 clear, 1 mist, 2 rain): the
+/// odds of rain and of mist, in a hundred.
+pub const RAIN_ODDS: u64 = 22;
+pub const MIST_ODDS: u64 = 18;
 /// The drop: from this high, falling no faster than this, steering
 /// faster than running.
 pub const DROP_HEIGHT: f32 = 70.0;

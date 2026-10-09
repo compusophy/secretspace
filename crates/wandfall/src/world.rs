@@ -169,8 +169,10 @@ pub struct World {
     pub(crate) past: VecDeque<(u32, Vec<Stood>)>,
     pub winner: u16,
     pub matches: u32,
-    /// The hour of the island's day (`HOURS`): its look, nothing else.
+    /// The hour of the island's day (`HOURS`) and its weather (0 clear,
+    /// 1 mist, 2 rain): its look, nothing else.
     pub hour: u8,
+    pub weather: u8,
     /// Names changed: the room sends the roster again; and the loot.
     pub roster_dirty: bool,
     pub loot_dirty: bool,
@@ -199,6 +201,7 @@ impl World {
             winner: 0,
             matches: 0,
             hour: (seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 56) as u8 % HOURS,
+            weather: 0,
             roster_dirty: true,
             loot_dirty: true,
             practice: None,
@@ -404,6 +407,14 @@ impl World {
         self.until = self.tick + LOBBY_SECS * TICK_HZ;
         if self.practice.is_none() {
             self.hour = (self.hour + 1) % HOURS;
+            // Its own dice (the world's are left as they were).
+            let h = (self.map.seed ^ (self.matches as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+                .wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            self.weather = match (h >> 33) % 100 {
+                r if r < RAIN_ODDS => 2,
+                r if r < RAIN_ODDS + MIST_ODDS => 1,
+                _ => 0,
+            };
         }
         self.roster_dirty = true;
         ev.push(Event::Lobby);

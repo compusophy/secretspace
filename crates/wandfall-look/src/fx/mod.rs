@@ -31,12 +31,14 @@ mod casts;
 mod gallery;
 mod marks;
 pub mod meshes;
+mod rain;
 mod rope;
 
 pub use bolts::bolt;
 pub use casts::shows;
 pub use gallery::{gallery, NAMES};
 pub use marks::{dust, falls, on_wizard};
+pub use rain::rain;
 pub use rope::ropes;
 
 use render::geo::{self, hash, mix, rgb, unit, V3};

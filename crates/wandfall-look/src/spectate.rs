@@ -15,7 +15,7 @@ use crate::fx::Draw;
 use crate::look::Look;
 use crate::rig::Anim;
 use crate::scene::{self, Eyes, Show};
-use crate::sky::{Hour, Sky};
+use crate::sky::{Hour, Sky, Weather};
 use crate::state::State;
 
 /// Ms to stay with one fighter at least, and at most while others fight.
@@ -157,10 +157,21 @@ impl Spectator {
             (now, dt),
             show,
         );
-        let hour = Hour::from(self.st.frame.as_ref().map_or(2, |f| f.hour));
+        let (hour, weather) = self
+            .st
+            .frame
+            .as_ref()
+            .map_or((Hour::Dusk, Weather::Clear), |f| {
+                (Hour::from(f.hour), Weather::from(f.weather))
+            });
+        let wet = self
+            .sky
+            .weigh(now, |_, w| (w == Weather::Rain) as i32 as f32);
+        let look = self.sky.look((hour, weather), in_storm, now);
+        crate::fx::rain(&mut d, cam.eye, (now / 1000.0) as f32, wet, look.wind);
         let frame = render::Frame {
             cam,
-            look: self.sky.look(hour, in_storm, now),
+            look,
             time: (now / 1000.0) as f32,
             items: &d.items,
             lights: &d.lights,
