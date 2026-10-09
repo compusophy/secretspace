@@ -41,6 +41,19 @@ struct Light {
 
 const PI: f32 = 3.14159265;
 
+/// An integer hash (PCG), and 0..1 for a whole-numbered cell: the same
+/// bits for the same cell on every GPU, however it was reached.
+fn hashu(x: u32) -> u32 {
+    let h = x * 747796405u + 2891336453u;
+    let w = ((h >> ((h >> 28u) + 4u)) ^ h) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+fn cell_hash(c: vec2<i32>, k: u32) -> f32 {
+    let h = hashu(bitcast<u32>(c.x) ^ hashu(bitcast<u32>(c.y) ^ hashu(k)));
+    return f32(h >> 8u) / 16777216.0;
+}
+
 fn hash3(p: vec3<f32>) -> f32 {
     var q = fract(p * 0.3183099 + vec3<f32>(0.71, 0.113, 0.419));
     q = q * 17.0;

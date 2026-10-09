@@ -334,7 +334,7 @@ impl Land {
         // The Spire's tower: a stone shaft, buttressed, a balcony with
         // battlements, a wizard's hat of a roof; windows lit up a spiral.
         let tower = smooth(r, |g| {
-            let pale = rgb(206, 198, 186);
+            let pale = rgb(172, 164, 160);
             let dark = rgb(120, 112, 132);
             g.lathe(
                 [0.0; 3],
@@ -466,7 +466,7 @@ impl Land {
         // A standing stone a unit tall, its runes on the side facing in.
         let menhir = one(r, |g| {
             // Five-sided, a face toward -x (inward once placed).
-            let grey = rgb(142, 140, 130);
+            let grey = rgb(112, 110, 106);
             let rot = 144f32.to_radians();
             g.column([0.0; 3], 5, (0.5, 0.36), 0.86, rot, grey, 0.0, false);
             g.column(
@@ -650,7 +650,7 @@ impl Land {
                 }
                 Kind::Stone => {
                     let m = m4::place(at, p.yaw, [1.1, p.h, 1.9]);
-                    statics.push(Item::new(menhir, m).rough(0.9).detail(0.7));
+                    statics.push(Item::new(menhir, m).rough(0.9).detail(0.2));
                 }
                 Kind::Altar => {
                     statics.push(

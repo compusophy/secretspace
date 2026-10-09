@@ -87,9 +87,12 @@ fn earth(pos: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
 }
 
 fn wave(q: vec2<f32>, t: f32) -> f32 {
+    // Each octave turned from the last, so no grid lines up.
+    let a = mat2x2<f32>(0.8, 0.6, -0.6, 0.8);
+    let b = mat2x2<f32>(0.28, 0.96, -0.96, 0.28);
     return noise2(q * 0.16 + vec2<f32>(t * 0.05, t * 0.03))
-        + 0.5 * noise2(q * 0.5 - vec2<f32>(t * 0.09, -t * 0.07))
-        + 0.22 * noise2(q * 1.5 + vec2<f32>(t * 0.2, t * 0.17));
+        + 0.5 * noise2(a * q * 0.5 - vec2<f32>(t * 0.09, -t * 0.07))
+        + 0.22 * noise2(b * q * 1.5 + vec2<f32>(t * 0.2, t * 0.17));
 }
 
 /// The sea: waves, the sky in it, the deep and the shallows, the sun's
@@ -97,9 +100,13 @@ fn wave(q: vec2<f32>, t: f32) -> f32 {
 fn sea(pos: vec3<f32>, alpha: f32) -> vec4<f32> {
     let t = g.eye.w;
     let p = pos.xz;
-    let e = 0.1;
+    // Far off, the waves are wider than a pixel: blur them (a wider
+    // step) and flatten them, and let the sun's glint spread, so the
+    // sea does not sparkle and crawl as you move.
+    let dist = length(g.eye.xyz - pos);
+    let e = 0.1 + dist * 0.012;
     let h0 = wave(p, t);
-    let s = g.water.w;
+    let s = g.water.w / (1.0 + dist * 0.02);
     let n = normalize(vec3<f32>(-(wave(p + vec2<f32>(e, 0.0), t) - h0) / e * s, 1.0, -(wave(p + vec2<f32>(0.0, e), t) - h0) / e * s));
     let v = normalize(g.eye.xyz - pos);
     let nv = max(dot(n, v), 0.0);
@@ -109,7 +116,7 @@ fn sea(pos: vec3<f32>, alpha: f32) -> vec4<f32> {
     let light = g.sky.rgb * 0.9 + g.sun.rgb * max(g.sun_dir.y, 0.0) * 0.3;
     let body = mix(vec3<f32>(0.03, 0.22, 0.20), g.water.rgb, smoothstep(0.0, 6.0, depth)) * light;
     let lit = sunlit(pos, vec3<f32>(0.0, 1.0, 0.0));
-    let glint = ggx(n, v, g.sun_dir.xyz, 0.05, vec3<f32>(0.02)) * g.sun.rgb * max(dot(n, g.sun_dir.xyz), 0.0) * lit;
+    let glint = ggx(n, v, g.sun_dir.xyz, clamp(0.08 + dist * 0.004, 0.08, 0.4), vec3<f32>(0.02)) * g.sun.rgb * max(dot(n, g.sun_dir.xyz), 0.0) * lit;
     var c = mix(body, refl, fres) + glint;
     let foam = (1.0 - smoothstep(0.0, 0.8, depth)) * smoothstep(0.4, 0.75, noise2(p * 1.2 + vec2<f32>(t * 0.25, -t * 0.2)));
     c = mix(c, vec3<f32>(0.9, 0.93, 0.95) * light * 1.4, foam * 0.75);
@@ -255,13 +262,14 @@ fn grass_vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     let k = shape[vi];
     let sp = g.grass.x;
     let side = u32(g.grass.y);
-    let half = f32(side) * sp * 0.5;
-    let base = floor((g.eye.xz - half) / sp) * sp;
-    var xz = base + vec2<f32>(f32(ii % side), f32(ii / side)) * sp;
-    let r1 = hash3(vec3<f32>(xz.x, 1.3, xz.y));
-    let r2 = hash3(vec3<f32>(xz.x, 7.7, xz.y));
-    let r3 = hash3(vec3<f32>(xz.x, 3.1, xz.y));
-    xz = xz + (vec2<f32>(r1, r2) - 0.5) * sp * 1.8;
+    // Each blade belongs to a whole-numbered cell of the ground and is
+    // hashed from it, so it is the same blade wherever the eye stands.
+    let corner = vec2<i32>(floor(g.eye.xz / sp)) - vec2<i32>(i32(side / 2u));
+    let cell = corner + vec2<i32>(i32(ii % side), i32(ii / side));
+    let r1 = cell_hash(cell, 1u);
+    let r2 = cell_hash(cell, 2u);
+    let r3 = cell_hash(cell, 3u);
+    let xz = vec2<f32>(cell) * sp + (vec2<f32>(r1, r2) - 0.5) * sp * 1.8;
     let gh = ground(xz);
     let dx = ground(xz + vec2<f32>(0.6, 0.0)) - ground(xz - vec2<f32>(0.6, 0.0));
     let dz = ground(xz + vec2<f32>(0.0, 0.6)) - ground(xz - vec2<f32>(0.0, 0.6));

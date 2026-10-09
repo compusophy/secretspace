@@ -306,25 +306,26 @@ impl Look {
 /// The sky by day, a little after noon; violet and close when you stand
 /// in the storm.
 pub fn sky(in_storm: bool) -> render::Look {
+    // Dusk on a wizard's island: a low amber sun under a violet sky, the
+    // first stars out, so lamps, crystals and lava read.
     let day = render::Look {
-        // Late in a long afternoon: a low gold sun, a lilac horizon.
-        sun_dir: geo::norm([0.55, 0.4, 0.3]),
-        sun: [3.4, 2.75, 2.1],
-        sun_size: 0.035,
-        sky: [0.36, 0.40, 0.64],
-        low: [0.15, 0.12, 0.10],
-        zenith: [0.10, 0.17, 0.50],
-        horizon: [0.76, 0.64, 0.78],
-        deep: [0.08, 0.12, 0.18],
-        fog: 0.0011,
+        sun_dir: geo::norm([0.6, 0.26, 0.3]),
+        sun: [2.2, 1.45, 0.95],
+        sun_size: 0.04,
+        sky: [0.15, 0.15, 0.29],
+        low: [0.08, 0.065, 0.06],
+        zenith: [0.05, 0.07, 0.22],
+        horizon: [0.42, 0.29, 0.45],
+        deep: [0.05, 0.06, 0.10],
+        fog: 0.0016,
         fog_falloff: 0.015,
-        clouds: 0.5,
-        stars: 0.0,
-        exposure: 1.0,
-        bloom: 0.05,
-        vignette: 0.28,
+        clouds: 0.55,
+        stars: 0.25,
+        exposure: 0.85,
+        bloom: 0.07,
+        vignette: 0.36,
         sea: Some(SEA),
-        water: rgb(16, 76, 106),
+        water: rgb(10, 40, 66),
         waves: 0.4,
         wind: [0.9, 0.35],
     };
