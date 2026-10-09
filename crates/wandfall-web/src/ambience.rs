@@ -1,8 +1,10 @@
 //! The island's sound under everything, going round and round: wind (more
 //! of it high up and on a broom), the rift's rumble and crackle near it,
 //! the Spire's humming chord near its beacon, the storm's roar as its
-//! wall comes near (and inside it). Written by `engine::synth` at start,
-//! each eased up and down as you move (`kit::audio`'s hums).
+//! wall comes near (and inside it); crickets at night, birds at dawn and
+//! through the afternoon, both hushed high up and in the storm. Written
+//! by `engine::synth` at start, each eased up and down as you move
+//! (`kit::audio`'s hums).
 
 use engine::synth::{Env, Synth, Wave};
 use kit::audio::Audio;
@@ -104,6 +106,85 @@ fn roar() -> Vec<f32> {
     s.looped(0.6, 1.0)
 }
 
+/// A little number from a few, the same every time.
+fn rnd(a: u32, b: u32) -> f32 {
+    let mut h = a.wrapping_mul(0x9e37_79b9) ^ b.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2c1b_3c6d);
+    h ^= h >> 12;
+    (h & 0xffff) as f32 / 65535.0
+}
+
+/// Crickets in the grass: a few of them, each chirping its own pulses at
+/// its own pitch and pace.
+fn crickets() -> Vec<f32> {
+    let secs = 9.0;
+    let mut s = Synth::new(secs);
+    for c in 0..6u32 {
+        let hz = 3900.0 + 1300.0 * rnd(c, 1);
+        let every = 0.55 + 0.6 * rnd(c, 2);
+        let pulses = 2 + (rnd(c, 3) * 3.0) as u32;
+        let gain = 0.25 + 0.35 * rnd(c, 4);
+        let mut t = rnd(c, 5) * every;
+        let mut n = 0;
+        while t < secs - 0.2 {
+            for p in 0..pulses {
+                s.tone(
+                    Wave::Sine,
+                    (hz, hz * 0.985),
+                    (t + p as f32 * 0.028, 0.02),
+                    Env::new(gain, 0.004, 0.008),
+                    (0.0, 0.0),
+                );
+            }
+            n += 1;
+            t += every * (0.9 + 0.2 * rnd(c, 10 + n));
+        }
+    }
+    // The grass hissing under them.
+    s.noise(
+        (0.0, secs),
+        Env::new(0.04, 0.0, 1e6),
+        (2500.0, 2500.0),
+        (6000.0, 6000.0),
+        0.0,
+    );
+    s.looped(0.5, 1.0)
+}
+
+/// Birds: now and then a phrase of quick whistled notes, each bird its
+/// own pitch and song.
+fn birds() -> Vec<f32> {
+    let secs = 11.0;
+    let mut s = Synth::new(secs);
+    let mut t = 0.3;
+    let mut k = 0u32;
+    while t < secs - 1.0 {
+        let bird = (rnd(k, 1) * 4.0) as u32;
+        let base = 2200.0 + 1400.0 * rnd(bird, 2);
+        let notes = 3 + (rnd(k, 3) * 5.0) as u32;
+        let gain = 0.2 + 0.3 * rnd(k, 4);
+        for n in 0..notes {
+            let up = rnd(bird * 31 + n, 5);
+            let (a, b) = if n % 2 == 0 {
+                (base * (0.9 + 0.3 * up), base * (1.2 + 0.3 * up))
+            } else {
+                (base * (1.25 + 0.2 * up), base * 0.95)
+            };
+            s.tone(
+                Wave::Sine,
+                (a, b),
+                (t + n as f32 * 0.09, 0.07),
+                Env::new(gain, 0.01, 0.03),
+                (28.0, 0.02),
+            );
+        }
+        k += 1;
+        t += 0.5 + notes as f32 * 0.09 + 1.6 * rnd(k, 6);
+    }
+    s.looped(0.45, 0.8)
+}
+
 /// Where you are, for the island's sound: the ear (where, facing which
 /// way), how high over the ground, on a broom, how fast; the rift and the
 /// Spire's beacon; the storm's circle if it stands (centre, radius).
@@ -115,6 +196,10 @@ pub struct Here {
     pub rift: Option<V3>,
     pub spire: Option<V3>,
     pub storm: Option<([f32; 2], f32)>,
+    /// How much of the night there is (crickets), and of the morning and
+    /// the afternoon (birds), 0 to 1.
+    pub night: f32,
+    pub birds: f32,
 }
 
 pub struct Ambience {
@@ -122,6 +207,8 @@ pub struct Ambience {
     rift: usize,
     spire: usize,
     storm: usize,
+    crickets: usize,
+    birds: usize,
 }
 
 impl Ambience {
@@ -135,6 +222,8 @@ impl Ambience {
             rift: hum(rumble()),
             spire: hum(chord()),
             storm: hum(roar()),
+            crickets: hum(crickets()),
+            birds: hum(birds()),
         }
     }
 
@@ -175,5 +264,35 @@ impl Ambience {
             }
         });
         audio.tune(self.storm, roar * k, 0.0);
+        // The island's own sounds, close to the ground and out of the
+        // storm.
+        let calm = (1.0 - h.over / 25.0).clamp(0.0, 1.0) * (1.0 - roar).max(0.0);
+        audio.tune(self.crickets, 0.3 * h.night * calm * k, 0.0);
+        audio.tune(self.birds, 0.22 * h.birds * calm * k, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_island_sounds_are_there_and_never_clip() {
+        for (name, v) in [
+            ("wind", wind()),
+            ("rumble", rumble()),
+            ("chord", chord()),
+            ("roar", roar()),
+            ("crickets", crickets()),
+            ("birds", birds()),
+        ] {
+            let top = v.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+            let rms = (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
+            assert!(top <= 0.6 && rms > 0.005, "{name}: top {top}, rms {rms}");
+            assert!(
+                v.len() > engine::synth::RATE as usize * 5,
+                "{name}: long enough to loop"
+            );
+        }
     }
 }

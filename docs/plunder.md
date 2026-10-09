@@ -329,7 +329,9 @@ of combat styles and all varieties to counter all varieties".
   seamless loops written by `engine::synth`, eased by `kit::audio`'s
   hums): wind, more of it high up, on a broom and going fast; the rift's
   rumble and crackle near it; the Spire's humming chord near its tower;
-  the storm's roar as its wall comes near, and all round inside it.
+  the storm's roar as its wall comes near, and all round inside it;
+  crickets at night and birds at dawn and through the afternoon, hushed
+  high up and in the storm.
 - **Lessons on the range** (`wandfall-web/src/lessons.rs`), the first
   time: twelve steps under the top line, each ticked off as you do it
   (move, jump, a timed hop, an air jump, a climb, a launch rune, sprint,

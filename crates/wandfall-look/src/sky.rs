@@ -95,6 +95,18 @@ impl Sky {
     }
 }
 
+impl Sky {
+    /// A number for each hour (how loud the crickets are, ...), as the
+    /// sky is now, turning from one hour's to the next's.
+    pub fn weigh(&self, now: f64, f: impl Fn(Hour) -> f32) -> f32 {
+        let Some((from, to, since)) = self.turn else {
+            return f(Hour::Dusk);
+        };
+        let t = smooth(((now / 1000.0 - since) as f32 / TURN).clamp(0.0, 1.0));
+        f(from) + (f(to) - f(from)) * t
+    }
+}
+
 /// The sky at `hour`, at once; violet and close in the storm.
 pub fn sky(hour: Hour, in_storm: bool) -> Look {
     let clear = hour.clear();

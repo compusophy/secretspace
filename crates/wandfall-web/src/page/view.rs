@@ -102,6 +102,16 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             rift: at(wandfall::places::Place::Rift, -2.0),
             spire: at(wandfall::places::Place::Spire, 12.0),
             storm,
+            night: p.sky.weigh(now, |h| match h {
+                Hour::Night => 1.0,
+                Hour::Dusk => 0.35,
+                _ => 0.0,
+            }),
+            birds: p.sky.weigh(now, |h| match h {
+                Hour::Dawn => 1.0,
+                Hour::Day => 0.5,
+                _ => 0.0,
+            }),
         };
         p.sounds.ambience.tune(&p.sounds.audio, &here, false);
     }
