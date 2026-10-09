@@ -256,6 +256,33 @@ pub fn mesh(
     g
 }
 
+/// Smooth noise in space (about -1 to 1), the same everywhere it is
+/// asked: for leaves, bark and stone.
+pub fn noise(p: V3) -> f32 {
+    let f = [p[0].floor(), p[1].floor(), p[2].floor()];
+    let t = [p[0] - f[0], p[1] - f[1], p[2] - f[2]].map(|x| x * x * (3.0 - 2.0 * x));
+    let at = |i: i32, j: i32, k: i32| {
+        let h = crate::geo::hash(f[0] as i32 + i, f[1] as i32 + j, (f[2] as i32 + k) as u32);
+        crate::geo::unit(h) * 2.0 - 1.0
+    };
+    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    let x00 = lerp(at(0, 0, 0), at(1, 0, 0), t[0]);
+    let x10 = lerp(at(0, 1, 0), at(1, 1, 0), t[0]);
+    let x01 = lerp(at(0, 0, 1), at(1, 0, 1), t[0]);
+    let x11 = lerp(at(0, 1, 1), at(1, 1, 1), t[0]);
+    lerp(lerp(x00, x10, t[1]), lerp(x01, x11, t[1]), t[2])
+}
+
+/// Bend every normal `k` of the way toward out from `centre`: a crown of
+/// leaves lit as one soft mass, not as its every lump.
+pub fn bend(g: &mut Geo, centre: V3, k: f32) {
+    for v in g.v.chunks_mut(crate::geo::STRIDE) {
+        let out = norm(sub([v[0], v[1], v[2]], centre));
+        let n = norm(add(scale([v[3], v[4], v[5]], 1.0 - k), scale(out, k)));
+        v[3..6].copy_from_slice(&n);
+    }
+}
+
 /// A sheet woven over `u` and `v` (each 0 to 1, in `nu` and `nv` steps):
 /// `at(u, v)` where it is, `paint(u, v)` its colour; its normals from its
 /// own slopes (out along the `u` slope crossed with the `v` slope), so

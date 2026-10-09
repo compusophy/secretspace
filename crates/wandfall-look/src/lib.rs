@@ -7,6 +7,7 @@
 
 pub mod aura;
 pub mod camera;
+pub mod flora;
 pub mod fx;
 pub mod icon;
 pub mod land;

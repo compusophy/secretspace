@@ -282,6 +282,14 @@ of combat styles and all varieties to counter all varieties".
       curved high collar, a belt with buckle and pouch, and a hat with a
       wide floppy brim, a crumpled crown, a band and buckle. About 41,000
       triangles near and 7,000 far (beyond 16 m, coarser).
+- [x] **A sculpted wood** (on the owner's word: "do the trees and rocks
+      next"). `flora.rs`: broadleaf trees with ridged bark, roots flaring
+      into the ground and branches up into crowns of leafy masses melted
+      together and ruffled, lit as one soft mass, darker beneath; firs of
+      woven tiers, ragged and drooping, darker under each; boulders cut in
+      worn facets, moss on top. Near and far: within 30 m about 6,000
+      triangles a tree, beyond it under 1,000 (the engine lays still
+      things anew as the eye moves, each its near or far mesh, `Item::far`).
 - [x] **Moving like it matters** (on the owner's word: "crouching,
       sliding, sprinting, gravity down hill, momentum"). Shift sprints
       (10 m/s against 7; forward only, not aiming, casting or wading), as

@@ -16,6 +16,9 @@ use gpu::wgpu;
 const INST: usize = 24;
 /// Floats a spark: position and size, colour.
 const SPARK: usize = 8;
+/// How far the eye goes before the statics are laid again (near and far
+/// meshes chosen anew).
+const STILL_RELAY: f32 = 6.0;
 const SHADOW: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// What the last frame cost.
@@ -51,6 +54,9 @@ pub struct Renderer {
     free: Vec<u32>,
     statics: Vec<Item>,
     statics_dirty: bool,
+    /// Where the eye was when the statics were laid (their near or far
+    /// meshes chosen from it).
+    still_eye: [f32; 3],
     still_runs: Vec<Run>,
     grid: Grid,
     bytes: Vec<u8>,
@@ -404,6 +410,7 @@ impl Renderer {
             free: Vec::new(),
             statics: Vec::new(),
             statics_dirty: false,
+            still_eye: [0.0; 3],
             still_runs: Vec::new(),
             grid: Grid::default(),
             bytes: Vec::new(),
@@ -727,10 +734,31 @@ impl Renderer {
             self.groups = Some([group(&self.globals[0]), group(&self.globals[1])]);
         }
 
-        // What never moves, when it changed.
-        if self.statics_dirty {
+        // What never moves, when it changed or the eye has gone far
+        // enough to change which are drawn near and which far.
+        let eye = f.cam.eye;
+        let moved = (0..3)
+            .map(|k| (eye[k] - self.still_eye[k]).powi(2))
+            .sum::<f32>();
+        if self.statics_dirty || moved > STILL_RELAY * STILL_RELAY {
             self.statics_dirty = false;
-            let mut items: Vec<&Item> = self.statics.iter().collect();
+            self.still_eye = eye;
+            let chosen: Vec<Item> = self
+                .statics
+                .iter()
+                .map(|i| match i.far {
+                    Some((m, d)) => {
+                        let at = [i.model[12], i.model[13], i.model[14]];
+                        let d2 = (0..3).map(|k| (at[k] - eye[k]).powi(2)).sum::<f32>();
+                        Item {
+                            mesh: if d2 > d * d { m } else { i.mesh },
+                            ..*i
+                        }
+                    }
+                    None => *i,
+                })
+                .collect();
+            let mut items: Vec<&Item> = chosen.iter().collect();
             items.sort_by_key(|i| i.mesh);
             b.clear();
             self.still_runs = Self::lay(&mut items, &mut b, 0);
@@ -739,7 +767,6 @@ impl Renderer {
 
         // What moves, by pass (the sea among the see-through): the
         // see-through farthest first.
-        let eye = f.cam.eye;
         let sea = f.look.sea.map(|y| {
             let snap = |v: f32| (v / 50.0).round() * 50.0;
             Item::new(

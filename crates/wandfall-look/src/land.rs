@@ -15,8 +15,12 @@ use wandfall::laws::{MAP_HALF, SEA};
 use wandfall::map::{smooth as ease, Kind, Map};
 use wandfall::places::{Deck, Place, Poi};
 
+use crate::flora;
+
 /// Metres between the ground's samples.
 const TERRAIN_CELL: f32 = 1.25;
+/// Trees and boulders farther than this are drawn coarser.
+const FAR_AWAY: f32 = 30.0;
 
 pub(crate) const VIOLET: V3 = rgb(178, 132, 255);
 pub(crate) const CYAN: V3 = rgb(110, 225, 255);
@@ -330,67 +334,23 @@ impl Land {
         t.grow(|x, z| lush(map, x, z));
         r.terrain(&t);
         let ground = r.mesh(&t.mesh(SEA - 4.0, |x, z, _| paint(map, x, z)));
-        let bark = rgb(96, 74, 56);
-        let trunk = smooth(r, |g| {
-            let profile = [
-                (0.46, -0.3),
-                (0.36, 0.4),
-                (0.27, 1.6),
-                (0.2, 3.2),
-                (0.1, 4.4),
-            ];
-            g.lathe([0.0; 3], &profile, 9, bark, 0.0);
-        });
+        // Trees and boulders, sculpted, near and far (`flora`).
+        let near_far =
+            |r: &mut Renderer, f: &dyn Fn(f32) -> Geo| (r.mesh(&f(1.0)), r.mesh(&f(flora::FAR)));
+        let trunks = [3u32, 8].map(|s| near_far(r, &|q| flora::trunk(s, q)));
         // Crowns: green, a deep teal, and the wizard-wood's violet.
         let leaves = [
-            (rgb(60, 104, 42), rgb(98, 132, 54)),
-            (rgb(34, 92, 78), rgb(60, 120, 96)),
-            (rgb(96, 64, 150), rgb(140, 96, 190)),
+            (rgb(42, 78, 30), rgb(118, 150, 60)),
+            (rgb(22, 70, 62), rgb(70, 136, 108)),
+            (rgb(70, 44, 118), rgb(156, 108, 206)),
         ];
         let crowns = [11u32, 29, 47].map(|s| {
-            let (a, b) = leaves[(s as usize / 18) % 3];
-            smooth(r, |g| {
-                let c = mix(a, b, unit(hash(s as i32, 1, 7)));
-                let dark = mix(c, rgb(24, 40, 40), 0.45);
-                g.sphere([0.0, 3.9, 0.0], [2.1, 1.8, 2.1], (2, s, 0.3), c, 0.0);
-                g.sphere(
-                    [0.6, 5.1, -0.3],
-                    [1.5, 1.3, 1.5],
-                    (2, s + 1, 0.3),
-                    mix(c, b, 0.6),
-                    0.0,
-                );
-                g.sphere([-0.8, 4.6, 0.6], [1.3, 1.1, 1.3], (2, s + 2, 0.3), c, 0.0);
-                g.sphere([0.3, 3.3, 1.1], [1.2, 1.0, 1.2], (2, s + 3, 0.3), dark, 0.0);
-            })
+            let colours = leaves[(s as usize / 18) % 3];
+            near_far(r, &|q| flora::crown(s, colours, q))
         });
-        let pines = smooth(r, |g| {
-            for (y, w, h) in [
-                (1.5, 2.3, 2.5),
-                (2.9, 1.85, 2.3),
-                (4.1, 1.4, 2.1),
-                (5.2, 0.95, 1.9),
-            ] {
-                g.lathe(
-                    [0.0, y, 0.0],
-                    &[(w, 0.0), (w * 0.5, h * 0.45), (0.0, h)],
-                    12,
-                    rgb(30, 70, 56),
-                    0.0,
-                );
-            }
-        });
-        let rocks = [5u32, 17, 23].map(|s| {
-            smooth(r, |g| {
-                g.sphere(
-                    [0.0, 0.35, 0.0],
-                    [1.0, 0.85, 1.0],
-                    (3, s, 0.34),
-                    rgb(130, 126, 120),
-                    0.0,
-                )
-            })
-        });
+        let pine_trunk = near_far(r, &|q| flora::pine_trunk(q));
+        let pines = near_far(r, &|q| flora::pine(5, q));
+        let rocks = [5u32, 17, 23].map(|s| near_far(r, &|q| flora::boulder(s, q)));
         let stone = rgb(208, 200, 184);
         let pillar = smooth(r, |g| {
             let profile = [
@@ -710,27 +670,43 @@ impl Land {
             match p.kind {
                 Kind::Tree => {
                     let s = p.scale;
-                    statics.push(
-                        Item::new(trunk, m4::place(at, p.yaw, [s; 3]))
-                            .rough(0.9)
-                            .detail(0.4),
-                    );
-                    let crown = match k % 7 {
-                        0 | 4 => pines,
-                        6 => crowns[2],
-                        3 => crowns[1],
-                        _ => crowns[0],
+                    let m = m4::place(at, p.yaw, [s; 3]);
+                    let pine = k % 7 == 0 || k % 7 == 4;
+                    let (trunk, crown) = if pine {
+                        (pine_trunk, pines)
+                    } else {
+                        (
+                            trunks[k % 2],
+                            match k % 7 {
+                                6 => crowns[2],
+                                3 => crowns[1],
+                                _ => crowns[0],
+                            },
+                        )
                     };
                     statics.push(
-                        Item::new(crown, m4::place(at, p.yaw, [s; 3]))
+                        Item::new(trunk.0, m)
+                            .far(trunk.1, FAR_AWAY)
+                            .rough(0.9)
+                            .detail(0.25),
+                    );
+                    statics.push(
+                        Item::new(crown.0, m)
+                            .far(crown.1, FAR_AWAY)
                             .material(Material::Foliage)
-                            .rough(0.7),
+                            .rough(0.75),
                     );
                 }
                 Kind::Rock => {
                     let s = p.scale;
                     let m = m4::place(at, p.yaw, [s * 1.2, s * 1.4, s * 1.1]);
-                    statics.push(Item::new(rocks[k % 3], m).rough(0.85).detail(0.6));
+                    let (near, far) = rocks[k % 3];
+                    statics.push(
+                        Item::new(near, m)
+                            .far(far, FAR_AWAY)
+                            .rough(0.85)
+                            .detail(0.35),
+                    );
                 }
                 Kind::Pillar => {
                     let m = m4::place(at, p.yaw, [1.0, p.h, 1.0]);
@@ -801,8 +777,9 @@ impl Land {
             );
             if k % 2 == 0 {
                 let m = m4::place([x, y + 0.6 * s, z], a, [s * 0.8; 3]);
-                statics.push(Item::new(trunk, m).rough(0.9));
-                statics.push(Item::new(crowns[k as usize % 3], m).material(Material::Foliage));
+                // Always far off: the coarser tree.
+                statics.push(Item::new(trunks[0].1, m).rough(0.9));
+                statics.push(Item::new(crowns[k as usize % 3].1, m).material(Material::Foliage));
             } else {
                 let c = mix(AMETHYST, AQUA, (k % 3) as f32 / 2.0);
                 let m = m4::basis(
@@ -822,11 +799,17 @@ impl Land {
         });
         let runes = one(r, |g| rune_ring(g, 18, 5));
         let mut held = vec![
-            ground, trunk, pines, pillar, cap, tower, trim, lamp, menhir, altar, spike, gate,
-            islet, decks, merlon,
+            ground, pillar, cap, tower, trim, lamp, menhir, altar, spike, gate, islet, decks,
+            merlon,
         ];
-        held.extend(crowns);
-        held.extend(rocks);
+        for (a, b) in trunks
+            .into_iter()
+            .chain(crowns)
+            .chain(rocks)
+            .chain([pine_trunk, pines])
+        {
+            held.extend([a, b]);
+        }
         held.extend(shrooms);
         held.extend(crystals);
         held.extend([gem, runes]);

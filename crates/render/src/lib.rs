@@ -60,7 +60,8 @@ pub enum Material {
 }
 
 /// One drawn thing: a mesh, where, its tint (alpha for `Faint`), how much
-/// it lights itself, how rough it is, its material, and how bumpy.
+/// it lights itself, how rough it is, its material, and how bumpy; and
+/// (still things) a lighter mesh to draw instead beyond a distance.
 #[derive(Clone, Copy, Debug)]
 pub struct Item {
     pub mesh: Mesh,
@@ -71,6 +72,7 @@ pub struct Item {
     pub rough: f32,
     pub material: Material,
     pub detail: f32,
+    pub far: Option<(Mesh, f32)>,
 }
 
 impl Item {
@@ -84,6 +86,16 @@ impl Item {
             rough: 0.8,
             material: Material::Plain,
             detail: 0.0,
+            far: None,
+        }
+    }
+
+    /// Beyond `d` metres from the eye, `mesh` is drawn instead (for
+    /// statics: chosen as the eye moves).
+    pub fn far(self, mesh: Mesh, d: f32) -> Item {
+        Item {
+            far: Some((mesh, d)),
+            ..self
         }
     }
 
