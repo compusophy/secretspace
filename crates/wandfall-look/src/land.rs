@@ -21,6 +21,9 @@ use crate::flora;
 const TERRAIN_CELL: f32 = 1.25;
 /// Trees and boulders farther than this are drawn coarser.
 const FAR_AWAY: f32 = 30.0;
+/// The ground in this many pieces a side, so a shadow's cascade draws
+/// only those near it.
+const GROUND_CHUNKS: usize = 4;
 
 pub(crate) const VIOLET: V3 = rgb(178, 132, 255);
 pub(crate) const CYAN: V3 = rgb(110, 225, 255);
@@ -335,7 +338,11 @@ impl Land {
         );
         t.grow(|x, z| lush(map, x, z));
         r.terrain(&t);
-        let ground = r.mesh(&t.mesh(SEA - 4.0, |x, z, _| paint(map, x, z)));
+        let ground: Vec<(Mesh, V3)> = t
+            .chunks(GROUND_CHUNKS, SEA - 4.0, |x, z, _| paint(map, x, z))
+            .into_iter()
+            .map(|(g, mid)| (r.mesh(&g), mid))
+            .collect();
         // Trees and boulders, sculpted, near and far (`flora`).
         let near_far =
             |r: &mut Renderer, f: &dyn Fn(f32) -> Geo| (r.mesh(&f(1.0)), r.mesh(&f(flora::FAR)));
@@ -659,10 +666,11 @@ impl Land {
             );
         });
 
-        let mut statics = vec![
-            Item::new(ground, m4::ID).material(Material::Terrain),
-            Item::new(decks, m4::ID).rough(0.85).detail(0.15),
-        ];
+        let mut statics: Vec<Item> = ground
+            .iter()
+            .map(|&(m, at)| Item::new(m, m4::place(at, 0.0, [1.0; 3])).material(Material::Terrain))
+            .collect();
+        statics.push(Item::new(decks, m4::ID).rough(0.85).detail(0.15));
         let mut lamps = Vec::new();
         let mut gems = Vec::new();
         let mut gate_at = ([0.0; 3], 0.0);
@@ -801,9 +809,9 @@ impl Land {
         });
         let runes = one(r, |g| rune_ring(g, 18, 5));
         let mut held = vec![
-            ground, pillar, cap, tower, trim, lamp, menhir, altar, spike, gate, islet, decks,
-            merlon,
+            pillar, cap, tower, trim, lamp, menhir, altar, spike, gate, islet, decks, merlon,
         ];
+        held.extend(ground.iter().map(|g| g.0));
         for (a, b) in trunks
             .into_iter()
             .chain(crowns)

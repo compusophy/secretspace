@@ -99,6 +99,8 @@ impl Parts {
 pub struct Model {
     /// Near and far.
     pub lod: [Parts; 2],
+    /// Each near part's coarser twin (for the sun's shadow).
+    coarse: std::collections::HashMap<Mesh, Mesh>,
     pub broom: Mesh,
     pub orb: Mesh,
     pub ball: Mesh,
@@ -113,8 +115,11 @@ fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
 
 impl Model {
     pub fn new(r: &mut Renderer) -> Model {
+        let lod = [Parts::new(r, 1.0), Parts::new(r, FAR)];
+        let coarse = lod[0].all().into_iter().zip(lod[1].all()).collect();
         Model {
-            lod: [Parts::new(r, 1.0), Parts::new(r, FAR)],
+            lod,
+            coarse,
             broom: smooth(r, |g| {
                 let wood = rgb(120, 86, 56);
                 let straw = rgb(206, 170, 96);
@@ -137,6 +142,11 @@ impl Model {
                 g.sphere([0.0; 3], [1.0; 3], (2, 3, 0.0), [1.0; 3], 0.0)
             }),
         }
+    }
+
+    /// A near part's coarser twin (itself, if it has none).
+    pub fn coarse(&self, near: Mesh) -> Mesh {
+        self.coarse.get(&near).copied().unwrap_or(near)
     }
 
     pub fn all(&self) -> Vec<Mesh> {

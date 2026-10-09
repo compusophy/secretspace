@@ -112,7 +112,12 @@ impl Rig {
         // Cloth takes the wizard's colour; gold shines; skin and
         // hair wrap the light.
         let mut put = |mesh: Mesh, at: M4, tint: Option<V3>, (mat, rough): (Material, f32)| {
-            let it = Item::new(mesh, at).rough(rough).material(mat);
+            // Its shadow is drawn coarse (the engine's `far`, for what
+            // moves).
+            let it = Item::new(mesh, at)
+                .far(self.m.coarse(mesh), f32::MAX)
+                .rough(rough)
+                .material(mat);
             d.items.push(match tint {
                 Some(t) => it.tint(t, 1.0).glow(lit),
                 None => it,

@@ -17,6 +17,7 @@ pub mod terrain;
 
 mod ao;
 mod buffers;
+mod cull;
 mod draw;
 mod globals;
 mod post;
@@ -104,7 +105,9 @@ impl Item {
     }
 
     /// Beyond `d` metres from the eye, `mesh` is drawn instead (for
-    /// statics: chosen as the eye moves).
+    /// statics: chosen as the eye moves). The sun's shadow draws it for
+    /// what moves, and for statics past its nearest cascade: a coarser
+    /// shadow is the same shadow.
     pub fn far(self, mesh: Mesh, d: f32) -> Item {
         Item {
             far: Some((mesh, d)),

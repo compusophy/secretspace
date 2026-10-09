@@ -391,6 +391,16 @@ Every phase:
       way: GPU-driven, instance data in a storage buffer read through a
       per-frame list of visible indices (a few KB a frame), so culling
       adds no draws.
+- [x] The sun's cascades culled (`render/src/cull.rs`): each cascade
+      lays out its own instances of what could cast into its box (its
+      bounding sphere inside the box seen from the sun, not beyond its far
+      side, with slack), again only when the box has moved past the slack
+      or the sun has turned, so runs stay one a mesh and draws do not grow
+      (400 to 360). Past the nearest cascade statics cast at their far
+      mesh, and what moves always does (a wizard's shadow from its 7k
+      model, not its 42k one). The ground is cut in 4 by 4 pieces so the
+      cascades take only the near ones. On the range, shadow triangles
+      3,395k to 2,250k; `?perf=1` shows them a cascade at a time.
 - [ ] Compute culling: frustum plus Hi-Z occlusion from last frame's depth
       pyramid, writing indirect args. A path without
       `indirect-first-instance`.

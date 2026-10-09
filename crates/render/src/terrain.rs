@@ -78,12 +78,53 @@ impl Terrain {
     /// each sample (x, z, height) a colour and how much of it covers the
     /// ground the material would draw (0 leaves the ground as it is).
     pub fn mesh(&self, floor: f32, paint: impl Fn(f32, f32, f32) -> (V3, f32)) -> Geo {
-        let n = self.n;
+        let all = self.n - 1;
+        self.patch((0, 0), (all, all), [0.0; 2], floor, &paint)
+    }
+
+    /// The mesh cut into `k` by `k` pieces, each about its own middle (at
+    /// height 0), so what is far from a view (or a shadow) can be left
+    /// out; pieces wholly under `floor` are left out.
+    pub fn chunks(
+        &self,
+        k: usize,
+        floor: f32,
+        paint: impl Fn(f32, f32, f32) -> (V3, f32),
+    ) -> Vec<(Geo, V3)> {
+        let cells = self.n - 1;
+        let step = cells.div_ceil(k.max(1));
+        let mut out = Vec::new();
+        for cj in (0..cells).step_by(step) {
+            for ci in (0..cells).step_by(step) {
+                let hi = ((ci + step).min(cells), (cj + step).min(cells));
+                let mid = [
+                    self.origin[0] + (ci + hi.0) as f32 * 0.5 * self.cell,
+                    self.origin[1] + (cj + hi.1) as f32 * 0.5 * self.cell,
+                ];
+                let g = self.patch((ci, cj), hi, mid, floor, &paint);
+                if !g.i.is_empty() {
+                    out.push((g, [mid[0], 0.0, mid[1]]));
+                }
+            }
+        }
+        out
+    }
+
+    /// The samples from `lo` to `hi` (inclusive), about `mid`.
+    fn patch(
+        &self,
+        lo: (usize, usize),
+        hi: (usize, usize),
+        mid: [f32; 2],
+        floor: f32,
+        paint: &impl Fn(f32, f32, f32) -> (V3, f32),
+    ) -> Geo {
+        let w = hi.0 - lo.0 + 1;
         let mut g = Geo::default();
-        let mut ids = vec![u32::MAX; n * n];
+        let mut ids = vec![u32::MAX; w * (hi.1 - lo.1 + 1)];
         let low = |i: usize, j: usize| self.at(i, j) < floor;
-        for j in 0..n {
-            for i in 0..n {
+        for j in lo.1..=hi.1 {
+            for i in lo.0..=hi.0 {
                 let x = self.origin[0] + i as f32 * self.cell;
                 let z = self.origin[1] + j as f32 * self.cell;
                 let h = self.at(i, j);
@@ -91,16 +132,18 @@ impl Terrain {
                 let dz = self.at(i, j + 1) - self.at(i, j.saturating_sub(1));
                 let nrm = geo::norm([-dx, 2.0 * self.cell, -dz]);
                 let (c, cover) = paint(x, z, h);
-                ids[j * n + i] = g.vertex([x, h, z], nrm, c, cover);
+                ids[(j - lo.1) * w + i - lo.0] =
+                    g.vertex([x - mid[0], h, z - mid[1]], nrm, c, cover);
             }
         }
-        for j in 0..n - 1 {
-            for i in 0..n - 1 {
+        for j in lo.1..hi.1 {
+            for i in lo.0..hi.0 {
                 if low(i, j) && low(i + 1, j) && low(i, j + 1) && low(i + 1, j + 1) {
                     continue;
                 }
-                let (a, b) = (ids[j * n + i], ids[j * n + i + 1]);
-                let (c, d) = (ids[(j + 1) * n + i], ids[(j + 1) * n + i + 1]);
+                let at = |i: usize, j: usize| ids[(j - lo.1) * w + i - lo.0];
+                let (a, b) = (at(i, j), at(i + 1, j));
+                let (c, d) = (at(i, j + 1), at(i + 1, j + 1));
                 // Counter-clockwise from above.
                 g.index(a, c, b);
                 g.index(b, c, d);
@@ -133,5 +176,17 @@ mod tests {
             );
             assert!(n[1] > 0.0);
         }
+        // In pieces: the same triangles, each piece about its middle.
+        let parts = t.chunks(4, -100.0, |_, _, _| ([1.0; 3], 0.0));
+        assert_eq!(parts.len(), 16);
+        let n: usize = parts.iter().map(|(g, _)| g.triangles()).sum();
+        assert_eq!(n, g.triangles());
+        let (piece, mid) = &parts[5];
+        let r = piece
+            .v
+            .chunks(geo::STRIDE)
+            .map(|v| v[0].hypot(v[2]))
+            .fold(0.0, f32::max);
+        assert!(r < 5.0, "{r}, about {mid:?}");
     }
 }

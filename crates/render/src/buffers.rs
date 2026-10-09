@@ -65,6 +65,8 @@ pub struct MeshBuf {
     pub v: wgpu::Buffer,
     pub i: wgpu::Buffer,
     pub count: u32,
+    /// How far its farthest point is from its origin.
+    pub r: f32,
 }
 
 /// Instances of one mesh in a row of the instance buffer.

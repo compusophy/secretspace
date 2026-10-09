@@ -163,11 +163,12 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     let perf = p.perf.then(|| {
         let s = p.r.stats;
         format!(
-            "{:.0} fps  draws {} inst {} tris {}k lights {}  @{:.0},{:.0}{}",
+            "{:.0} fps  draws {} inst {} tris {}k shadow {:?}k lights {}  @{:.0},{:.0}{}",
             p.fps,
             s.draws,
             s.instances,
             s.triangles / 1000,
+            s.shadow.map(|t| t / 1000),
             s.lights,
             cam.eye[0],
             cam.eye[2],

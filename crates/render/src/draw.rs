@@ -28,6 +28,8 @@ pub struct Stats {
     pub draws: u32,
     pub instances: u32,
     pub triangles: u64,
+    /// Triangles drawn into the sun's shadow, a cascade at a time.
+    pub shadow: [u64; 3],
     pub lights: u32,
     pub grass: u32,
 }
@@ -64,6 +66,8 @@ pub struct Renderer {
     /// meshes chosen from it).
     still_eye: [f32; 3],
     still_runs: Vec<Run>,
+    /// What casts into each of the sun's cascades (`cull`).
+    cull: crate::cull::Cull,
     grid: Grid,
     bytes: Vec<u8>,
     shadow_layers: Vec<wgpu::TextureView>,
@@ -448,6 +452,7 @@ impl Renderer {
             statics_dirty: false,
             still_eye: [0.0; 3],
             still_runs: Vec::new(),
+            cull: crate::cull::Cull::new(device, laws::CASCADES.len()),
             grid: Grid::default(),
             bytes: Vec::new(),
             shadow_layers,
@@ -506,10 +511,15 @@ impl Renderer {
         if !ib_bytes.is_empty() {
             self.queue.write_buffer(&ib, 0, &ib_bytes);
         }
+        let r =
+            g.v.chunks(geo::STRIDE)
+                .map(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
+                .fold(0.0, f32::max);
         let m = MeshBuf {
             v: vb,
             i: ib,
             count: g.i.len() as u32,
+            r,
         };
         match self.free.pop() {
             Some(i) => {
@@ -588,7 +598,7 @@ impl Renderer {
     }
 
     /// Lay items out as instances; the runs of one mesh each.
-    fn lay(items: &mut [&Item], bytes: &mut Vec<u8>, base: u32) -> Vec<Run> {
+    pub(crate) fn lay(items: &mut [&Item], bytes: &mut Vec<u8>, base: u32) -> Vec<Run> {
         let mut runs: Vec<Run> = Vec::new();
         for (k, it) in items.iter().enumerate() {
             put_f32s(bytes, &it.model);
@@ -751,12 +761,15 @@ impl Renderer {
                     None => *i,
                 })
                 .collect();
+            self.cull.set(&chosen, &self.statics);
             let mut items: Vec<&Item> = chosen.iter().collect();
             items.sort_by_key(|i| i.mesh);
             b.clear();
             self.still_runs = Self::lay(&mut items, &mut b, 0);
             self.still.put(&device, &queue, &b);
         }
+        self.cull
+            .lay((&device, &queue), &cascades, &self.meshes, &mut b);
 
         // What moves, by pass (the sea among the see-through): the
         // see-through farthest first.
@@ -796,6 +809,13 @@ impl Renderer {
             base += by[p].len() as u32;
         }
         self.moving.put(&device, &queue, &b);
+        self.cull.moving(
+            (&device, &queue),
+            &cascades,
+            &by[Pass::Opaque as usize],
+            &self.meshes,
+            &mut b,
+        );
         b.clear();
         for s in f.sparks {
             put_f32s(&mut b, &[s.p[0], s.p[1], s.p[2], s.size]);
@@ -834,15 +854,22 @@ impl Renderer {
             pass.set_pipeline(&self.shadow_pipe);
             pass.set_bind_group(0, &self.casters[c].1, &[]);
             let mut s = Stats::default();
-            runs_of(&mut pass, meshes, &self.still.buf, &self.still_runs, &mut s);
             runs_of(
                 &mut pass,
                 meshes,
-                &self.moving.buf,
-                &runs[Pass::Opaque as usize],
+                &self.cull.bufs[c].buf,
+                &self.cull.runs[c],
+                &mut s,
+            );
+            runs_of(
+                &mut pass,
+                meshes,
+                &self.cull.moving_bufs[c].buf,
+                &self.cull.moving_runs[c],
                 &mut s,
             );
             stats.draws += s.draws;
+            stats.shadow[c.min(2)] = s.triangles;
         }
 
         // The scene: what is solid, then (once it is occluded, if it is)
