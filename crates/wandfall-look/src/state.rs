@@ -33,6 +33,8 @@ pub struct State {
     /// When your bolt last hit someone; when you were last hurt.
     pub hit_at: f64,
     pub hurt_at: f64,
+    /// Where what hurt you came from, and when (the last few seconds).
+    pub hurt_from: Vec<(f64, [f32; 3])>,
     /// Bursts of light where something struck someone: (when, who,
     /// what).
     pub bursts: Vec<(f64, u16, u8)>,
@@ -139,6 +141,16 @@ impl State {
                     }
                     if to == self.you {
                         self.hurt_at = now;
+                        // From where the one who hurt you stands (the
+                        // storm comes from everywhere).
+                        let from = self
+                            .frame
+                            .as_ref()
+                            .and_then(|f| f.players.iter().find(|s| s.id == by && by != to));
+                        if let Some(s) = from {
+                            self.hurt_from.retain(|h| now - h.0 < 2000.0);
+                            self.hurt_from.push((now, s.p));
+                        }
                     }
                     self.bursts.push((now, to, what));
                     self.last_hit.insert(to, what);

@@ -89,6 +89,43 @@ pub struct View<'a> {
     pub book: bool,
 }
 
+/// Which way `from` is from `at`, facing `yaw`, as the screen has it
+/// (radians: 0 ahead, up the screen; round to the right, clockwise);
+/// none if it is right here.
+fn bearing(at: [f32; 3], yaw: f32, from: [f32; 3]) -> Option<f32> {
+    let (s, c) = yaw.sin_cos();
+    let (dx, dz) = (from[0] - at[0], from[2] - at[2]);
+    // Ahead is (c, s) on the ground; to the right, (-s, c).
+    let (ahead, right) = (dx * c + dz * s, -dx * s + dz * c);
+    (ahead.hypot(right) >= 0.5).then(|| right.atan2(ahead))
+}
+
+/// A wedge of a ring about `o`, `r` out, centred at `mid` radians
+/// (0 up, clockwise), pointing outward.
+fn arc(c: &mut Canvas, o: (f32, f32), r: f32, mid: f32, ui: i32, col: Rgba) {
+    let u = ui as f32;
+    let at = |a: f32, d: f32| (o.0 + a.sin() * d, o.1 - a.cos() * d);
+    let (inner, outer) = (r, r + 5.0 * u);
+    let n = 8;
+    for k in 0..n {
+        let a0 = mid - 0.38 + 0.76 * k as f32 / n as f32;
+        let a1 = mid - 0.38 + 0.76 * (k + 1) as f32 / n as f32;
+        c.poly(
+            &[at(a0, inner), at(a0, outer), at(a1, outer), at(a1, inner)],
+            col,
+        );
+    }
+    // A point at its middle, outward.
+    c.poly(
+        &[
+            at(mid - 0.09, outer),
+            at(mid, outer + 7.0 * u),
+            at(mid + 0.09, outer),
+        ],
+        col,
+    );
+}
+
 fn clock(secs: u16) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
 }
@@ -208,6 +245,17 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     if hurt > 0.0 {
         let r = (w.min(h) as f32) * 0.62;
         c.outside_circle(cx as f32, h as f32 / 2.0, r, RED.fade(0.35 * hurt));
+    }
+    // And which way it came from: a red arc on a ring about the middle.
+    if let Some((at, yaw)) = v.me {
+        let ring = (w.min(h) as f32) * 0.2;
+        for &(when, from) in &v.st.hurt_from {
+            let f = (1.0 - (v.now - when) / 1500.0) as f32;
+            if let Some(mid) = bearing(at, yaw, from).filter(|_| f > 0.0) {
+                let col = RED.fade(0.85 * f);
+                arc(c, (cx as f32, h as f32 / 2.0), ring, mid, ui, col);
+            }
+        }
     }
     if v.in_storm {
         let r = (w.min(h) as f32) * 0.55;
@@ -501,4 +549,24 @@ fn scale_to(src: &Canvas, s: i32) -> Canvas {
         }
     }
     c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hit_shows_from_the_way_it_came() {
+        let at = [0.0; 3];
+        let ahead = bearing(at, 0.0, [10.0, 0.0, 0.0]).unwrap();
+        assert!(ahead.abs() < 1e-4);
+        let right = bearing(at, 0.0, [0.0, 0.0, 10.0]).unwrap();
+        assert!((right - std::f32::consts::FRAC_PI_2).abs() < 1e-4);
+        let behind = bearing(at, 0.0, [-10.0, 0.0, 0.0]).unwrap();
+        assert!((behind.abs() - std::f32::consts::PI).abs() < 1e-4);
+        // Turned to face it, it is ahead.
+        let turned = bearing(at, std::f32::consts::FRAC_PI_2, [0.0, 0.0, 10.0]).unwrap();
+        assert!(turned.abs() < 1e-4);
+        assert!(bearing(at, 0.0, [0.1, 3.0, 0.0]).is_none());
+    }
 }
