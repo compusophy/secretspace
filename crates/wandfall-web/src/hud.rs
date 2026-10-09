@@ -95,17 +95,22 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         c.text_centred(cx, h / 2, "finding the island...", 2 * ui, INK);
         return;
     };
-    // Names over heads, near enough to read.
+    // Names over heads, near enough to read; nearest first, and one that
+    // would cover a nearer one's is left out.
     if let Some((eye, _)) = v.me.or(Some(([0.0; 3], 0.0))) {
-        for s in v
+        let mut near: Vec<_> = v
             .others
             .iter()
             .filter(|s| s.flags & flag::ALIVE != 0 && s.id != v.st.you)
-        {
-            let d = ((s.p[0] - eye[0]).powi(2) + (s.p[2] - eye[2]).powi(2)).sqrt();
-            if v.me.is_some() && d > 45.0 {
-                continue;
-            }
+            .map(|s| {
+                let d = (s.p[0] - eye[0]).powi(2) + (s.p[2] - eye[2]).powi(2);
+                (d, s)
+            })
+            .filter(|(d, _)| v.me.is_none() || *d < 45.0 * 45.0)
+            .collect();
+        near.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut placed: Vec<Rect> = Vec::new();
+        for (_, s) in near {
             let (x, y, ww) = m4::project(&v.vp, [s.p[0], s.p[1] + 2.5, s.p[2]]);
             if ww <= 0.1 {
                 continue;
@@ -116,6 +121,17 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
                 continue;
             }
             let name = format!("{}  {}", v.st.name(s.id), s.level);
+            let tw = pixels::text_width(&name, ui).max(24 * ui);
+            let r = Rect::new(
+                (sx - tw / 2) as f32,
+                (sy - 10 * ui) as f32,
+                tw as f32,
+                (12 * ui) as f32,
+            );
+            if placed.iter().any(|p| p.overlaps(&r)) {
+                continue;
+            }
+            placed.push(r);
             c.text_centred(sx, sy - 9 * ui, &name, ui, INK.fade(0.9));
             let bar = 24 * ui;
             let full = max_hp(s.level);

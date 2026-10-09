@@ -80,6 +80,11 @@ impl Rect {
     pub fn grow(&self, d: f32) -> Rect {
         Rect::new(self.x - d, self.y - d, self.w + 2.0 * d, self.h + 2.0 * d)
     }
+
+    /// Whether it and `o` share any pixel.
+    pub fn overlaps(&self, o: &Rect) -> bool {
+        self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
+    }
 }
 
 #[derive(Clone)]
@@ -480,6 +485,14 @@ fn rounded(b: Rect, r: f32, px: f32, py: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn boxes_overlap_only_when_they_share_a_pixel() {
+        let a = Rect::new(0.0, 0.0, 10.0, 4.0);
+        assert!(a.overlaps(&Rect::new(9.0, 3.0, 5.0, 5.0)));
+        assert!(!a.overlaps(&Rect::new(10.0, 0.0, 5.0, 4.0)));
+        assert!(!a.overlaps(&Rect::new(0.0, 4.0, 10.0, 4.0)));
+    }
 
     #[test]
     fn a_layer_keeps_its_alpha_and_a_picture_stays_opaque() {
