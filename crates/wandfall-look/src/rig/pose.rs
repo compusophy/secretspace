@@ -29,6 +29,10 @@ pub const UPPER: f32 = 0.29;
 pub const FORE: f32 = 0.27;
 /// The wand's tip, down the forearm from the elbow.
 pub const TIP: f32 = 0.77;
+/// The most ground a planted foot covers (metres): a longer stride spends
+/// less of its cycle on the ground (a run leaves it, a sprint more so),
+/// so a leg never has to reach further than it is long.
+const CONTACT: f32 = 0.7;
 
 /// What it is doing this frame, besides moving.
 pub struct Pose {
@@ -118,18 +122,18 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
     let air = a.air;
     let moving = ease(0.25, 1.2, a.speed) * (1.0 - air);
     let crouch = a.crouch;
-    let duty = 0.6 + (0.36 - 0.6) * run;
-    let lift = (0.11 + 0.15 * run) * (1.0 - 0.4 * crouch);
     let step = a.stride * moving;
-    let back = a.back.x > 0.5;
+    let duty = (0.6 - 0.24 * run).min(CONTACT / (2.0 * step).max(0.01));
+    let lift = (0.11 + 0.15 * run) * (1.0 - 0.4 * crouch);
+    // Backing away plays the stride backward (through standing, as it
+    // turns from one to the other).
+    let back = 1.0 - 2.0 * a.back.x;
     let cyc = a.phase;
     let mut feet = [([0.0; 3], 0.0); 2];
     for (side, foot_at) in feet.iter_mut().enumerate() {
         let u = (cyc + 0.5 * side as f32).fract();
-        let (mut x, y, pitch) = foot(u, step, duty, lift * moving);
-        if back {
-            x = -x;
-        }
+        let (x, y, pitch) = foot(u, step, duty, lift * moving);
+        let x = x * back;
         let out = (HIP_W + 0.02 + 0.06 * crouch - 0.025 * run) * if side == 0 { -1.0 } else { 1.0 };
         // In the air the legs tuck.
         let tuck = [0.1 + 0.08 * side as f32, 0.36 - 0.06 * side as f32];
@@ -139,9 +143,11 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
     // The hips ride over each step: highest over the planted foot at a
     // walk, lowest as it lands at a run; they sway over it at a walk.
     let w = 2.0 * TAU * (cyc - duty * 0.5);
-    let bob = moving * (0.022 * (1.0 - run) * w.cos() - 0.05 * run * w.cos());
+    let bob = moving * (0.022 * (1.0 - run) * w.cos() - 0.035 * run * w.cos());
     let sway = -0.026 * moving * (1.0 - run) * (TAU * (cyc - duty * 0.5)).cos();
-    let low = (0.34 * crouch + 0.22 * a.land).min(0.5);
+    // Lower going faster, so the legs reach (and it looks driven).
+    let low = (0.34 * crouch + 0.22 * a.land).min(0.5)
+        + moving * (0.04 + 0.05 * run + 0.03 * a.sprint.x) * (1.0 - crouch);
     let flinch = p.flash;
     // The arms swing against the legs, elbows bending more at a run.
     let swing = |side: usize| {
@@ -165,7 +171,7 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
         hip: (HIP - low + bob + 0.05 * air, a.land),
         sway,
         hips: a.hips.x,
-        wobble: 0.09 * moving * (TAU * cyc).cos() * if back { -1.0 } else { 1.0 },
+        wobble: 0.09 * moving * (TAU * cyc).cos() * back,
         lean: a.lean.x + 0.3 * crouch + 0.15 * a.land - 0.35 * flinch,
         bank: a.bank.x,
         breathe: 1.0 + 0.015 * (p.t * 2.4 + id as f32).sin() * (1.0 - moving),
@@ -242,18 +248,7 @@ fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
     let root = chain(&[tr([at[0], at[1] - b.sink, at[2]]), ry(yaw), rz(b.fall)]);
     let hips = ry(b.hips);
     let turn = ry(b.hips + b.wobble);
-    // The hips no higher than the planted feet can reach.
-    let mut hip_y = b.hip.0;
-    for (f, _) in &b.feet {
-        let h = point(&turn, [0.0, 0.0, f[2].signum() * HIP_W]);
-        let fp = point(&hips, *f);
-        let dx = fp[0] - h[0];
-        let dz = fp[2] - (h[2] + b.sway);
-        let most = (THIGH + SHIN - 0.015).powi(2) - dx * dx - dz * dz;
-        if most > 0.0 {
-            hip_y = hip_y.min(f[1] + ANKLE + most.sqrt());
-        }
-    }
+    let hip_y = b.hip.0;
     let pelvis = chain(&[tr([0.0, hip_y, b.sway]), turn, rz(-0.3 * b.lean)]);
     let mut legs = [(root, root, root); 2];
     // How far each thigh swings forward (radians), in the hips' turn.
@@ -328,14 +323,45 @@ fn m4mul(a: &M4, b: &M4) -> M4 {
     render::m4::mul(a, b)
 }
 
-/// A wizard moving as `a` does, doing `p`.
+/// A wizard moving as `a` does, doing `p`; getting on or off its broom,
+/// eased from sitting to standing.
 pub fn wizard(at: V3, yaw: f32, a: &Anim, p: &Pose, id: u16) -> Frames {
-    let b = if p.glide {
+    let k = a.seat.x.clamp(0.0, 1.0);
+    let b = if k > 0.99 {
         sitting(p, id)
-    } else {
+    } else if k < 0.01 {
         standing(a, p, id)
+    } else {
+        blend(&standing(a, p, id), &sitting(p, id), k)
     };
     frames(at, yaw, &b)
+}
+
+/// `a` turned `k` of the way into `b`.
+fn blend(a: &Body, b: &Body, k: f32) -> Body {
+    let m = |x: f32, y: f32| x + (y - x) * k;
+    let v = |x: V3, y: V3| [m(x[0], y[0]), m(x[1], y[1]), m(x[2], y[2])];
+    let foot = |s: usize| (v(a.feet[s].0, b.feet[s].0), m(a.feet[s].1, b.feet[s].1));
+    let arm = |s: usize| {
+        let (x, y) = (a.arms[s], b.arms[s]);
+        (m(x.0, y.0), m(x.1, y.1), m(x.2, y.2))
+    };
+    Body {
+        hip: (m(a.hip.0, b.hip.0), m(a.hip.1, b.hip.1)),
+        sway: m(a.sway, b.sway),
+        hips: m(a.hips, b.hips),
+        wobble: m(a.wobble, b.wobble),
+        lean: m(a.lean, b.lean),
+        bank: m(a.bank, b.bank),
+        breathe: m(a.breathe, b.breathe),
+        nod: m(a.nod, b.nod),
+        feet: [foot(0), foot(1)],
+        arms: [arm(0), arm(1)],
+        cloth: m(a.cloth, b.cloth),
+        hat: m(a.hat, b.hat),
+        fall: m(a.fall, b.fall),
+        sink: m(a.sink, b.sink),
+    }
 }
 
 /// Knocked out `t` seconds ago: it falls on its back and sinks away.
@@ -376,7 +402,7 @@ mod tests {
         let mut p = from;
         for _ in 0..frames {
             p = [p[0] + v.0 / 60.0, 0.0, p[2] + v.1 / 60.0];
-            a.step(p, yaw, (true, false, false), 1.0 / 60.0);
+            a.step(p, (yaw, 0.0), (true, false, false), 1.0 / 60.0);
         }
         p
     }
@@ -450,12 +476,71 @@ mod tests {
     }
 
     #[test]
+    fn running_at_any_pace_nothing_jumps_between_frames() {
+        // At 144 frames a second, from a walk to past a sprint: no joint
+        // moves (against the body) much faster than the body does, and the
+        // hips rise and fall in a wave, never turning sharply; a knee that
+        // snaps straight, or hips that drop when a foot is far, flicker.
+        for v in [2.0f32, 5.0, 7.0, 10.0, 14.0] {
+            let fps = 144.0;
+            let mut a = Anim::default();
+            let mut p = [0.0f32; 3];
+            let mut was: Option<(Vec<V3>, f32, f32)> = None;
+            for k in 0..(fps as usize * 3) {
+                p[0] += v / fps;
+                a.step(p, (0.0, 0.0), (true, false, false), 1.0 / fps);
+                let f = wizard(p, 0.0, &a, &pose(), 1);
+                let joints: Vec<V3> = (0..2)
+                    .flat_map(|s| {
+                        let hand = point(&f.fore[s], [0.0, -FORE, 0.0]);
+                        [sole(&f, s), point(&f.shin[s], [0.0; 3]), hand]
+                    })
+                    .map(|j| geo::sub(j, p))
+                    .collect();
+                let hip = point(&f.pelvis, [0.0; 3])[1];
+                let mut rise = 0.0;
+                if let Some((old, oh, or)) = &was {
+                    rise = (hip - oh) * fps;
+                    if k > fps as usize {
+                        for (j, o) in joints.iter().zip(old) {
+                            let d = geo::dot(geo::sub(*j, *o), geo::sub(*j, *o)).sqrt() * fps;
+                            assert!(d < 1.25 * v + 3.0, "{v} m/s: a joint at {d} m/s");
+                        }
+                        let turn = (rise - or).abs() * fps;
+                        // A wave quickens with the pace; the old flicker
+                        // turned at some 1,800.
+                        let most = 60.0 + 0.5 * v * v;
+                        assert!(turn < most, "{v} m/s: the hips turned at {turn} m/s/s");
+                    }
+                }
+                was = Some((joints, hip, rise));
+            }
+        }
+    }
+
+    #[test]
+    fn an_aim_that_jumps_turns_it_smoothly() {
+        // What the crosshair is on can jump (near ground, the sky): the
+        // body turns after it, never in a frame.
+        let mut a = Anim::default();
+        let fps = 144.0;
+        let mut last = 0.0;
+        for k in 0..300 {
+            let aim = if (k / 20) % 2 == 0 { 0.0 } else { 0.3 };
+            a.step([0.0; 3], (aim, 0.0), (true, false, false), 1.0 / fps);
+            let turn = (a.face.x - last).abs();
+            assert!(k == 0 || turn < 0.06, "turned {turn} in a frame");
+            last = a.face.x;
+        }
+    }
+
+    #[test]
     fn sliding_it_sits_low_with_a_leg_out_ahead() {
         let mut a = Anim::default();
         let mut p = [0.0; 3];
         for _ in 0..30 {
             p = [p[0] + 11.0 / 60.0, 0.0, 0.0];
-            a.step(p, 0.0, (true, true, true), 1.0 / 60.0);
+            a.step(p, (0.0, 0.0), (true, true, true), 1.0 / 60.0);
         }
         let f = wizard(p, 0.0, &a, &pose(), 1);
         let hip = point(&f.root, [0.0, HIP, 0.0]);

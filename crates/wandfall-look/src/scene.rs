@@ -67,27 +67,39 @@ pub fn draw(
                 .filter(|b| b.1 == s.id)
                 .map(|b| now - b.0)
                 .fold(1e9, f64::min);
-            let pose = rig::Pose {
-                flash: (1.0 - hit / 200.0).max(0.0) as f32,
-                arm: (tip.1 * 2.0)
-                    .max((1.0 - fired as f32 / 450.0) * 1.5)
-                    .min(1.0),
-                aim: s.pitch as f32 / 65536.0 * std::f32::consts::TAU,
-                tip,
-                glide: s.flags & flag::GLIDE != 0,
-                t,
-            };
-            let yaw = trig::radians(s.yaw);
+            let aimed = (
+                trig::radians(s.yaw),
+                s.pitch as f32 / 65536.0 * std::f32::consts::TAU,
+            );
+            let fresh = !anims.contains_key(&s.id);
             let a = anims.entry(s.id).or_default();
+            let glide = s.flags & flag::GLIDE != 0;
+            if fresh {
+                a.seat.x = glide as i32 as f32;
+            }
             let slide = s.flags & flag::SLIDE != 0;
             let stance = (
                 s.flags & flag::GROUND != 0,
                 s.flags & flag::CROUCH != 0,
                 slide,
             );
-            if let Some(hard) = a.step(s.p, yaw, stance, dt as f32 / 1000.0) {
+            if let Some(hard) = a.step(s.p, aimed, stance, dt as f32 / 1000.0) {
                 st.dust.push((now, s.p, hard));
             }
+            a.seat.step(glide as i32 as f32, 0.06, dt as f32 / 1000.0);
+            // Drawn facing and looking as eased, so an aim that jumps
+            // does not jerk the body.
+            let (yaw, aim) = (a.face.x, a.pitch.x);
+            let pose = rig::Pose {
+                flash: (1.0 - hit / 200.0).max(0.0) as f32,
+                arm: (tip.1 * 2.0)
+                    .max((1.0 - fired as f32 / 450.0) * 1.5)
+                    .min(1.0),
+                aim,
+                tip,
+                glide,
+                t,
+            };
             // A slide kicks up dust behind it.
             if slide && (now / 90.0).floor() != ((now - dt) / 90.0).floor() {
                 st.dust.push((now, s.p, 0.25));

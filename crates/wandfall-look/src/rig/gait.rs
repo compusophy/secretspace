@@ -11,7 +11,9 @@
 //!   the ground while it bears the weight;
 //! - its lean into speed and acceleration, its bank into a turn, the drag
 //!   of its robe and the lag of its hat's tip;
-//! - in the air, crouched, or landing (how hard).
+//! - in the air, crouched, or landing (how hard);
+//! - where it faces and looks, eased: an aim follows what the crosshair
+//!   is on, which can jump from the ground near by to the sky beyond.
 
 use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -28,11 +30,16 @@ const RUN: f32 = 5.2;
 /// The furthest the hips turn from the aim, going forward and backing.
 const HIPS_FWD: f32 = 1.05;
 const HIPS_BACK: f32 = 0.55;
+/// How quickly it turns to face (and look) where it aims (seconds).
+const FACE: f32 = 0.06;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Anim {
     vx: Spring,
     vz: Spring,
+    /// Where it faces (radians, unwrapped) and looks up (radians), eased.
+    pub face: Spring,
+    pub pitch: Spring,
     /// Speed (m/s), and forward and to the right of its facing.
     pub speed: f32,
     pub fwd: f32,
@@ -60,6 +67,8 @@ pub struct Anim {
     pub air: f32,
     pub crouch: f32,
     pub land: f32,
+    /// On its broom (1) or on its feet (0), eased as it gets on or off.
+    pub seat: Spring,
     aloft: f32,
     last: V3,
     was: (f32, f32),
@@ -67,12 +76,13 @@ pub struct Anim {
 }
 
 impl Anim {
-    /// Watch it at `p`, facing `yaw`, on the ground or not, crouched,
-    /// sliding, `dt` seconds on. A landing says how hard it was (0 to 1).
+    /// Watch it at `p`, facing `yaw` and looking `pitch` up (radians), on
+    /// the ground or not, crouched, sliding, `dt` seconds on. A landing
+    /// says how hard it was (0 to 1).
     pub fn step(
         &mut self,
         p: V3,
-        yaw: f32,
+        (yaw, pitch): (f32, f32),
         (ground, crouch, slide): (bool, bool, bool),
         dt: f32,
     ) -> Option<f32> {
@@ -80,8 +90,13 @@ impl Anim {
             self.last = p;
             self.seen = true;
             self.stride = STEP_WALK;
+            self.face.x = yaw;
+            self.pitch.x = pitch;
         }
         let dt = dt.max(1e-3);
+        let to = self.face.x + wrap(yaw - self.face.x);
+        let yaw = self.face.step(to, FACE, dt);
+        self.pitch.step(pitch, FACE, dt);
         let (mut mx, mut mz) = ((p[0] - self.last[0]) / dt, (p[2] - self.last[2]) / dt);
         // A blink is not a stride.
         if mx * mx + mz * mz > 30.0 * 30.0 {
@@ -164,7 +179,7 @@ mod tests {
         let mut p = a.last;
         for _ in 0..(secs * 60.0) as usize {
             p = [p[0] + v.0 / 60.0, 0.0, p[2] + v.1 / 60.0];
-            a.step(p, yaw, (true, false, false), 1.0 / 60.0);
+            a.step(p, (yaw, 0.0), (true, false, false), 1.0 / 60.0);
         }
     }
 

@@ -67,9 +67,20 @@ pub fn bone(from: V3, to: V3, fwd: V3) -> M4 {
 
 /// Two bones (`a` then `b` long) from `hip` reaching for `foot`, the knee
 /// bent toward `pole`: where the knee goes, and where the foot can reach.
+/// The last tenth of the reach is softened (the foot eases short of a
+/// target too far), so a knee never snaps straight, or out of it, in a
+/// frame.
 pub fn reach(hip: V3, foot: V3, pole: V3, (a, b): (f32, f32)) -> (V3, V3) {
     let d = geo::sub(foot, hip);
-    let len = geo::dot(d, d).sqrt().clamp(0.05, a + b - 1e-3);
+    let want = geo::dot(d, d).sqrt();
+    let (most, soft) = (a + b, 0.9 * (a + b));
+    let len = if want > soft {
+        let span = most - soft;
+        soft + span * (1.0 - (-(want - soft) / span).exp())
+    } else {
+        want
+    }
+    .max(0.05);
     let u = geo::norm(d);
     let foot = geo::add(hip, geo::scale(u, len));
     let ca = ((a * a + len * len - b * b) / (2.0 * a * len)).clamp(-1.0, 1.0);

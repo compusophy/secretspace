@@ -301,11 +301,24 @@ impl Map {
     /// Where along a bolt's path from `a` to `b` (0..1) it strikes the
     /// ground or something standing, if it does.
     pub fn strikes(&self, a: [f32; 3], b: [f32; 3]) -> Option<f32> {
+        self.strikes_if(a, b, |_| true)
+    }
+
+    /// As `strikes`, passing through the things `solid` says are not.
+    pub fn strikes_if(
+        &self,
+        a: [f32; 3],
+        b: [f32; 3],
+        solid: impl Fn(&Prop) -> bool,
+    ) -> Option<f32> {
         let mut first: Option<f32> = None;
         let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         let len = (d[0] * d[0] + d[2] * d[2]).sqrt();
         let mid = [a[0] + d[0] * 0.5, a[2] + d[2] * 0.5];
-        for q in self.near(mid[0], mid[1], len * 0.5 + BOLT_RADIUS) {
+        for q in self
+            .near(mid[0], mid[1], len * 0.5 + BOLT_RADIUS)
+            .filter(|q| solid(q))
+        {
             // Circle against the segment, on the ground's plane.
             let (fx, fz) = (a[0] - q.x, a[2] - q.z);
             let r = q.r + BOLT_RADIUS;

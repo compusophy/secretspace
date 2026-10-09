@@ -255,7 +255,14 @@ of combat styles and all varieties to counter all varieties".
       two-bone reach; hips turning toward where it goes while the chest
       keeps the aim; a robe to the ankle in four panels hinged at the
       waist. The spell bar sits bottom right and health bottom left, the
-      middle left to your wizard.
+      middle left to your wizard. Smooth by measurement (the owner saw a
+      flickering run and a wizard that all but teleported): a planted foot
+      never covers more ground than a leg can reach (a run spends less of
+      its stride on the ground, and runs lower), the reach is softened so
+      a knee never snaps, facing and aim are eased (what the crosshair is
+      on can jump), and the camera slides round trunks instead of being
+      yanked in by them (`running_at_any_pace_nothing_jumps_between_frames`,
+      `running_through_a_wood_the_view_never_leaps`).
 - [x] **Moving like it matters** (on the owner's word: "crouching,
       sliding, sprinting, gravity down hill, momentum"). Shift sprints
       (10 m/s against 7; forward only, not aiming, casting or wading).

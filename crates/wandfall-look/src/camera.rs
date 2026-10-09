@@ -1,14 +1,16 @@
 //! The camera over a wizard's shoulder (third person): a spring arm from a
 //! pivot above its right shoulder, back along where you look; pulled in
-//! at once when something stands between (never inside a tree, a stone,
-//! the tower or the ground) and let out again gently; nearer and tighter
+//! at once when a wall stands between (the ground, the tower, a stone)
+//! and let out again gently; eased in out of a tree's crown; slid round a
+//! trunk or a post rather than pulled in by it (a trunk passing behind a
+//! running wizard would jerk the view in and out); nearer and tighter
 //! when aiming, lower crouched, further out on a broom. And what the
 //! crosshair at the middle of the screen is on, so a wizard aims there
 //! from its own eyes (the shoulder's offset taken out).
 
 use render::geo::{self, V3};
 use render::Camera;
-use wandfall::map::Map;
+use wandfall::map::{Kind, Map, Prop};
 use wandfall::proto::Seen;
 
 use crate::fx;
@@ -28,6 +30,9 @@ const HEAD_GLIDE: f32 = 1.9;
 /// sits above the line of the arm (so the wizard stands low in the view).
 const SKIN: f32 = 0.3;
 const LIFT: f32 = 0.35;
+/// Things narrower than this (radius, metres: trunks, stems, posts,
+/// lamps) the camera slides round; wider ones are walls.
+const THIN: f32 = 0.6;
 /// Fields of view (radians, up and down): walking, aiming.
 pub const FOV: f32 = 1.15;
 pub const FOV_AIM: f32 = 0.78;
@@ -103,31 +108,37 @@ impl Chase {
         let y = self.rise.step(feet[1], 0.05, dt);
         let (fwd, right) = axes(yaw, pitch);
         let top = [feet[0], y + head, feet[2]];
-        // The shoulder's offset, cut short by anything beside the head.
+        let wall = |q: &Prop| q.r >= THIN;
+        // The shoulder's offset, cut short by a wall beside the head.
         let side = geo::add(top, geo::scale(right, shoulder));
-        let pivot = match map.strikes(top, side) {
+        let pivot = match map.strikes_if(top, side, wall) {
             Some(t) => geo::add(top, geo::scale(right, (shoulder * t - SKIN).max(0.0))),
             None => side,
         };
-        // The arm, cut short at once by anything behind; let out gently.
+        // The arm, cut short at once by a wall behind; let out gently.
         let back = geo::sub(pivot, geo::scale(fwd, arm + SKIN));
         let room = map
-            .strikes(pivot, back)
-            .map_or(arm, |t| ((arm + SKIN) * t - SKIN).max(0.35));
-        // Nor inside a tree's crown: in a step at a time till clear.
-        let mut want = room.min(arm);
+            .strikes_if(pivot, back, wall)
+            .map_or(arm, |t| ((arm + SKIN) * t - SKIN).max(0.35))
+            .min(arm);
+        // Nor inside a tree's crown: eased in till clear (leaves, not
+        // walls, so a moment among them does no harm).
+        let mut want = room;
         while want > 0.7 && in_crown(map, geo::sub(pivot, geo::scale(fwd, want))) {
             want -= 0.25;
         }
-        if want < self.arm.x {
-            self.arm = Spring { x: want, v: 0.0 };
-        } else {
-            self.arm.step(want, 0.25, dt);
+        if room < self.arm.x {
+            self.arm = Spring { x: room, v: 0.0 };
         }
+        let half = if want < self.arm.x { 0.08 } else { 0.25 };
+        self.arm.step(want, half, dt);
         let lift = LIFT * (self.arm.x / arm).min(1.0);
-        let eye = geo::add(
-            geo::sub(pivot, geo::scale(fwd, self.arm.x)),
-            [0.0, lift, 0.0],
+        let eye = clear(
+            map,
+            geo::add(
+                geo::sub(pivot, geo::scale(fwd, self.arm.x)),
+                [0.0, lift, 0.0],
+            ),
         );
         Camera {
             eye,
@@ -139,9 +150,35 @@ impl Chase {
     }
 }
 
+/// `p` moved out of any trunk, stem or post it is in (to the side, the
+/// shortest way), so the camera slides round them.
+fn clear(map: &Map, mut p: V3) -> V3 {
+    for q in map.near(p[0], p[2], THIN + SKIN) {
+        let trunk = match q.kind {
+            Kind::Tree | Kind::Shroom => q.h * 0.35,
+            _ => q.h,
+        };
+        if q.r >= THIN || p[1] < q.y || p[1] > q.y + trunk {
+            continue;
+        }
+        let (dx, dz) = (p[0] - q.x, p[2] - q.z);
+        let d = (dx * dx + dz * dz).sqrt();
+        let need = q.r + SKIN;
+        if d < need {
+            let (nx, nz) = if d > 1e-4 {
+                (dx / d, dz / d)
+            } else {
+                (1.0, 0.0)
+            };
+            p[0] = q.x + nx * need;
+            p[2] = q.z + nz * need;
+        }
+    }
+    p
+}
+
 /// Whether `p` is among a tree's or a mushroom's leaves or cap.
 fn in_crown(map: &Map, p: V3) -> bool {
-    use wandfall::map::Kind;
     map.near(p[0], p[2], 2.0).any(|q| {
         matches!(q.kind, Kind::Tree | Kind::Shroom)
             && p[1] > q.y + q.h * 0.3
@@ -181,6 +218,46 @@ pub fn toward(eye: V3, at: V3, cam: &Camera) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn running_through_a_wood_the_view_never_leaps() {
+        // Through the thickest wood on the island at a sprint, 144 frames
+        // a second: trunks pass behind, crowns overhead; the camera slides
+        // and eases, never jumping more than the wizard moves by much.
+        let map = Map::new(3);
+        let (fps, v) = (144.0, 10.0);
+        let trees = |x: f32, z: f32| {
+            (0..30)
+                .filter(|k| {
+                    let x = x + *k as f32 * 2.0;
+                    map.land(x, z) && map.near(x, z, 6.0).any(|q| q.kind == Kind::Tree)
+                })
+                .count()
+        };
+        let mut best = (0, 0.0, 0.0);
+        for k in 0..900 {
+            let (x, z) = ((k % 30) as f32 * 6.0 - 90.0, (k / 30) as f32 * 6.0 - 90.0);
+            let n = trees(x, z);
+            if n > best.0 {
+                best = (n, x, z);
+            }
+        }
+        let (_, x0, z) = best;
+        let mut c = Chase::default();
+        let mut last: Option<V3> = None;
+        let mut worst: f32 = 0.0;
+        for k in 0..(fps as usize * 6) {
+            let x = x0 + v * k as f32 / fps;
+            let feet = [x, map.floor(x, z, map.height(x, z) + 1.0), z];
+            let cam = c.view(&map, feet, (0.0, 0.0), Stance::default(), 1.6, 1.0 / fps);
+            if let Some(l) = last {
+                let d = geo::sub(cam.eye, l);
+                worst = worst.max(geo::dot(d, d).sqrt());
+            }
+            last = Some(cam.eye);
+        }
+        assert!(worst < 3.0 * v / fps, "the view leapt {worst} m in a frame");
+    }
 
     #[test]
     fn it_looks_over_the_shoulder_and_never_inside_the_tower() {
