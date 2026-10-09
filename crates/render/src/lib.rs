@@ -233,7 +233,7 @@ pub fn perspective(fov: f32, aspect: f32) -> M4 {
 /// How the world looks: the sun, the sky, the air, the sea. Colours are
 /// as people pick them (sRGB); the sun's and the sky's light are linear
 /// and may be brighter than 1 (the picture is HDR, tone mapped at the end).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
     /// Toward the sun (or moon), its light, its disc's size (radians).
     pub sun_dir: V3,

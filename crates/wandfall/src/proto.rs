@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 11;
+pub const PROTO: u8 = 12;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -178,6 +178,8 @@ pub struct Frame {
     pub shrinking: bool,
     pub storm_phase: u8,
     pub winner: u16,
+    /// The hour of the island's day (`laws::HOURS`).
+    pub hour: u8,
     pub you: Option<Own>,
     pub players: Vec<Seen>,
     pub bolts: Vec<BoltSeen>,
@@ -220,7 +222,8 @@ impl Frame {
         circle(&mut w, &self.next);
         w.u8(self.shrinking as u8)
             .u8(self.storm_phase)
-            .u16(self.winner);
+            .u16(self.winner)
+            .u8(self.hour);
         match &self.you {
             None => {
                 w.u8(0);
@@ -306,6 +309,7 @@ impl Frame {
             shrinking: r.u8()? != 0,
             storm_phase: r.u8()?,
             winner: r.u16()?,
+            hour: r.u8()?,
             ..Frame::default()
         };
         if r.u8()? == 1 {
@@ -637,6 +641,7 @@ mod tests {
             shrinking: true,
             storm_phase: 1,
             winner: 0,
+            hour: 3,
             you: Some(Own {
                 body: Body {
                     p: [1.234_567_9, 2.0, -3.333_333],

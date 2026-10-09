@@ -129,6 +129,11 @@ pub const STEP: f32 = 0.6;
 pub const MATCH_SIZE: usize = 16;
 /// Seconds of lobby once someone is waiting.
 pub const LOBBY_SECS: u32 = 12;
+/// The island's day: each lobby turns it on an hour (dawn, day, dusk,
+/// night, and dawn again), so match after match the light changes; the
+/// range stays at dusk.
+pub const HOURS: u8 = 4;
+pub const RANGE_HOUR: u8 = 2;
 /// The drop: from this high, falling no faster than this, steering
 /// faster than running.
 pub const DROP_HEIGHT: f32 = 70.0;

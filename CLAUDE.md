@@ -75,7 +75,7 @@ crates/luciphon*  game #2, legacy: core, -look (2D), -web (WebGL2 3D)
 crates/wandfall   game #3's core: laws trig map places motion storm world bots
                   predict proto view room (spec: docs/plunder.md)
 crates/wandfall-look  its look (page + hub): look land aura rig/ fx/
-                  state icon scene spectate camera
+                  state icon scene spectate camera sky
 crates/wandfall-web  its page: page/ bar hud menu sound ambience touch lessons
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
@@ -145,4 +145,4 @@ deviceScaleFactor: 3` at 390x844 for a phone.
 - A ring or `outside_circle` as big as the arena shades only on-screen
   pixels; skip it when its edge is out of view.
 - Text sized for a desktop overflows a 390-px phone: wrap it (`wrap`) or
-  fit it (`fit_scale`); check the phone screenshot.
+  fit it (`fit_scale`); check a phone shot.

@@ -8,7 +8,9 @@ use engine::who::{Seen as Named, Status};
 use kit::input::{Hand, Hands};
 use kit::link::Net;
 use render::{Camera, Frame, Renderer};
-use wandfall::laws::{spell, BOLT_COOLDOWN, LANCE_RANGE, LIGHTNING_RANGE, SEA, TICK_HZ};
+use wandfall::laws::{
+    spell, BOLT_COOLDOWN, LANCE_RANGE, LIGHTNING_RANGE, RANGE_HOUR, SEA, TICK_HZ,
+};
 use wandfall::map::Map;
 use wandfall::motion::{cast, keys, Body, Input};
 use wandfall::predict::Predict;
@@ -21,10 +23,11 @@ use crate::camera::{self, Chase};
 use crate::fx::{self, Draw};
 use crate::hud;
 use crate::lessons::{self, Lessons};
-use crate::look::{self, Look};
+use crate::look::Look;
 use crate::menu::{self, Act, Spots};
 use crate::rig;
 use crate::scene;
+use crate::sky::{Hour, Sky};
 use crate::sound::Sounds;
 use crate::state::State;
 use crate::touch::Touch;
@@ -121,6 +124,9 @@ struct Page {
     /// `?fx=name` (`fx::NAMES`): that effect shown by you, again and
     /// again, or (`&age=ms`) held at that age.
     gallery: Option<(String, Option<f64>)>,
+    /// The sky, turning with the island's day; `?hour=` holds it at one.
+    sky: Sky,
+    hour: Option<Hour>,
     /// How each wizard has been moving (for its stride).
     anims: HashMap<u16, rig::Anim>,
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
@@ -294,6 +300,8 @@ pub fn start() {
                 lesson_panel: None,
                 gallery: query_value("fx")
                     .map(|n| (n, query_value("age").and_then(|v| v.parse().ok()))),
+                sky: Sky::default(),
+                hour: query_value("hour").and_then(|h| Hour::named(&h)),
                 anims: HashMap::new(),
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,

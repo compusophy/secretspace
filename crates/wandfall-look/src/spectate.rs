@@ -12,9 +12,10 @@ use wandfall::proto::{self, flag, Seen};
 use wandfall::trig;
 
 use crate::fx::Draw;
-use crate::look::{self, Look};
+use crate::look::Look;
 use crate::rig::Anim;
 use crate::scene::{self, Eyes, Show};
+use crate::sky::{Hour, Sky};
 use crate::state::State;
 
 /// Ms to stay with one fighter at least, and at most while others fight.
@@ -67,6 +68,8 @@ pub struct Spectator {
     eye: Option<(V3, f32, f32)>,
     last: f64,
     frame_at: f64,
+    /// The sky, turning with the island's day.
+    sky: Sky,
 }
 
 impl Spectator {
@@ -154,9 +157,10 @@ impl Spectator {
             (now, dt),
             show,
         );
+        let hour = Hour::from(self.st.frame.as_ref().map_or(2, |f| f.hour));
         let frame = render::Frame {
             cam,
-            look: look::sky(in_storm),
+            look: self.sky.look(hour, in_storm, now),
             time: (now / 1000.0) as f32,
             items: &d.items,
             lights: &d.lights,

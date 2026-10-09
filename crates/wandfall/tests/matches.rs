@@ -13,6 +13,7 @@ fn a_match_runs_to_a_winner_and_starts_again() {
     let mut w = World::new(42);
     let me = w.join("tester", 0);
     assert_eq!(w.phase, Phase::Lobby);
+    let hour = w.hour;
     let (mut began, mut winner, mut shot, mut storm, mut lobby) = (false, None, 0, 0, false);
     let (mut casts, mut levels, mut top, mut opened) = (0, 0, 1, 0);
     let (mut lying, mut fought): (Vec<u16>, bool) = (Vec::new(), false);
@@ -78,6 +79,7 @@ fn a_match_runs_to_a_winner_and_starts_again() {
         "back to the lobby, bots gone"
     );
     assert!(w.find(me).is_some());
+    assert_eq!(w.hour, (hour + 1) % HOURS, "the island's day turns an hour");
     assert!(opened >= 8, "cubes are picked up: {opened}");
     assert!(casts >= 10, "spells are cast: {casts}");
     assert!(

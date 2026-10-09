@@ -130,9 +130,13 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             fx::aim_ring(&i.look, &mut d, ground, t);
         }
     }
+    // The island's hour, from the room (the range: dusk), or `?hour=`.
+    let hour = p
+        .hour
+        .unwrap_or_else(|| Hour::from(p.st.frame.as_ref().map_or(RANGE_HOUR, |f| f.hour)));
     let scene = Frame {
         cam,
-        look: look::sky(in_storm),
+        look: p.sky.look(hour, in_storm, now),
         time: t,
         items: &d.items,
         lights: &d.lights,

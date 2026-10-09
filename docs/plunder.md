@@ -350,6 +350,13 @@ of combat styles and all varieties to counter all varieties".
   says what is coming: fire thrust with both hands, lightning called
   down from overhead, frost swept across, a ward spread wide, mending
   drawn to the chest, a gust flung out, a blink crouched into.
+- **The island's day** (`wandfall-look/src/sky.rs`, `laws::HOURS`): each
+  lobby turns the island an hour, dawn (a rose sun, mist lying low), a
+  golden afternoon, dusk, a moonlit night (stars, a cold moon, every lamp
+  and spell bright against it), dawn again, so match after match the
+  light changes. The world keeps the hour and every frame names it; the
+  page turns its sky over six seconds, and eases into the storm's violet
+  and out. The range stays at dusk; `?hour=dawn|day|dusk|night` holds any.
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.

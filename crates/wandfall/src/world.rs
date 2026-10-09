@@ -160,6 +160,8 @@ pub struct World {
     pub zones: Vec<Zone>,
     pub winner: u16,
     pub matches: u32,
+    /// The hour of the island's day (`HOURS`): its look, nothing else.
+    pub hour: u8,
     /// Names changed: the room sends the roster again; and the loot.
     pub roster_dirty: bool,
     pub loot_dirty: bool,
@@ -186,6 +188,7 @@ impl World {
             zones: Vec::new(),
             winner: 0,
             matches: 0,
+            hour: (seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 56) as u8 % HOURS,
             roster_dirty: true,
             loot_dirty: true,
             practice: None,
@@ -388,6 +391,9 @@ impl World {
         self.loot_dirty = true;
         self.phase = Phase::Lobby;
         self.until = self.tick + LOBBY_SECS * TICK_HZ;
+        if self.practice.is_none() {
+            self.hour = (self.hour + 1) % HOURS;
+        }
         self.roster_dirty = true;
         ev.push(Event::Lobby);
     }

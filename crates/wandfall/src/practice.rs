@@ -36,6 +36,7 @@ pub fn setup(w: &mut World) {
         .min_by(|a, b| (a[0].hypot(a[1])).total_cmp(&b[0].hypot(b[1])))
         .unwrap_or([0.0, 0.0]);
     let spawn = clear(w, spawn);
+    w.hour = RANGE_HOUR;
     w.practice = Some(Practice {
         spawn,
         loot_at: w.tick + PRACTICE_LOOT_EVERY,
