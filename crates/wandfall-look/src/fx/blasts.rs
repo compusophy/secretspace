@@ -177,7 +177,7 @@ pub fn mark(look: &Look, d: &mut Draw, at: V3, age: f32, seed: i32) {
 /// A jagged path of `n` steps from `top` down to `end`, wandering by up
 /// to `wide`, as `flick` says; each step a hot core in a halo.
 #[allow(clippy::too_many_arguments)]
-fn forks(
+pub(crate) fn forks(
     look: &Look,
     d: &mut Draw,
     (top, end): (V3, V3),

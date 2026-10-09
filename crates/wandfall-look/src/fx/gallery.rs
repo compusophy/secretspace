@@ -12,10 +12,32 @@ use super::{bolt, falls, on_wizard, shows, Draw};
 use crate::look::Look;
 
 /// The effects there are, by name.
-pub const NAMES: [&str; 24] = [
-    "wand", "fireball", "burst", "lance", "frost", "shatter", "mark", "strike", "blink", "arrive",
-    "ward", "break", "mend", "gust", "level", "shield", "chill", "mending", "fall", "sparks",
-    "storm", "tether", "catch", "scars",
+pub const NAMES: [&str; 25] = [
+    "wand",
+    "fireball",
+    "burst",
+    "lance",
+    "frost",
+    "shatter",
+    "mark",
+    "strike",
+    "blink",
+    "arrive",
+    "ward",
+    "break",
+    "mend",
+    "gust",
+    "level",
+    "shield",
+    "chill",
+    "mending",
+    "fall",
+    "sparks",
+    "storm",
+    "tether",
+    "catch",
+    "scars",
+    "storm-far",
 ];
 
 /// Effect `name` at `age` ms (`now` ms, `t` s), cast from `at` (feet)
@@ -140,6 +162,12 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
         "storm" => {
             let c = geo::sub(at, geo::scale(fwd, -20.0));
             look.storm(d, [c[0], c[2]], 26.0, at, t);
+            None
+        }
+        // The wall 30 m ahead of the eye (`fwd` is to its right).
+        "storm-far" => {
+            let c = geo::sub(at, geo::scale([fwd[2], 0.0, -fwd[0]], 80.0));
+            look.storm(d, [c[0], c[2]], 110.0, at, t);
             None
         }
         "fall" => {

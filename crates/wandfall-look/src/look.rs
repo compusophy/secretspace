@@ -13,6 +13,8 @@ use wandfall::map::Map;
 
 pub const GOLD: V3 = rgb(255, 214, 128);
 const STORM: V3 = rgb(150, 70, 230);
+/// The storm's lightning.
+const BOLT: V3 = rgb(215, 170, 255);
 
 pub struct Look {
     /// Every wizard, jointed (`rig`).
@@ -199,10 +201,11 @@ impl Look {
         }
     }
 
-    /// The storm's wall: a circle of violet light from the sea to the sky,
-    /// storm cloud flowing up it. Its edge glows where you see it side on;
-    /// where it meets the ground it burns; nearest you, it crackles
-    /// (`eye`, `t` seconds).
+    /// The storm's wall: a dark violet veil from the sea to the sky (what
+    /// lies beyond it dimmed), storm cloud flowing up it. Its edge glows
+    /// where you see it side on; where it meets the ground it burns;
+    /// nearest you, it crackles, and now and then lightning crawls down
+    /// it, lighting the ground (`eye`, `t` seconds).
     pub fn storm(&self, d: &mut Draw, centre: [f32; 2], r: f32, eye: V3, t: f32) {
         if r <= 0.5 {
             return;
@@ -210,8 +213,8 @@ impl Look {
         let at = [centre[0], SEA - 6.0, centre[1]];
         d.items.push(
             Item::new(self.wall, m4::place(at, 0.0, [r, 75.0, r]))
-                .tint([1.0; 3], 0.34)
-                .glow(0.7)
+                .tint(rgb(90, 50, 140), 0.5)
+                .glow(0.12)
                 .pass(Pass::Faint),
         );
         d.items.push(
@@ -228,8 +231,8 @@ impl Look {
                 self.wall,
                 m4::place(at, -t * 0.02, [r + 0.9, 75.0, r + 0.9]),
             )
-            .tint(rgb(185, 110, 255), 0.65)
-            .glow(0.25)
+            .tint(rgb(115, 65, 205), 0.55)
+            .glow(0.0)
             .detail(0.06)
             .rough(0.55)
             .material(Material::Energy)
@@ -248,6 +251,35 @@ impl Look {
             return;
         }
         let a0 = dz.atan2(dx);
+        // Lightning: in some of each 0.4 s, a bolt down the wall within
+        // 35 m either side of you, flickering for a quarter second.
+        let slot = (t / 0.4).floor() as i32;
+        for s in [slot - 1, slot] {
+            let start = s as f32 * 0.4 + 0.4 * unit(hash(s, 2, 74));
+            let age = t - start;
+            if unit(hash(s, 1, 74)) > 0.3 || !(0.0..0.25).contains(&age) {
+                continue;
+            }
+            let a = a0 + (unit(hash(s, 3, 74)) - 0.5) * (70.0 / r.max(10.0)).min(3.0);
+            let on = |y: f32| [centre[0] + a.cos() * r, y, centre[1] + a.sin() * r];
+            let top = on(eye[1] + 22.0 + 18.0 * unit(hash(s, 4, 74)));
+            let f = 1.0 - age / 0.25;
+            let flick = s.wrapping_mul(7) + (age / 0.05) as i32;
+            crate::fx::forks(
+                self,
+                d,
+                (top, on(eye[1] - 4.0)),
+                10,
+                7.0,
+                flick,
+                (0.1, BOLT, f),
+            );
+            d.lights.push(Light {
+                p: on(eye[1] + 3.0),
+                r: 45.0,
+                c: geo::scale(BOLT, 5.0 * f),
+            });
+        }
         let flick = (t * 14.0) as i32;
         for n in 0..36 {
             let a = a0 + (unit(hash(flick, n, 71)) - 0.5) * (40.0 / r.max(10.0)).min(3.0);

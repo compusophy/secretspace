@@ -34,6 +34,7 @@ pub mod meshes;
 mod rain;
 mod rope;
 
+pub(crate) use blasts::forks;
 pub use bolts::bolt;
 pub use casts::shows;
 pub use gallery::{gallery, NAMES};
