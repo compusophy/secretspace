@@ -68,13 +68,24 @@ fn a_match_runs_to_a_winner_and_starts_again() {
 }
 
 #[test]
-fn no_one_here_no_match() {
+fn bots_fight_while_no_one_is_here_and_make_way_for_someone() {
     let mut w = World::new(1);
     for _ in 0..TICK_HZ * 30 {
         w.step();
     }
+    assert_eq!(w.phase, Phase::Fight, "a match of bots, to watch");
+    assert_eq!(w.players.len(), MATCH_SIZE);
+    assert!(w.players.iter().all(|p| p.bot));
+    // Someone arrives: the bots' match gives way to a lobby for them.
+    let me = w.join("late", 0);
+    w.step();
     assert_eq!(w.phase, Phase::Lobby);
-    assert!(w.players.is_empty());
+    assert!(w.find(me).is_some_and(|p| p.alive));
+    for _ in 0..(LOBBY_SECS + 1) * TICK_HZ {
+        w.step();
+    }
+    assert_eq!(w.phase, Phase::Fight);
+    assert!(w.find(me).is_some_and(|p| p.entrant), "and they are in it");
 }
 
 #[test]

@@ -1,9 +1,10 @@
-//! Wandfall's card. While a match is on, the hub watches it (as a
+//! Wandfall's card: the room itself, live. The hub watches it (as a
 //! watcher: never one of the people there) and draws it from above as the
-//! game's map does: the island, the storm's circles, every wizard in its
-//! colour, bolts and beams in the colours of their spells, a burst where
-//! one falls. Between matches it draws the idea of one instead: the storm
-//! closing and opening again, wizards duelling.
+//! game's map does: the island and its places, the storm's circles, every
+//! wizard in its colour, bolts and beams in the colours of their spells, a
+//! burst where one falls; and how it stands: how many of how many are left
+//! in the fight, the lobby's countdown, or who won. Matches always run
+//! (bots fight while no one is there), so there is always one to show.
 
 use pixels::{Canvas, Rect, Rgba};
 use wandfall::laws::{MAP_HALF, SEA};
@@ -22,14 +23,6 @@ const SPELLS: [(u8, u8, u8); 8] = [
     (120, 235, 110),
     (215, 235, 245),
 ];
-
-fn hash(n: u32) -> f32 {
-    let mut x = n.wrapping_mul(0x9e37_79b9) ^ 0x85eb_ca6b;
-    x ^= x >> 15;
-    x = x.wrapping_mul(0x2c1b_3c6d);
-    x ^= x >> 12;
-    (x & 0xffff) as f32 / 65535.0
-}
 
 /// The wizards' colours (as the game draws them).
 const HUES: [(u8, u8, u8); 8] = [
@@ -59,6 +52,9 @@ pub struct WandWatch {
     /// Beams (when, from, to, spell) and falls (when, where).
     beams: Vec<(f64, [f32; 3], [f32; 3], u8)>,
     falls: Vec<(f64, [f32; 3])>,
+    /// Everyone's names, and who won the last match.
+    names: Vec<(u16, bool, String)>,
+    winner: u16,
     buf: Canvas,
 }
 
@@ -79,6 +75,8 @@ impl WandWatch {
             frame_at: -1e9,
             beams: Vec::new(),
             falls: Vec::new(),
+            names: Vec::new(),
+            winner: 0,
             buf: Canvas::new(1, 1),
         }
     }
@@ -98,12 +96,15 @@ impl WandWatch {
             } else if let Some(f) = Frame::decode(&b) {
                 self.frame = Some(f);
                 self.frame_at = now;
+            } else if let Some(list) = proto::read_roster(&b) {
+                self.names = list;
             } else if let Some(list) = proto::read_events(&b) {
                 for e in list {
                     match e {
                         Ev::Beam {
                             from, to, spell, ..
                         } => self.beams.push((now, from, to, spell)),
+                        Ev::Win { who } => self.winner = who,
                         Ev::Out { who, .. } => {
                             let at = self
                                 .frame
@@ -165,14 +166,9 @@ impl WandWatch {
         self.island.as_ref()
     }
 
-    /// The card's picture in `b`: the match, live, if one is on.
-    pub fn draw(&mut self, c: &mut Canvas, b: Rect, t: f32, u: i32, now: f64) {
+    /// The card's picture in `b`: the room, live.
+    pub fn draw(&mut self, c: &mut Canvas, b: Rect, u: i32, now: f64) {
         self.poll(now);
-        let fight =
-            self.frame.as_ref().is_some_and(|f| f.phase == 1) && now - self.frame_at < 2000.0;
-        if !fight || self.map.is_none() {
-            return idea(c, b, t, u as f32);
-        }
         let uf = u as f32;
         self.buf.resize(b.w as i32, b.h as i32);
         self.buf.clear(Rgba::rgb(22, 50, 84));
@@ -189,7 +185,12 @@ impl WandWatch {
             )
         };
         let k = side as f32 / (2.0 * MAP_HALF);
-        let f = self.frame.as_ref().expect("a frame");
+        let fresh = now - self.frame_at < 3000.0;
+        let Some(f) = self.frame.as_ref() else {
+            self.tag("connecting to the island", false, u, now);
+            c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
+            return;
+        };
         let violet = Rgba::rgb(190, 110, 255);
         if f.storm.1 < MAP_HALF * 1.2 {
             let (x, y) = to(f.storm.0[0], f.storm.0[1]);
@@ -237,82 +238,54 @@ impl WandWatch {
                 Rgba(255, 214, 128, 255).fade(a),
             );
         }
-        // LIVE, with a beating dot, and how many are left.
+        // How it stands: how many of how many are left, the lobby's
+        // countdown, or who won.
+        let (tag, live) = match f.phase {
+            _ if !fresh => ("reconnecting".to_string(), false),
+            1 => (format!("LIVE  {} of {} left", f.alive, f.entrants), true),
+            0 => (format!("next match in {}s", f.secs), false),
+            _ => {
+                let name = self
+                    .names
+                    .iter()
+                    .find(|n| n.0 == self.winner)
+                    .map(|n| n.2.clone());
+                (
+                    name.map_or("match over".to_string(), |n| format!("{n} won")),
+                    false,
+                )
+            }
+        };
+        self.tag(&tag, live, u, now);
+        c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
+    }
+
+    /// A tag at the card's corner; with a beating red dot when live.
+    fn tag(&mut self, tag: &str, live: bool, u: i32, now: f64) {
+        let uf = u as f32;
         let p = 4.0 * uf;
-        let beat = 0.55 + 0.45 * ((now / 400.0) as f32).sin().abs();
-        let tag = format!("LIVE  {} left", f.alive);
-        let tw = pixels::text_width(&tag, u) as f32;
+        let dot = if live { 10.0 * uf } else { 0.0 };
+        let tw = pixels::text_width(tag, u) as f32;
         self.buf.round_rect(
-            Rect::new(p, p, tw + 14.0 * uf, 11.0 * uf),
+            Rect::new(p, p, tw + dot + 6.0 * uf, 11.0 * uf),
             3.0 * uf,
             Rgba(7, 10, 18, 170),
         );
-        self.buf.circle(
-            p + 5.5 * uf,
-            p + 5.5 * uf,
-            2.5 * uf,
-            Rgba(240, 70, 70, 255).fade(beat),
-        );
+        if live {
+            let beat = 0.55 + 0.45 * ((now / 400.0) as f32).sin().abs();
+            self.buf.circle(
+                p + 5.5 * uf,
+                p + 5.5 * uf,
+                2.5 * uf,
+                Rgba(240, 70, 70, 255).fade(beat),
+            );
+        }
         self.buf.text(
-            (p as i32) + 10 * u,
+            (p + 3.0 * uf + dot) as i32,
             (p as i32) + 2 * u,
-            &tag,
+            tag,
             u,
             Rgba(244, 241, 255, 230),
         );
-        c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
-    }
-}
-
-/// The idea of a match, between matches.
-fn idea(c: &mut Canvas, b: Rect, t: f32, u: f32) {
-    c.round_rect(b, 6.0 * u, Rgba::rgb(14, 30, 52));
-    let (cx, cy) = (b.x + b.w / 2.0, b.y + b.h / 2.0);
-    let r = b.h.min(b.w) * 0.42;
-    c.glow(cx, cy, r * 1.6, Rgba::rgb(40, 90, 130).fade(0.5));
-    // The island: sand, then grass, a hill or two.
-    c.circle(cx, cy, r + 2.0 * u, Rgba::rgb(190, 172, 120));
-    c.circle(cx, cy, r, Rgba::rgb(70, 124, 64));
-    c.circle(cx - r * 0.3, cy - r * 0.2, r * 0.35, Rgba::rgb(96, 140, 76));
-    c.circle(
-        cx + r * 0.35,
-        cy + r * 0.25,
-        r * 0.25,
-        Rgba::rgb(110, 146, 84),
-    );
-    // The storm: closing over twelve seconds, then again.
-    let k = (t / 12.0).fract();
-    let sr = r * (1.25 - 0.95 * k);
-    c.ring(cx, cy, sr, 2.0 * u, Rgba::rgb(190, 110, 255));
-    c.ring(cx, cy, sr + 3.0 * u, 3.0 * u, Rgba(190, 110, 255, 60));
-    // Wizards wandering inside the storm.
-    let n = 6;
-    let at = |i: u32| {
-        let a = hash(i) * std::f32::consts::TAU + t * (0.2 + 0.2 * hash(i + 9));
-        let d = sr.min(r) * (0.25 + 0.6 * hash(i + 3));
-        (cx + a.cos() * d, cy + a.sin() * d * 0.8)
-    };
-    for i in 0..n {
-        let (x, y) = at(i);
-        c.circle(x, y, 2.2 * u, Rgba::rgb(250, 246, 236));
-    }
-    // Bolts: one duel at a time, a spell's colour each.
-    let beat = (t / 0.9) as u32;
-    let f = (t / 0.9).fract();
-    let (a, z) = (beat % n, (beat * 7 + 3) % n);
-    if a != z {
-        let ((x0, y0), (x1, y1)) = (at(a), at(z));
-        let (r0, g0, b0) = SPELLS[(beat % 8) as usize];
-        let col = Rgba::rgb(r0, g0, b0);
-        let p = (f * 1.6).min(1.0);
-        let (x, y) = (x0 + (x1 - x0) * p, y0 + (y1 - y0) * p);
-        let tail = (p - 0.25).max(0.0);
-        let (tx, ty) = (x0 + (x1 - x0) * tail, y0 + (y1 - y0) * tail);
-        if p < 1.0 {
-            c.line(tx, ty, x, y, 1.5 * u, col);
-            c.glow(x, y, 6.0 * u, col.fade(0.8));
-        } else {
-            c.glow(x1, y1, (4.0 + 10.0 * (f - 0.625)) * u, col.fade(1.0 - f));
-        }
     }
 }

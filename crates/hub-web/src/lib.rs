@@ -297,7 +297,7 @@ fn draw(h: &mut Hub, now: f64) {
         } else if let (Some(l), "luciphon") = (h.luci.as_mut(), card.id) {
             l.draw(c, pv, 6.0 * uf, u, now);
         } else if card.id == "wandfall" {
-            h.wand.draw(c, pv, t, u, now);
+            h.wand.draw(c, pv, u, now);
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }

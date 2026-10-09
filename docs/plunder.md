@@ -167,11 +167,14 @@ of combat styles and all varieties to counter all varieties".
 - [x] **Reading the end:** a burst where a wizard falls; the feed shows
       the icon of what dealt the knockout; a card when you are out or win
       (your place, who took you and with what, knockouts, level).
-- [x] **The hub card** (from Stage C): while a match is on, the hub
-      watches it (a watcher, not counted) and draws it from above: the
-      island, the storm's circles, every wizard, bolts and beams in their
-      spells' colours, falls, "LIVE n left"; between matches, the idea of
-      one (the storm closing, wizards duelling).
+- [x] **The hub card** (from Stage C): the room itself, live, never a
+      mock-up (on the owner's word). The hub watches it (a watcher, not
+      counted) and draws it from above: the island and its places, the
+      storm's circles, every wizard, bolts and beams in their spells'
+      colours, falls; "LIVE 7 of 16 left" in a fight, "next match in 6s"
+      in the lobby, "Gecko won" after. Matches always run: bots fight while
+      no one is there, and someone arriving to a match of bots alone gets
+      a new one at once (`bots_fight_while_no_one_is_here_and_make_way_for_someone`).
 - [x] **Aim and feel:** the crosshair reddens on a wizard in the Lance's
       reach; aiming with Lightning ready shows where it will strike. Hit
       wizards flash white; your view bobs as you walk and shakes when you

@@ -178,7 +178,7 @@ impl World {
             tick: 0,
             map: Map::new(seed),
             phase: Phase::Lobby,
-            until: 0,
+            until: LOBBY_SECS * TICK_HZ,
             began: 0,
             storm: Storm::default(),
             players: Vec::new(),
@@ -390,11 +390,7 @@ impl World {
         self.scrolls.clear();
         self.loot_dirty = true;
         self.phase = Phase::Lobby;
-        self.until = if self.players.is_empty() {
-            0
-        } else {
-            self.tick + LOBBY_SECS * TICK_HZ
-        };
+        self.until = self.tick + LOBBY_SECS * TICK_HZ;
         self.roster_dirty = true;
         ev.push(Event::Lobby);
     }
@@ -485,15 +481,15 @@ impl World {
         }
         match self.phase {
             _ if self.practice.is_some() => {}
-            Phase::Lobby if self.until != 0 && self.tick >= self.until => {
-                if self.humans() > 0 {
-                    self.begin(&mut ev);
-                } else {
-                    self.until = 0;
-                }
-            }
+            // Matches always run: bots fight while no one is here, so there
+            // is always one to watch (the hub's card shows it).
+            Phase::Lobby if self.until != 0 && self.tick >= self.until => self.begin(&mut ev),
             Phase::Fight => {
-                if self.players.iter().all(|p| p.bot) {
+                // Someone arrived to a match of bots alone: not made to
+                // wait it out, a new one gathers for them.
+                let waiting = self.players.iter().any(|p| !p.bot && !p.entrant);
+                let in_it = self.players.iter().any(|p| !p.bot && p.entrant);
+                if waiting && !in_it {
                     self.lobby(&mut ev);
                 } else if self.alive() <= 1 {
                     self.winner = self
