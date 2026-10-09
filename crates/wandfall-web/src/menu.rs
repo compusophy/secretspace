@@ -77,9 +77,13 @@ fn button(c: &mut Canvas, spots: &mut Spots, b: Rect, text: &str, lit: bool, act
 }
 
 /// The title: the game's name, and how to play it.
+/// What is new, at the title's corner.
+const NEWS: &str = "new: the Tether, wall jumps, weather and the hall of wizards";
+
 pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
     let (w, h) = (c.w, c.h);
     c.fill_rect(0, 0, w, h, Rgba(6, 8, 18, 110));
+
     let name = "WANDFALL";
     // Everything under the name, so the name takes what room is left.
     let s = (22 * ui).min((w - 24 * ui) / 10);
@@ -119,6 +123,15 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
     for line in pixels::wrap(how, half.min(w - 16 * ui), ui) {
         c.text_centred(w / 2, ty, &line, ui, DIM);
         ty += 11 * ui;
+    }
+    // What is new, if the spells below still fit under it.
+    let news = pixels::wrap(NEWS, half.min(w - 16 * ui), ui);
+    let rows = 6 * ui + 2 * (s + s / 4);
+    if ty + news.len() as i32 * 11 * ui + rows <= h - 14 * ui {
+        for line in news {
+            c.text_centred(w / 2, ty, &line, ui, GOLD.fade(0.9));
+            ty += 11 * ui;
+        }
     }
     // The spells: what you hurt with, what you live by.
     ty += 6 * ui;
