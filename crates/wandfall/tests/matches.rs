@@ -107,7 +107,13 @@ fn the_page_predicts_its_wizard_exactly() {
                 seq,
                 yaw: (t * 300) as u16,
                 pitch: 0,
-                keys: (rng.next_u64() as u8) & (keys::FWD | keys::LEFT | keys::JUMP | keys::AIM),
+                keys: (rng.next_u64() as u16)
+                    & (keys::FWD
+                        | keys::LEFT
+                        | keys::JUMP
+                        | keys::AIM
+                        | keys::SPRINT
+                        | keys::CROUCH),
                 cast: 0,
             };
             page.push(i, &w.map);

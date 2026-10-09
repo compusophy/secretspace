@@ -23,7 +23,9 @@ owner may rename it. Luciphon is frozen. The owner's vision, verbatim:
 > instead of charging an attack?"
 
 ## What it is
-- **A first-person wand shooter.** Short battle royale matches with queues
+- **A third-person wand shooter** (first person until October 2026, on
+  the owner's word: "a third person shooter... fits wow as well"). Short
+  battle royale matches with queues
   and matchmaking. Everyone starts at level 1 and can reach 20 within one
   match; levels reset each match.
 - **A large map that shrinks.** A storm wall closes in over time.
@@ -194,7 +196,7 @@ of combat styles and all varieties to counter all varieties".
       its arms in the air; flinches when hit; nods with its aim; raises and
       thrusts its wand to cast; falls on its back when knocked out. The
       drop is ridden on a **broomstick** (sitting, sparks trailing from the
-      bristles), and in first person its handle reaches ahead below you.
+      bristles).
       `?orbit=ID` turns the camera about a wizard (0 is you) to look.
 - [x] **Jumps and landings you feel; crouching.** Coyote time (4 ticks off
       a ledge) and a buffered press (4 ticks before landing) forgive the
@@ -240,6 +242,32 @@ of combat styles and all varieties to counter all varieties".
       kind you know (it waits 2 s before it can be cast; two slots trade).
       The fallen drop every spell they knew at its rank, and their XP joins
       their victor's. The wire carries the book (PROTO 5, `Up::Equip`).
+- [x] **Third person, and a wizard rebuilt** (on the owner's word:
+      "strafing is horrible, so is running... robotic"). The camera rides a
+      spring arm over your right shoulder (`wandfall-look/src/camera.rs`):
+      pulled in at once by anything behind (never inside a tree's crown, a
+      stone or the tower), let out gently; nearer and tighter aiming, lower
+      crouched, further out on a broom. The crosshair is cast from the
+      camera, and you aim from your own eyes at what it is on. The rig is
+      four modules (`rig/`: gait, pose, model, math): critically damped
+      springs for everything eased; feet placed through stance and swing
+      by distance travelled, so a planted foot never slides; knees by
+      two-bone reach; hips turning toward where it goes while the chest
+      keeps the aim; a robe to the ankle in four panels hinged at the
+      waist. The spell bar sits bottom right and health bottom left, the
+      middle left to your wizard.
+- [x] **Moving like it matters** (on the owner's word: "crouching,
+      sliding, sprinting, gravity down hill, momentum"). Shift sprints
+      (10 m/s against 7; forward only, not aiming, casting or wading).
+      Crouching at a sprint slides: a boost (once a second), then friction,
+      gravity along the slope (a hill makes a slide gather speed, to
+      18 m/s), a little steering; it ends when you stand or slow to a
+      crouch. Running uphill is slower and downhill faster. Speed is kept:
+      overspeed bleeds away on the ground and is held in the air, so a
+      jump out of a slide carries it. The rig strides longer and pumps its
+      arms at a sprint; sliding, it sits low, a leg out ahead, leaning
+      back, dust behind; the view widens. All of it is in the shared step,
+      so the page still predicts to the bit (PROTO 6: keys are 16 bits).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half

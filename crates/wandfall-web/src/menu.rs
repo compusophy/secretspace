@@ -200,7 +200,7 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
     y += bh + 10.0 * ui as f32;
     if !touch {
         let help =
-            "WASD move - space jump - C crouch - click cast - right click aim - Q E R F spells - B spellbook - M sound";
+            "WASD move - shift sprint - space jump - C crouch (sprinting: slide) - click cast - right click aim - Q E R F spells - B spellbook - M sound";
         let k = pixels::fit_scale(help, w - 16 * ui, ui);
         c.text_centred(w / 2, y as i32, help, k, DIM);
     }

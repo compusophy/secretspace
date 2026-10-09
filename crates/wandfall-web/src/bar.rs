@@ -35,8 +35,9 @@ pub fn pips(c: &mut Canvas, cx: f32, y: f32, rank: u8, ui: i32) {
     }
 }
 
-/// Where the bar goes: its left, its top, a tile's size, and how wide
-/// it is in all.
+/// Where the bar goes (at the foot of the screen, to the right, clear of
+/// your wizard in the middle): its left, its top, a tile's size, and how
+/// wide it is in all.
 pub struct Layout {
     pub x: i32,
     pub y: i32,
@@ -48,7 +49,7 @@ pub fn layout(w: i32, h: i32, ui: i32) -> Layout {
     let s = 32 * ui;
     let total = 4 * s + 2 * 6 * ui + 16 * ui;
     Layout {
-        x: (w - total) / 2,
+        x: w - total - 14 * ui,
         y: h - s - 26 * ui,
         s,
         total,
@@ -122,9 +123,13 @@ pub fn draw(c: &mut Canvas, own: &Own, st: &State, now: f64, ui: i32, slots: boo
     };
     c.fill_rect(xx, xy, xw, 2 * ui, SHADE);
     c.fill_rect(xx, xy, (xw as f32 * xp) as i32, 2 * ui, GOLD);
-    // What lies underfoot: over the health bar, or (touch) at the top.
-    let bottom = if slots { y - 22 * ui } else { 108 * ui };
-    underfoot(c, own, st, bottom, ui);
+    // What lies underfoot: over the bar, or (touch) at the top.
+    let at = if slots {
+        (Some(x0 + total), y - 10 * ui)
+    } else {
+        (None, 108 * ui)
+    };
+    underfoot(c, own, st, at, ui);
     // A level gained.
     learned(c, st, now, ui);
     let age = now - st.levelled.0;
@@ -165,9 +170,10 @@ fn learned(c: &mut Canvas, st: &State, now: f64, ui: i32) {
     }
 }
 
-/// What lies underfoot: its icon, what it is, and what running over it does, on a
-/// card whose foot is at `y`.
-fn underfoot(c: &mut Canvas, own: &Own, st: &State, y: i32, ui: i32) {
+/// What lies underfoot: its icon, what it is, and what running over it
+/// does, on a card whose foot is at `y` (its right edge at `right`, or
+/// across the middle).
+fn underfoot(c: &mut Canvas, own: &Own, st: &State, (right, y): (Option<i32>, i32), ui: i32) {
     let me = own.body.p;
     let near = st
         .loot
@@ -201,7 +207,8 @@ fn underfoot(c: &mut Canvas, own: &Own, st: &State, y: i32, ui: i32) {
         .max(pixels::text_width(&hint, ui));
     let cw = (tw + 46 * ui).min(w - 8 * ui);
     let ch = 38 * ui;
-    let card = Rect::new(((w - cw) / 2) as f32, (y - ch) as f32, cw as f32, ch as f32);
+    let x = right.map_or((w - cw) / 2, |r| (r - cw).max(4 * ui));
+    let card = Rect::new(x as f32, (y - ch) as f32, cw as f32, ch as f32);
     c.round_rect(card, 6.0 * u, Rgba(8, 10, 20, 200));
     c.round_rect_line(card, 6.0 * u, u, col.fade(0.6));
     icon(

@@ -138,8 +138,9 @@ impl Touch {
         self.held.iter().any(|h| h.1 == b)
     }
 
-    /// The keys the fingers hold now.
-    pub fn keys(&self) -> u8 {
+    /// The keys the fingers hold now: the stick pushed to its edge
+    /// forward sprints.
+    pub fn keys(&self) -> u16 {
         let mut k = 0;
         if let Some((_, o, n)) = self.stick {
             let (dx, dy) = (n.0 - o.0, n.1 - o.1);
@@ -148,6 +149,9 @@ impl Touch {
                 let (ux, uy) = (dx / len, dy / len);
                 if uy < -0.38 {
                     k |= keys::FWD;
+                    if len > REACH * 0.9 && uy < -0.8 {
+                        k |= keys::SPRINT;
+                    }
                 }
                 if uy > 0.38 {
                     k |= keys::BACK;

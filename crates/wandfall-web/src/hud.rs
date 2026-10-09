@@ -242,13 +242,14 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             }
         }
         let full = max_hp(o.level);
-        // Over the spell bar; on a touch screen the thumbs own the
-        // bottom, and health goes top left.
+        // At the foot of the screen, left (the spells are right, your
+        // wizard between); on a touch screen the thumbs own the bottom,
+        // and health goes top left.
         let (x, y, bw, bh) = if v.touch {
             (12 * ui, 40 * ui, 120 * ui, 8 * ui)
         } else {
             let l = bar::layout(w, h, ui);
-            (l.x, l.y - 17 * ui, l.total, 9 * ui)
+            (14 * ui, l.y + l.s - 11 * ui, (150 * ui).min(w / 3), 11 * ui)
         };
         let u = ui as f32;
         c.round_rect(
@@ -284,7 +285,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             c.text_shadowed(x, y - 12 * ui, &line, ui, INK);
             c.text_shadowed(x, y + 16 * ui, &ko, ui, GOLD);
         } else {
-            c.text_centred(x + bw / 2, y + ui, &hp, ui, INK);
+            c.text_centred(x + bw / 2, y + 2 * ui, &hp, ui, INK);
             let s = (MINI * ui).min(w / 4).min(h / 4);
             let kx = w - 10 * ui - pixels::text_width(&ko, ui);
             c.text_shadowed(kx, 24 * ui + s + 6 * ui, &ko, ui, GOLD);

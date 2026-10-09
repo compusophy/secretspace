@@ -41,8 +41,10 @@ pub struct Anim {
     /// forward, 1 backing away.
     pub hips: Spring,
     pub back: Spring,
-    /// 0 at a walk, 1 at a run.
+    /// 0 at a walk, 1 at a run; 0 to 1 into a sprint; sliding (0 to 1).
     pub run: Spring,
+    pub sprint: Spring,
+    pub slide: Spring,
     /// Through two steps, 0 to 1 (the left foot lands at 0).
     pub phase: f32,
     /// Metres a step now.
@@ -65,13 +67,13 @@ pub struct Anim {
 }
 
 impl Anim {
-    /// Watch it at `p`, facing `yaw`, crouched or not, `dt` seconds on.
-    /// A landing says how hard it was (0 to 1).
+    /// Watch it at `p`, facing `yaw`, on the ground or not, crouched,
+    /// sliding, `dt` seconds on. A landing says how hard it was (0 to 1).
     pub fn step(
         &mut self,
         p: V3,
         yaw: f32,
-        (ground, crouch): (bool, bool),
+        (ground, crouch, slide): (bool, bool, bool),
         dt: f32,
     ) -> Option<f32> {
         if !self.seen {
@@ -112,14 +114,18 @@ impl Anim {
         };
         self.hips.step(turn * moving, 0.11, dt);
         let run = self.run.step(ease(WALK, RUN, self.speed), 0.2, dt);
+        let sprint = self.sprint.step(ease(7.6, 9.6, self.speed), 0.2, dt);
+        self.slide.step(slide as i32 as f32, 0.07, dt);
         let low = if crouch { 1.0 } else { 0.0 };
         self.crouch += (low - self.crouch) * (1.0 - (-dt * 12.0).exp());
-        self.stride = (STEP_WALK + (STEP_RUN - STEP_WALK) * run) * (1.0 - 0.3 * self.crouch);
+        self.stride =
+            (STEP_WALK + (STEP_RUN - STEP_WALK) * run + 0.35 * sprint) * (1.0 - 0.3 * self.crouch);
         if ground {
             // Two steps a cycle: the feet move as far as the body does.
             self.phase = (self.phase + self.speed * dt / (2.0 * self.stride)).fract();
         }
-        let lean = 0.12 * run + (accel.0 * 0.012).clamp(-0.12, 0.12) + 0.08 * run * moving;
+        let lean =
+            0.12 * run + 0.14 * sprint + (accel.0 * 0.012).clamp(-0.12, 0.12) + 0.08 * run * moving;
         self.lean.step(lean.clamp(-0.2, 0.35), 0.15, dt);
         self.bank
             .step((-accel.1 * 0.01).clamp(-0.2, 0.2) * moving, 0.12, dt);
@@ -158,7 +164,7 @@ mod tests {
         let mut p = a.last;
         for _ in 0..(secs * 60.0) as usize {
             p = [p[0] + v.0 / 60.0, 0.0, p[2] + v.1 / 60.0];
-            a.step(p, yaw, (true, false), 1.0 / 60.0);
+            a.step(p, yaw, (true, false, false), 1.0 / 60.0);
         }
     }
 

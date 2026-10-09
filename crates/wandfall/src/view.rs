@@ -71,7 +71,9 @@ pub fn frame(w: &World, you: u16) -> Frame {
                     | if p.body.ground { flag::GROUND } else { 0 }
                     | if p.bot { flag::BOT } else { 0 }
                     | if p.entrant { flag::ENTRANT } else { 0 }
-                    | if p.body.crouch { flag::CROUCH } else { 0 },
+                    | if p.body.crouch { flag::CROUCH } else { 0 }
+                    | if p.body.sprint { flag::SPRINT } else { 0 }
+                    | if p.body.slide { flag::SLIDE } else { 0 },
             })
             .collect(),
         bolts: w

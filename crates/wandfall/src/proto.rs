@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 5;
+pub const PROTO: u8 = 6;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -52,7 +52,7 @@ impl Up {
             Up::Inputs(v) => {
                 w.u8(tag::INPUT).u8(v.len().min(MAX_INPUTS) as u8);
                 for i in v.iter().take(MAX_INPUTS) {
-                    w.u16(i.seq).u16(i.yaw).i16(i.pitch).u8(i.keys).u8(i.cast);
+                    w.u16(i.seq).u16(i.yaw).i16(i.pitch).u16(i.keys).u8(i.cast);
                 }
             }
         }
@@ -78,7 +78,7 @@ impl Up {
                         seq: r.u16()?,
                         yaw: r.u16()?,
                         pitch: r.i16()?,
-                        keys: r.u8()?,
+                        keys: r.u16()?,
                         cast: r.u8()?,
                     });
                 }
@@ -147,6 +147,8 @@ pub mod flag {
     pub const BOT: u8 = 8;
     pub const ENTRANT: u8 = 16;
     pub const CROUCH: u8 = 32;
+    pub const SPRINT: u8 = 64;
+    pub const SLIDE: u8 = 128;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -228,8 +230,13 @@ impl Frame {
                 f32s(&mut w, o.body.p);
                 f32s(&mut w, o.body.v);
                 let b = &o.body;
-                w.u8(b.ground as u8 | (b.glide as u8) << 1 | (b.crouch as u8) << 2)
+                w.u8(b.ground as u8
+                    | (b.glide as u8) << 1
+                    | (b.crouch as u8) << 2
+                    | (b.sprint as u8) << 3
+                    | (b.slide as u8) << 4)
                     .u8(b.coyote.min(15) | b.buffer.min(15) << 4)
+                    .u8(b.slide_cd)
                     .u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
@@ -299,6 +306,7 @@ impl Frame {
             let v = read_f32s(&mut r)?;
             let g = r.u8()?;
             let jump = r.u8()?;
+            let slide_cd = r.u8()?;
             let mut o = Own {
                 body: Body {
                     p,
@@ -306,6 +314,9 @@ impl Frame {
                     ground: g & 1 != 0,
                     glide: g & 2 != 0,
                     crouch: g & 4 != 0,
+                    sprint: g & 8 != 0,
+                    slide: g & 16 != 0,
+                    slide_cd,
                     coyote: jump & 15,
                     buffer: jump >> 4,
                     chill: r.u16()?,
@@ -640,6 +651,9 @@ mod tests {
                     crouch: true,
                     coyote: 3,
                     buffer: 2,
+                    sprint: false,
+                    slide: true,
+                    slide_cd: 17,
                 },
                 seq: 65535,
                 hp: 252,

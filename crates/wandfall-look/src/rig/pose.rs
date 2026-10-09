@@ -146,10 +146,11 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
     // The arms swing against the legs, elbows bending more at a run.
     let swing = |side: usize| {
         let x = feet[side].0[0];
-        let k = 0.3 + 0.35 * run;
+        let k = 0.3 + 0.35 * run + 0.25 * a.sprint.x;
         -(x / (duty * a.stride).max(0.2)) * k * moving
     };
-    let elbow = 0.18 + 1.05 * run * moving + 0.3 * crouch;
+    let sprint = a.sprint.x;
+    let elbow = 0.18 + 1.05 * run * moving + 0.3 * sprint + 0.3 * crouch;
     let out = 0.1 + 0.05 * run + 0.6 * air + 0.25 * a.land;
     let rest = (swing(1), out * 0.6, elbow);
     let up = FRAC_PI_2 + p.aim.clamp(-1.0, 1.0);
@@ -160,7 +161,7 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
         rest.1 + (cast.1 - rest.1) * k,
         rest.2 + (cast.2 - rest.2) * k,
     );
-    Body {
+    let mut b = Body {
         hip: (HIP - low + bob + 0.05 * air, a.land),
         sway,
         hips: a.hips.x,
@@ -175,7 +176,43 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
         hat: a.hat.x,
         fall: 0.0,
         sink: 0.0,
+    };
+    slid(&mut b, a.slide.x, k);
+    b
+}
+
+/// Sliding (`s` of the way into it): low, the lead leg out ahead, the
+/// other tucked under, leaning back, the free arm out for balance, the
+/// robe flying; the wand arm still casts (`cast` of the way up).
+fn slid(b: &mut Body, s: f32, cast: f32) {
+    if s <= 0.0 {
+        return;
     }
+    let mix = |a: f32, z: f32| a + (z - a) * s;
+    b.hip.0 = mix(b.hip.0, HIP - 0.5);
+    b.sway *= 1.0 - s;
+    b.wobble *= 1.0 - s;
+    b.lean = mix(b.lean, -0.42);
+    let lead = ([0.62, 0.0, 0.09], -0.1);
+    let tuck = ([-0.12, 0.1, -0.06], -0.5);
+    for (side, (to, pitch)) in [(0, tuck), (1, lead)] {
+        let (at, p) = b.feet[side];
+        b.feet[side] = (
+            [mix(at[0], to[0]), mix(at[1], to[1]), mix(at[2], to[2])],
+            mix(p, pitch),
+        );
+    }
+    let (sw, out, el) = b.arms[0];
+    b.arms[0] = (mix(sw, -0.5), mix(out, 1.0), mix(el, 0.35));
+    let (sw, out, el) = b.arms[1];
+    let k = s * (1.0 - cast);
+    b.arms[1] = (
+        sw + (0.9 - sw) * k,
+        out + (0.25 - out) * k,
+        el + (0.3 - el) * k,
+    );
+    b.cloth = mix(b.cloth, 0.9);
+    b.hat = mix(b.hat, 0.5);
 }
 
 /// Sitting on its broom: legs forward, hands on the handle.
@@ -339,7 +376,7 @@ mod tests {
         let mut p = from;
         for _ in 0..frames {
             p = [p[0] + v.0 / 60.0, 0.0, p[2] + v.1 / 60.0];
-            a.step(p, yaw, (true, false), 1.0 / 60.0);
+            a.step(p, yaw, (true, false, false), 1.0 / 60.0);
         }
         p
     }
@@ -410,6 +447,23 @@ mod tests {
         for side in 0..2 {
             assert!(sole(&f, side)[1].abs() < 0.03, "feet down");
         }
+    }
+
+    #[test]
+    fn sliding_it_sits_low_with_a_leg_out_ahead() {
+        let mut a = Anim::default();
+        let mut p = [0.0; 3];
+        for _ in 0..30 {
+            p = [p[0] + 11.0 / 60.0, 0.0, 0.0];
+            a.step(p, 0.0, (true, true, true), 1.0 / 60.0);
+        }
+        let f = wizard(p, 0.0, &a, &pose(), 1);
+        let hip = point(&f.root, [0.0, HIP, 0.0]);
+        let pelvis = point(&f.thigh[1], [0.0; 3]);
+        assert!(pelvis[1] < 0.6, "low: {pelvis:?} ({hip:?})");
+        let lead = sole(&f, 1);
+        assert!(lead[0] - p[0] > 0.4, "the lead foot ahead: {lead:?}");
+        assert!(lead[1].abs() < 0.12, "and on the ground: {lead:?}");
     }
 
     #[test]

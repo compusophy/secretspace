@@ -131,8 +131,11 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
     if held("Space") {
         k |= keys::JUMP;
     }
-    if held("KeyC") {
+    if held("KeyC") || held("ControlLeft") {
         k |= keys::CROUCH;
+    }
+    if held("ShiftLeft") || held("ShiftRight") {
+        k |= keys::SPRINT;
     }
     if p.firing {
         k |= keys::FIRE;

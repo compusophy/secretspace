@@ -38,6 +38,8 @@ pub struct Stance {
     pub aiming: bool,
     pub crouch: bool,
     pub glide: bool,
+    /// Going fast (sprinting or sliding): the view widens a touch.
+    pub fast: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -93,7 +95,9 @@ impl Chase {
         }
         let shoulder = self.shoulder.step(shoulder, 0.12, dt);
         let head = self.head.step(head, 0.1, dt);
-        let fov = self.fov.step(fov, 0.08, dt);
+        let fov = self
+            .fov
+            .step(fov + if stance.fast { 0.1 } else { 0.0 }, 0.12, dt);
         // The feet's height eased a touch, so steps and landings do not
         // jolt the view.
         let y = self.rise.step(feet[1], 0.05, dt);

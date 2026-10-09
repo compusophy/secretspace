@@ -214,7 +214,8 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
         let want = trig::heading(a);
         let diff = want.wrapping_sub(yaw) as i16;
         yaw = yaw.wrapping_add((diff as i32).clamp(-1800, 1800) as i16 as u16);
-        keys |= keys::FWD;
+        // Going somewhere (not fighting): at a sprint.
+        keys |= keys::FWD | keys::SPRINT;
     }
     // Stuck against something: jump, and walk elsewhere.
     if tick.is_multiple_of(TICK_HZ) {

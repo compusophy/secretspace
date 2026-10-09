@@ -79,9 +79,18 @@ pub fn draw(
             };
             let yaw = trig::radians(s.yaw);
             let a = anims.entry(s.id).or_default();
-            let stance = (s.flags & flag::GROUND != 0, s.flags & flag::CROUCH != 0);
+            let slide = s.flags & flag::SLIDE != 0;
+            let stance = (
+                s.flags & flag::GROUND != 0,
+                s.flags & flag::CROUCH != 0,
+                slide,
+            );
             if let Some(hard) = a.step(s.p, yaw, stance, dt as f32 / 1000.0) {
                 st.dust.push((now, s.p, hard));
+            }
+            // A slide kicks up dust behind it.
+            if slide && (now / 90.0).floor() != ((now - dt) / 90.0).floor() {
+                st.dust.push((now, s.p, 0.25));
             }
             look.rig.wizard(d, s.id, s.p, yaw, a, &pose);
         }

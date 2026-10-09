@@ -42,9 +42,30 @@ pub const RIFT_DEPTH: f32 = 3.5;
 
 // Moving.
 pub const RUN: f32 = 7.0;
+/// Sprinting (forward only; not aiming, casting or crouched).
+pub const SPRINT: f32 = 10.0;
 pub const WADE: f32 = 0.55;
-pub const ACCEL_GROUND: f32 = 70.0;
+/// Speeding up toward where you steer, on the ground and in the air;
+/// slowing with no keys held; and how fast speed above your pace bleeds
+/// away on the ground (in the air it holds): momentum, so a slide or a
+/// hill carries on into a run or a jump.
+pub const ACCEL_GROUND: f32 = 48.0;
 pub const ACCEL_AIR: f32 = 16.0;
+pub const BRAKE: f32 = 36.0;
+pub const OVERSPEED: f32 = 5.0;
+/// Hills: walking up a slope of 1 (45°) this much slower, down it this
+/// much faster (and less, gentler).
+pub const HILL: f32 = 0.45;
+/// Sliding: crouch while going fast (sprinting, or landing at speed). A
+/// boost (unless the last came within the cooldown, in ticks), friction
+/// on the flat, gravity down a slope, a little steering, a top speed; it
+/// ends below a crouch's pace, or standing up.
+pub const SLIDE_MIN: f32 = 7.5;
+pub const SLIDE_BOOST: f32 = 3.0;
+pub const SLIDE_COOLDOWN: u8 = 30;
+pub const SLIDE_FRICTION: f32 = 4.5;
+pub const SLIDE_STEER: f32 = 1.6;
+pub const SLIDE_MAX: f32 = 18.0;
 /// Falling is quicker than rising; holding jump rises on the lighter
 /// pull, so a held jump goes higher than a tapped one.
 pub const GRAVITY: f32 = 30.0;

@@ -41,6 +41,8 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             set(&mut me.flags, flag::GROUND, body.ground);
             set(&mut me.flags, flag::GLIDE, body.glide);
             set(&mut me.flags, flag::CROUCH, body.crouch);
+            set(&mut me.flags, flag::SPRINT, body.sprint);
+            set(&mut me.flags, flag::SLIDE, body.slide);
         }
     }
     let (cam, watching, orbit) = camera(p, &others, feet, now, dt, aspect);
@@ -265,6 +267,7 @@ fn camera(
             aiming: p.aiming,
             crouch: b.crouch,
             glide: b.glide,
+            fast: b.sprint || b.slide,
         };
         let mut cam = p
             .chase
