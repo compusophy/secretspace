@@ -178,6 +178,7 @@ pub fn blend(a: &Look, b: &Look, t: f32) -> Look {
             saturation: f(a.grade.saturation, b.grade.saturation),
             contrast: f(a.grade.contrast, b.grade.contrast),
         },
+        glow: f(a.glow, b.glow),
     }
 }
 
@@ -205,6 +206,7 @@ fn dusk() -> Look {
         waves: 0.4,
         wind: [0.9, 0.35],
         grade: GRADE,
+        glow: 1.0,
     }
 }
 
@@ -262,6 +264,8 @@ fn day() -> Look {
         water: rgb(14, 60, 88),
         waves: 0.45,
         wind: [1.0, 0.45],
+        // Lights and spells as bright as at dusk, under less exposure.
+        glow: 1.25,
         grade: Grade {
             lift: [0.0, 0.006, 0.016],
             gain: [1.03, 1.0, 0.96],
@@ -295,6 +299,8 @@ fn night() -> Look {
         water: rgb(6, 20, 38),
         waves: 0.35,
         wind: [0.6, -0.3],
+        // Under the night's exposure, spells would burn white.
+        glow: 0.62,
         grade: Grade {
             lift: [0.0, 0.01, 0.035],
             gamma: [1.0, 1.0, 1.03],

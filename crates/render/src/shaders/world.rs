@@ -150,7 +150,7 @@ fn energy(i: WorldOut, n: vec3<f32>) -> vec4<f32> {
     let cool = col * vec3<f32>(1.0, 0.55, 0.4);
     let hot = mix(mix(cool, col, smoothstep(0.2, 0.55, fire)), vec3<f32>(1.0, 0.95, 0.85) * peak, smoothstep(0.6, 1.0, fire) * 0.8);
     let lit = 0.1 + body * 2.2 + rim * edge * edge * 1.6;
-    let c = hot * lit * (1.0 + (i.col.a + i.extra.x) * 2.0);
+    let c = hot * lit * (1.0 + (i.col.a + i.extra.x) * 2.0) * g.wind.w;
     let a = clamp(body * mix(sqrt(facing), 0.3, rim) + rim * edge * edge * 0.6, 0.0, 1.0);
     return vec4<f32>(air(c, i.pos), i.tint.a * a);
 }
@@ -169,7 +169,7 @@ fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
         // Energy: bright where it is seen edge on, clear face on.
         let v = normalize(g.eye.xyz - i.pos);
         let edge = pow(1.0 - abs(dot(n, v)), 2.5);
-        let c = linear(i.col.rgb) * linear(i.tint.rgb) * (0.1 + edge * 2.5) * (1.0 + (i.col.a + i.extra.x) * 3.0);
+        let c = linear(i.col.rgb) * linear(i.tint.rgb) * (0.1 + edge * 2.5) * (1.0 + (i.col.a + i.extra.x) * 3.0) * g.wind.w;
         return vec4<f32>(c, i.tint.a);
     }
     if (mat == ENERGY) {
@@ -199,7 +199,7 @@ fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
     } else if (mat == METAL) {
         metal = 1.0;
     }
-    let c = shade(i.pos, n, base, rough, metal, glow, ao, through, mat);
+    let c = shade(i.pos, n, base, rough, metal, glow * g.wind.w, ao, through, mat);
     return vec4<f32>(air(c, i.pos), i.tint.a);
 }
 
@@ -347,7 +347,7 @@ fn spark(i: SparkOut) -> vec4<f32> {
         let body = 1.0 - smoothstep(0.2, 1.0, d + (n - 0.5) * 0.75);
         let core = 1.0 - smoothstep(0.0, 0.6, d + (n - 0.5) * 0.5);
         let hot = mix(col, vec3<f32>(1.0, 0.9, 0.7), core * 0.55);
-        return vec4<f32>(hot * body * (1.1 + core * 1.9) * i.col.a * along, 0.0);
+        return vec4<f32>(hot * body * (1.1 + core * 1.9) * i.col.a * along * g.wind.w, 0.0);
     }
     if (shape == SMOKE) {
         let n = noise3(vec3<f32>(i.uv * 1.4 + seed, t * 0.5 + seed)) * 0.7
@@ -362,11 +362,11 @@ fn spark(i: SparkOut) -> vec4<f32> {
         let rays = max(1.0 - smoothstep(0.0, 0.07, q.y), 1.0 - smoothstep(0.0, 0.07, q.x)) * fade;
         let core = 1.0 - smoothstep(0.0, 0.32, d);
         let k = rays * 1.4 + core * core * 4.0;
-        return vec4<f32>(mix(col, vec3<f32>(1.0), core * 0.6) * k * i.col.a, 0.0);
+        return vec4<f32>(mix(col, vec3<f32>(1.0), core * 0.6) * k * i.col.a * g.wind.w, 0.0);
     }
     let a = (1.0 - smoothstep(0.3, 1.0, d)) * i.col.a * along;
     let core = 1.0 - smoothstep(0.0, 0.45, d);
-    return vec4<f32>(col * a * (2.5 + core * 4.0), 0.0);
+    return vec4<f32>(col * a * (2.5 + core * 4.0) * g.wind.w, 0.0);
 }
 
 struct GrassOut {

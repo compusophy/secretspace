@@ -22,7 +22,7 @@ struct Globals {
     view: vec4<f32>,     // viewport width, height; shadow texel; cascades
     splits: vec4<f32>,   // where each cascade ends (metres ahead)
     terrain: vec4<f32>,  // heights: origin x, z, cell, samples a side
-    wind: vec4<f32>,     // xz the wind, z gusts, w unused
+    wind: vec4<f32>,     // xy the wind (x, z), z unused, w how bright glows are
     water: vec4<f32>,    // rgb deep water, w waves
     grass: vec4<f32>,    // spacing, blades a side, reach, on
 };

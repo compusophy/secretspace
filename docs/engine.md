@@ -236,7 +236,9 @@ Done, across phases, in `crates/render`:
   (`Look::grade`: lift, gamma, gain per channel, saturation, an S-curve
   contrast) and a dither against banding. Cloth (wrapped light and a
   Charlie sheen, its colour lighter) and skin (light wrapped further in
-  red) materials. Not yet: auto exposure, DoF, IBL.
+  red) materials. `Look::glow` scales all that glows (emission, sparks,
+  point lights), so a look exposed for a dark night keeps a spell its
+  colour instead of burning it white. Not yet: auto exposure, DoF, IBL.
 - Phase 5 (part): sparks with shapes (`Shape`: a glow, a licking flame,
   a puff of smoke laid over rather than added, a four-rayed glint), each
   stretched along its motion into a streak (`Spark::v`), flames and

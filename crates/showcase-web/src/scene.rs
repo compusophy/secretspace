@@ -246,6 +246,7 @@ impl Scene {
             waves: 0.3,
             wind: [0.6, 0.3],
             grade: Default::default(),
+            glow: 1.0,
         }
     }
 

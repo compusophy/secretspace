@@ -640,7 +640,7 @@ impl Renderer {
         let mut b = std::mem::take(&mut self.bytes);
         b.clear();
         for l in &self.grid.lights {
-            let c = l.c;
+            let c = geo::scale(l.c, f.look.glow);
             put_f32s(
                 &mut b,
                 &[l.p[0], l.p[1], l.p[2], l.r, c[0], c[1], c[2], 0.0],

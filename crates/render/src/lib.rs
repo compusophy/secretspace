@@ -266,6 +266,10 @@ pub struct Look {
     pub wind: [f32; 2],
     /// The picture's grade, after tone mapping.
     pub grade: Grade,
+    /// How bright all that glows is (glowing things, sparks, lights): 1
+    /// as made; less where the exposure is high (a night), so a spell
+    /// keeps its colour at every hour instead of burning white.
+    pub glow: f32,
 }
 
 /// A colour grade, applied to the finished picture (as it is shown):
@@ -317,6 +321,7 @@ impl Default for Look {
             waves: 0.35,
             wind: [0.8, 0.4],
             grade: Grade::default(),
+            glow: 1.0,
         }
     }
 }
