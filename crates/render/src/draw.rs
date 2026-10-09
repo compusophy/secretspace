@@ -19,7 +19,7 @@ const INST: usize = 24;
 const SPARK: usize = 12;
 /// How far the eye goes before the statics are laid again (near and far
 /// meshes chosen anew).
-const STILL_RELAY: f32 = 6.0;
+const STILL_RELAY: f32 = crate::cull::EYE_SLACK;
 const SHADOW: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// What the last frame cost.
@@ -746,24 +746,10 @@ impl Renderer {
         if self.statics_dirty || moved > STILL_RELAY * STILL_RELAY {
             self.statics_dirty = false;
             self.still_eye = eye;
-            let chosen: Vec<Item> = self
-                .statics
-                .iter()
-                .map(|i| match i.far {
-                    Some((m, d)) => {
-                        let at = [i.model[12], i.model[13], i.model[14]];
-                        let d2 = (0..3).map(|k| (at[k] - eye[k]).powi(2)).sum::<f32>();
-                        Item {
-                            mesh: if d2 > d * d { m } else { i.mesh },
-                            ..*i
-                        }
-                    }
-                    None => *i,
-                })
-                .collect();
-            self.cull.set(&chosen, &self.statics);
-            let mut items: Vec<&Item> = chosen.iter().collect();
-            items.sort_by_key(|i| i.mesh);
+            self.cull.set(&self.statics, eye);
+        }
+        // Of them, what the view could see (when it has turned).
+        if let Some(mut items) = self.cull.view(&f.cam, &self.meshes) {
             b.clear();
             self.still_runs = Self::lay(&mut items, &mut b, 0);
             self.still.put(&device, &queue, &b);

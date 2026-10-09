@@ -401,6 +401,11 @@ Every phase:
       model, not its 42k one). The ground is cut in 4 by 4 pieces so the
       cascades take only the near ones. On the range, shadow triangles
       3,395k to 2,250k; `?perf=1` shows them a cascade at a time.
+- [x] The view culled the same way: statics within a cone 20 degrees
+      wider than the eye's (or within 6 m), laid again in the frame the
+      view turns past that or the eye moves 6 m, so nothing pops; one run
+      a mesh still. On the range 1,238k triangles to 910k, instances 1,840
+      to 1,148, draws 360 to 346.
 - [ ] Compute culling: frustum plus Hi-Z occlusion from last frame's depth
       pyramid, writing indirect args. A path without
       `indirect-first-instance`.
