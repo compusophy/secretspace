@@ -63,7 +63,7 @@ crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   first), Session (the key), Pointer, Version, Socket,
                   TextField, storage, audio
 crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
-crates/render     the engine: retained scene, geo, terrain, sun shadows,
+crates/render     the engine: retained scene, geo, sculpt, terrain, shadows,
                   HDR + bloom + ACES, grass, sea, light grid;
                   crates/showcase-web is its test page (/showcase/)
 crates/hub-web    the front page (cards, live counts, scroll, footer), watch
@@ -137,7 +137,7 @@ deviceScaleFactor: 3` at 390x844 for a phone.
 - **`pkill -f server` kills your own shell** when the command line holds
   the pattern. Track the server's PID.
 - New people are ghosts for `GHOST_TICKS`: they cannot die or kill
-  (without it, test players died within eight seconds).
+  (without it, test players died in 8 s).
 - Bodies are rebuilt into the grid after deaths and before spawning; a
   stale grid indexes snakes that are gone.
 - The page steers by the pointer's angle from the screen's centre, where

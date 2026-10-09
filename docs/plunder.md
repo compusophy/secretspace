@@ -267,6 +267,21 @@ of combat styles and all varieties to counter all varieties".
       on can jump), and the camera slides round trunks instead of being
       yanked in by them (`running_at_any_pace_nothing_jumps_between_frames`,
       `running_through_a_wood_the_view_never_leaps`).
+- [x] **Wizards sculpted, not stacked** (on the owner's word: "the low
+      poly character models need so much work... giving AI slop"). The
+      engine sculpts (`render::sculpt`): distance fields blended like clay
+      (smooth union, carving), meshed smooth by surface nets with each
+      vertex pulled onto the surface, its normal the field's slope, its
+      creases darkened by occlusion read from the field; and cloth woven
+      as sheets whose folds cost nothing. A wizard (`rig/parts.rs`) now
+      has a face (brows, eyes with irises, a nose, cheeks, ears), a beard
+      and moustache in strands with long hair behind (or, younger, brown
+      hair and a goatee), hands closed in fists about a gnarled wand, boots
+      with curled toes and soles; a robe whose folds deepen to a gold hem,
+      bell sleeves lined and cuffed, a scalloped mantle edged in gold, a
+      curved high collar, a belt with buckle and pouch, and a hat with a
+      wide floppy brim, a crumpled crown, a band and buckle. About 41,000
+      triangles near and 7,000 far (beyond 16 m, coarser).
 - [x] **Moving like it matters** (on the owner's word: "crouching,
       sliding, sprinting, gravity down hill, momentum"). Shift sprints
       (10 m/s against 7; forward only, not aiming, casting or wading), as

@@ -8,7 +8,8 @@
 //!   swing, knees found by two-bone reach, the chest keeping its aim, arms
 //!   swinging against the legs, the wand arm rising to cast, the robe's
 //!   panels following the thighs; sitting on a broom; falling;
-//! - `model`: its parts as meshes, each hung from its joint;
+//! - `model`: its parts as meshes, each hung from its joint, near and far
+//!   (`parts` sculpts them);
 //! - `math`: the matrices, the reach and the springs they share.
 //!
 //! The model faces +x, up is +y, its right is +z (as `m4::place` turns
@@ -17,6 +18,7 @@
 mod gait;
 mod math;
 mod model;
+mod parts;
 mod pose;
 
 pub use gait::Anim;
@@ -64,10 +66,21 @@ impl Rig {
     }
 
     /// A wizard at `at` (its feet), facing `yaw` (radians), moving as `a`
-    /// says and doing what `p` says; its frames (where its wand's tip is).
-    pub fn wizard(&self, d: &mut Draw, id: u16, at: V3, yaw: f32, a: &Anim, p: &Pose) -> Frames {
+    /// says and doing what `p` says, drawn in full or (`far`) coarser; its
+    /// frames (where its wand's tip is).
+    #[allow(clippy::too_many_arguments)]
+    pub fn wizard(
+        &self,
+        d: &mut Draw,
+        id: u16,
+        at: V3,
+        yaw: f32,
+        a: &Anim,
+        p: &Pose,
+        far: bool,
+    ) -> Frames {
         let f = pose::wizard(at, yaw, a, p, id);
-        self.draw(d, id, &f, p);
+        self.draw(d, id, &f, p, far);
         f
     }
 
@@ -86,11 +99,11 @@ impl Rig {
             t,
         };
         let f = pose::fallen(at, yaw, &p, id, t);
-        self.draw(d, id, &f, &p);
+        self.draw(d, id, &f, &p, false);
     }
 
-    fn draw(&self, d: &mut Draw, id: u16, f: &Frames, p: &Pose) {
-        let m = &self.m;
+    fn draw(&self, d: &mut Draw, id: u16, f: &Frames, p: &Pose, far: bool) {
+        let m = &self.m.lod[far as usize];
         let c = hue(id);
         let robe = mix(c, [1.0; 3], 0.7 * p.flash);
         let lit = 0.6 * p.flash;
@@ -109,9 +122,11 @@ impl Rig {
         put(m.torso, f.chest, Some(robe));
         put(m.belt, f.chest, None);
         put(m.mantle, f.chest, Some(dark));
-        put(m.collar, f.chest, None);
+        put(m.collar, f.chest, Some(dark));
+        put(m.trim, f.chest, None);
         put(m.head[id as usize % 2], f.head, None);
         put(m.hat, f.head, Some(dark));
+        put(m.band, f.head, None);
         put(m.hat_tip, f.hat, Some(dark));
         for side in 0..2 {
             put(m.thigh, f.thigh[side], None);
@@ -127,7 +142,7 @@ impl Rig {
         let (col, flare) = p.tip;
         let k = 0.05 + 0.07 * flare;
         d.items.push(
-            Item::new(m.orb, m4::place(tip, 0.0, [k; 3]))
+            Item::new(self.m.orb, m4::place(tip, 0.0, [k; 3]))
                 .tint(col, 1.0)
                 .glow(1.0)
                 .pass(Pass::Glow),

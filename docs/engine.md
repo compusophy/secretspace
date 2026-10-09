@@ -95,6 +95,10 @@ first-person shooter.
 - `crates/kit/src/gl.rs`: the WebGL2 screen (`Gl`, `Program`, `Mesh`, `m4`
   maths, column-major).
 - `crates/kit/src/input.rs`: keys, fingers, mouse, pointer lock.
+- `crates/render/src/sculpt.rs`: models sculpted from distance fields
+  (blended and carved like clay), meshed smooth by surface nets with their
+  creases darkened from the field; cloth woven as sheets. Wandfall's
+  wizards are made with it (`crates/wandfall-look/src/rig/parts.rs`).
 
 **Conventions:**
 - **Space.** World tile `(x, y)` at height `h` is `(x, h, y)` in render space:

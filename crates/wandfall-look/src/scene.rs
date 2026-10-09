@@ -104,7 +104,12 @@ pub fn draw(
             if slide && (now / 90.0).floor() != ((now - dt) / 90.0).floor() {
                 st.dust.push((now, s.p, 0.25));
             }
-            look.rig.wizard(d, s.id, s.p, yaw, a, &pose);
+            // Far off, the coarser wizard.
+            let far = render::geo::dot(
+                render::geo::sub(s.p, cam.eye),
+                render::geo::sub(s.p, cam.eye),
+            ) > 16.0 * 16.0;
+            look.rig.wizard(d, s.id, s.p, yaw, a, &pose, far);
         }
         fx::on_wizard(look, d, s, t, own(s.id));
     }

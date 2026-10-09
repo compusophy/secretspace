@@ -10,6 +10,7 @@
 pub mod geo;
 pub mod grid;
 pub mod laws;
+pub mod sculpt;
 pub mod shaders;
 pub mod shadow;
 pub mod terrain;

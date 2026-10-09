@@ -249,11 +249,26 @@ fn camera(
         );
     }
     if let Some(o) = orbit {
-        let a = (now / 5000.0) as f32;
+        // `&close`: near, over the head (`&close=degrees`: held there,
+        // 0 in front of it).
+        let held = query_value("close").and_then(|v| v.parse::<f32>().ok());
+        let (mut r, mut up, mut pitch) = if query("close") || held.is_some() {
+            (1.7, 1.9, -0.22)
+        } else {
+            (3.6, 1.2, -0.08)
+        };
+        // `&lift=metres&dist=metres`: from there, looking level.
+        if let Some(l) = query_value("lift").and_then(|v| v.parse::<f32>().ok()) {
+            (up, pitch) = (l, 0.0);
+        }
+        if let Some(d) = query_value("dist").and_then(|v| v.parse::<f32>().ok()) {
+            r = d;
+        }
+        let a = held.map_or((now / 5000.0) as f32, f32::to_radians);
         let cam = Camera {
-            eye: [o[0] + a.cos() * 3.6, o[1] + 1.2, o[2] + a.sin() * 3.6],
+            eye: [o[0] + a.cos() * r, o[1] + up, o[2] + a.sin() * r],
             yaw: a + std::f32::consts::PI,
-            pitch: -0.08,
+            pitch,
             fov: camera::FOV,
             aspect,
         };
