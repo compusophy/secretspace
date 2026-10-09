@@ -43,6 +43,9 @@ pub struct Pose {
     pub arm: f32,
     pub aim: f32,
     pub tip: (V3, f32),
+    /// The spell it has just cast and how fresh (1 just now): its arms
+    /// make that spell's gesture, easing back.
+    pub spell: Option<(u8, f32)>,
     /// On its broomstick, dropping onto the island.
     pub glide: bool,
     /// Seconds (for breath and the broom's sway).
@@ -188,8 +191,66 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
         fall: 0.0,
         sink: 0.0,
     };
+    gesture(&mut b, p.spell, up);
     slid(&mut b, a.slide.x, k);
     b
+}
+
+/// Each spell's gesture, `k` of the way into it (fresh casts most): fire
+/// thrust forward with both hands, lightning called down from overhead,
+/// frost swept across, a ward spread wide, mending drawn to the chest,
+/// a gust flung out, a blink crouched into; the Lance's aim is the cast
+/// itself. `up` is the aim's angle for the wand arm.
+fn gesture(b: &mut Body, spell: Option<(u8, f32)>, up: f32) {
+    use wandfall::laws::spell::*;
+    let Some((sp, fresh)) = spell else {
+        return;
+    };
+    let k = fresh.clamp(0.0, 1.0);
+    let k = k * k * (3.0 - 2.0 * k);
+    let to = |a: &mut (f32, f32, f32), t: (f32, f32, f32), k: f32| {
+        *a = (
+            a.0 + (t.0 - a.0) * k,
+            a.1 + (t.1 - a.1) * k,
+            a.2 + (t.2 - a.2) * k,
+        );
+    };
+    let [left, wand] = &mut b.arms;
+    match sp {
+        FIREBALL => {
+            to(left, (up - 0.1, 0.3, 0.25), k);
+            b.lean += 0.15 * k;
+        }
+        LIGHTNING => {
+            // Overhead as it is called, coming down as it fades.
+            to(wand, (2.9, 0.1, 0.05), k);
+            to(left, (0.4, 1.1, 0.3), k);
+        }
+        FROST => {
+            to(wand, (up, -0.35 + 0.7 * (1.0 - k), 0.15), k);
+            to(left, (0.3, 0.9, 0.4), k);
+        }
+        WARD => {
+            to(wand, (0.9, 1.3, 0.2), k);
+            to(left, (0.9, 1.3, 0.2), k);
+            b.lean -= 0.1 * k;
+        }
+        MEND => {
+            to(wand, (1.0, -0.2, 1.9), k);
+            to(left, (1.0, -0.2, 1.9), k);
+            b.nod += 0.25 * k;
+        }
+        GUST => {
+            to(wand, (0.5, 1.5, 0.1), k);
+            to(left, (0.5, 1.5, 0.1), k);
+        }
+        BLINK => {
+            to(wand, (-0.6, 0.4, 0.3), k);
+            to(left, (-0.6, 0.4, 0.3), k);
+            b.lean += 0.3 * k;
+        }
+        _ => {}
+    }
 }
 
 /// Sliding (`s` of the way into it): low, the lead leg out ahead, the
@@ -444,6 +505,7 @@ mod tests {
 
     fn pose() -> Pose {
         Pose {
+            spell: None,
             flash: 0.0,
             arm: 0.0,
             aim: 0.0,

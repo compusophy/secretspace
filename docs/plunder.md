@@ -339,7 +339,10 @@ of combat styles and all varieties to counter all varieties".
   glints; lightning forked; blink a whirl of streaks round a shaft of
   light; a ward's bubble flowing plasma that shatters into crystals;
   gust wheeling streaks and dust. Rings and circles on the ground float
-  over the grass.
+  over the grass. Each cast has its gesture, so a glance at the caster
+  says what is coming: fire thrust with both hands, lightning called
+  down from overhead, frost swept across, a ward spread wide, mending
+  drawn to the chest, a gust flung out, a blink crouched into.
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.

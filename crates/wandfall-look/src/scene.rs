@@ -91,6 +91,7 @@ pub fn draw(
             // does not jerk the body.
             let (yaw, aim) = (a.face.x, a.pitch.x);
             let pose = rig::Pose {
+                spell: fx::casting(&st.shows, s.id, now),
                 flash: (1.0 - hit / 200.0).max(0.0) as f32,
                 arm: (tip.1 * 2.0)
                     .max((1.0 - fired as f32 / 450.0) * 1.5)

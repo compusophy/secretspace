@@ -1,6 +1,6 @@
 //! Any one effect on its own, to look at (the page's `?fx=name&age=ms`):
-//! made from the same events and bolts a match sends; and `sparks`, one
-//! spark of each shape.
+//! made from the same events and bolts a match sends; `sparks`, one spark
+//! of each shape; `gesture` and a spell's number, a wizard casting it.
 
 use render::geo::{self, V3};
 use wandfall::laws::spell;
@@ -41,6 +41,27 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
         stage,
         at: p,
     };
+    // `gesture` and a spell's number: a wizard casting it, facing you.
+    if let Some(sp) = name
+        .strip_prefix("gesture")
+        .and_then(|n| n.parse::<u8>().ok())
+    {
+        let fresh = (1.0 - age / 450.0).clamp(0.0, 1.0) as f32;
+        let me = geo::add(at, geo::scale(fwd, 2.5));
+        let yaw = fwd[2].atan2(fwd[0]) + std::f32::consts::FRAC_PI_2;
+        let pose = crate::rig::Pose {
+            flash: 0.0,
+            arm: 1.0,
+            aim: 0.1,
+            tip: (super::colour(sp), fresh),
+            spell: Some((sp, fresh)),
+            glide: false,
+            t,
+        };
+        let a = crate::rig::Anim::default();
+        look.rig.wizard(d, 3, me, yaw, &a, &pose, false);
+        return;
+    }
     let ev = match name {
         "wand" => {
             bolt(look, d, &flying(WAND, 30.0), false, t);

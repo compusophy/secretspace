@@ -91,6 +91,7 @@ impl Rig {
             return;
         }
         let p = Pose {
+            spell: None,
             flash: 0.0,
             arm: 0.0,
             aim: 0.0,

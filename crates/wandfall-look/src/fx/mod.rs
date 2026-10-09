@@ -355,6 +355,25 @@ fn glint(d: &mut Draw, at: V3, size: f32, c: V3, a: f32) {
     }
 }
 
+/// The spell a wizard has just cast, and how fresh (1 just now, 0 after
+/// `CAST_SHOWN` ms), if one.
+pub fn casting(list: &[(f64, Ev)], who: u16, now: f64) -> Option<(u8, f32)> {
+    list.iter().rev().find_map(|&(when, e)| match e {
+        Ev::Cast {
+            by,
+            spell,
+            stage: 0,
+            ..
+        } if by == who && now - when < CAST_SHOWN => {
+            Some((spell, (1.0 - (now - when) / CAST_SHOWN) as f32))
+        }
+        _ => None,
+    })
+}
+
+/// How long a cast shows at the wand and in the caster's gesture (ms).
+const CAST_SHOWN: f64 = 450.0;
+
 /// The colour and brightness of a wizard's wand tip: the spell it last
 /// cast, flaring and fading; gold at rest.
 pub fn tip(list: &[(f64, Ev)], who: u16, now: f64) -> (V3, f32) {
