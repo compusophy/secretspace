@@ -32,6 +32,8 @@ pub enum Act {
     Level(i8),
     NoCooldowns,
     Sparring,
+    /// The range's lessons from the start.
+    Lessons,
     /// A panel's own ground: a click there does nothing (off every panel,
     /// a click goes back to the game).
     Stay,
@@ -178,7 +180,7 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
     let (w, h) = (c.w, c.h);
     let bw = (200 * ui).min(w - 24 * ui) as f32;
     let bh = 28.0 * ui as f32;
-    let n = if practice { 3.0 } else { 2.0 };
+    let n = if practice { 4.0 } else { 2.0 };
     // The keys, inside the panel (a touch screen has its buttons), a
     // line holding as many whole ones as fit.
     let help = if touch {
@@ -225,6 +227,16 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
             "spellbook (B)",
             false,
             Act::Book,
+            ui,
+        );
+        y += bh + 8.0 * ui as f32;
+        button(
+            c,
+            spots,
+            Rect::new(x, y, bw, bh),
+            "lessons",
+            false,
+            Act::Lessons,
             ui,
         );
         y += bh + 8.0 * ui as f32;

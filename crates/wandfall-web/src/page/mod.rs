@@ -20,6 +20,7 @@ use wasm_bindgen::prelude::*;
 use crate::camera::{self, Chase};
 use crate::fx::{self, Draw};
 use crate::hud;
+use crate::lessons::{self, Lessons};
 use crate::look::{self, Look};
 use crate::menu::{self, Act, Spots};
 use crate::rig;
@@ -114,6 +115,9 @@ struct Page {
     sounds: Sounds,
     /// `?hold=ms`: every effect held at that age.
     hold: Option<f64>,
+    /// The range's first lessons, and where their panel is (to tap).
+    lessons: Lessons,
+    lesson_panel: Option<pixels::Rect>,
     /// `?fx=name` (`fx::NAMES`): that effect shown by you, again and
     /// again, or (`&age=ms`) held at that age.
     gallery: Option<(String, Option<f64>)>,
@@ -286,6 +290,8 @@ pub fn start() {
                 touch: kit::touch(),
                 sounds: Sounds::new(),
                 hold: query_value("hold").and_then(|v| v.parse().ok()),
+                lessons: Lessons::new(),
+                lesson_panel: None,
                 gallery: query_value("fx")
                     .map(|n| (n, query_value("age").and_then(|v| v.parse().ok()))),
                 anims: HashMap::new(),

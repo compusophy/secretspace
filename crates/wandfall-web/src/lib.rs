@@ -11,6 +11,7 @@
 
 pub mod bar;
 pub mod hud;
+pub mod lessons;
 pub mod menu;
 pub mod sound;
 pub mod touch;

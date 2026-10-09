@@ -318,6 +318,11 @@ of combat styles and all varieties to counter all varieties".
   `?nocd`, `?spar`, `?look=yaw,pitch`, `?hold=ms` (every effect held at
   that age), `?fx=name&age=ms` (any one effect shown by you, held at an
   age or again and again: `fx::NAMES`).
+- **Lessons on the range** (`wandfall-web/src/lessons.rs`), the first
+  time: ten steps under the top line, each ticked off as you do it
+  (move, jump, a timed hop, an air jump, sprint, slide, a wand hit, a
+  cast, a spell cube, the spellbook), keys or fingers in their words;
+  Enter or a tap skips one; the range's menu starts them again.
 - **Spells that look like magic** (the owner: "still pretty low poly, not
   cool spells"), `wandfall-look/src/fx/`: fire is flowing energy and
   licking flames (a fireball a roiling ball trailing flame into smoke;

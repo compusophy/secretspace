@@ -168,6 +168,31 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             if p.orbit.is_none() {
                 hud::draw(&mut p.g.hud, &i.mini, &view);
             }
+            // The range's lessons, while you play.
+            p.lesson_panel = None;
+            if practice && p.alive && p.orbit.is_none() {
+                let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
+                let you = p.st.you;
+                let cast_at =
+                    p.st.shows
+                        .iter()
+                        .filter_map(|&(when, e)| match e {
+                            proto::Ev::Cast { by, stage: 0, .. } if by == you => Some(when),
+                            _ => None,
+                        })
+                        .fold(0.0, f64::max);
+                p.lessons.frame(&lessons::Watch {
+                    now,
+                    at: feet,
+                    own,
+                    hit_at: p.st.hit_at,
+                    cast_at,
+                    book: p.book,
+                });
+                if !p.book && !p.paused {
+                    p.lesson_panel = p.lessons.draw(&mut p.g.hud, ui, p.touch, now);
+                }
+            }
             let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
             if p.touch && p.alive && !p.book && !p.paused {
                 p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);

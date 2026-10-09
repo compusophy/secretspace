@@ -76,7 +76,7 @@ crates/wandfall   game #3's core: laws trig map places motion storm world bots
                   predict proto view room (spec: docs/plunder.md)
 crates/wandfall-look  its look (page + hub): look land aura rig/ fx/
                   state icon scene spectate camera
-crates/wandfall-web  its page: page/ bar hud menu sound touch
+crates/wandfall-web  its page: page/ bar hud menu sound touch lessons
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -94,7 +94,7 @@ and `rooms/<id>/snap-*.bin`. A deploy is a Stillness: SIGTERM, each room
 `still()`s and saves, pages keep their picture and resume on reconnect.
 CI ships the server only when its build hash differs from live /health.
 
-Pixels: `kit::Screen` makes a buffer pixel `scale` CSS pixels (~960 across
+Pixels: `kit::Screen` makes a buffer pixel `scale` CSS pixels (~960 wide
 at most), shown sharp; `ui()` is the text scale that reads the same on any
 screen (2 phone, 1 desktop).
 

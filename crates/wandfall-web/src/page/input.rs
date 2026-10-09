@@ -54,6 +54,15 @@ pub(super) fn hands(p: &mut Page) {
                     act(p, a);
                 }
             }
+            // A tap on the lesson skips it.
+            Hand::Finger {
+                kind: kit::input::Kind::Down,
+                x,
+                y,
+                ..
+            } if p.touch && on_lesson(p, x, y) => {
+                p.lessons.skip(kit::now());
+            }
             Hand::Finger { id, kind, x, y, .. } if p.touch => {
                 let (dy, dp) = p.pad.finger(id, kind, x, y, p.g.css);
                 let k = zoom(p);
@@ -108,6 +117,10 @@ pub(super) fn hands(p: &mut Page) {
             } else if locked {
                 kit::input::unlock();
             }
+            continue;
+        }
+        if code == "Enter" && matches!(p.mode, Mode::Practice(_)) {
+            p.lessons.skip(kit::now());
             continue;
         }
         if code == "KeyM" {
@@ -209,6 +222,9 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
         };
         p.prev = p.pred.body;
         p.pred.push(i, &island.map);
+        if matches!(p.mode, Mode::Practice(_)) {
+            p.lessons.tick(&p.prev, &p.pred.body, p.seq, kit::now());
+        }
         // Feet leaving the ground, and meeting it again.
         let (was, is) = (p.prev, p.pred.body);
         if !was.ground && is.ground {
@@ -268,4 +284,11 @@ fn zoom(p: &Page) -> f32 {
     } else {
         1.0
     }
+}
+
+/// Whether a finger at (`x`, `y`) CSS pixels is on the lesson's panel.
+fn on_lesson(p: &Page, x: f64, y: f64) -> bool {
+    let (lx, ly) = p.g.to_px(x, y);
+    p.lesson_panel
+        .is_some_and(|r| lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h)
 }
