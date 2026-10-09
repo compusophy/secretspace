@@ -1,7 +1,7 @@
 //! The spell bar at the foot of the screen: your two spells to hurt with
 //! (Q, E) and two to live by (R, F), each a tile in its spell's colour
 //! with its glyph, its rank and its cooldown sweeping away; your level
-//! and XP; what lies underfoot and how to take it; and a cheer when you
+//! and XP; the spell cube underfoot and what running over it does; and a cheer when you
 //! level. The icons are drawn here, shape by shape, so every size is
 //! sharp: a flame, a spear of light, a snowflake, a bolt, a step, a
 //! shield, a cross, the wind.
@@ -373,7 +373,7 @@ fn learned(c: &mut Canvas, st: &State, now: f64, ui: i32) {
     }
 }
 
-/// What lies underfoot: its icon, what it is, and how to take it, on a
+/// What lies underfoot: its icon, what it is, and what running over it does, on a
 /// card whose foot is at `y`.
 fn underfoot(c: &mut Canvas, own: &Own, st: &State, y: i32, ui: i32) {
     let me = own.body.p;

@@ -335,8 +335,8 @@ pub fn tip(list: &[(f64, Ev)], who: u16, now: f64) -> (V3, f32) {
         .unwrap_or((GOLD, 0.0))
 }
 
-/// Chests (glowing until opened) and scrolls (a crystal of their spell
-/// under a pillar of its light, taller by rank).
+/// Chests (glowing until opened) and spell cubes (their icon on every
+/// face, under a pillar of their light, taller by rank).
 pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
     let far = |p: V3| (p[0] - eye[0]).powi(2) + (p[2] - eye[2]).powi(2) > 140.0 * 140.0;
     for &(id, p, open) in &l.chests {

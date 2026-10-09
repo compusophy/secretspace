@@ -5,7 +5,7 @@
 //! a crack of thunder for Lightning, a vwip for Blink, a shimmer (and
 //! shattering glass) for the Ward, a chime for Mend, wind for Gust. Then
 //! the wand, your hits, being hurt, a knockout, a level, a chest, a
-//! scroll. Each is heard from where it happened: quieter far off, to the
+//! spell learned. Each is heard from where it happened: quieter far off, to the
 //! left or the right.
 
 use engine::synth::{Env, Synth, Wave, RATE};
@@ -764,7 +764,7 @@ impl Sounds {
     }
 
     /// A new frame: others' wands newly fired (a few at most), and a
-    /// scroll you took.
+    /// spell you learned or ranked up.
     pub fn frame(&self, old: Option<&Frame>, f: &Frame, me: u16, ear: (V3, f32)) {
         let mut n = 0;
         for b in f.bolts.iter().filter(|b| b.kind == WAND && b.by != me) {
