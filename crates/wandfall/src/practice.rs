@@ -96,8 +96,16 @@ pub fn arrive(w: &mut World, name: &str) -> u16 {
     p.alive = true;
     p.entrant = true;
     crate::world::warmup(&mut p, &mut w.rng);
-    // On the range every spell is known.
+    // On the range every spell is known, and the Tether is always to
+    // hand (F), for its lesson.
     p.book = [1; SPELLS.len()];
+    if p.slots[2].is_some_and(|s| s.spell == spell::TETHER) {
+        p.slots[2] = p.slots[3];
+    }
+    p.slots[3] = Some(crate::world::Slot {
+        spell: spell::TETHER,
+        rank: 1,
+    });
     let id = p.id;
     w.players.push(p);
     w.roster_dirty = true;

@@ -347,8 +347,9 @@ of combat styles and all varieties to counter all varieties".
   sprint, hushed crouching, so creeping up on someone is quiet. Yours are
   soft and close; others' come from where they are, out to 40 m.
 - **Lessons on the range** (`wandfall-web/src/lessons.rs`), the first
-  time: twelve steps under the top line, each ticked off as you do it
-  (move, jump, a timed hop, an air jump, a climb, a launch rune, sprint,
+  time: thirteen steps under the top line, each ticked off as you do it
+  (move, jump, a timed hop, an air jump, a climb, a launch rune, a
+  Tether (always in F on the range), sprint,
   slide, a wand hit, a cast, a spell cube, the spellbook), keys or fingers in their words;
   Enter or a tap skips one; the range's menu starts them again.
 - **Spells that look like magic** (the owner: "still pretty low poly, not

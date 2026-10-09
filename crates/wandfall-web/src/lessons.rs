@@ -1,8 +1,9 @@
 //! The range's first lessons, a step at a time under the top line, each
 //! ticked off as you do it: move, jump, hop as you land, jump again in the
-//! air, climb onto a rock, take a launch rune, sprint, slide, hit a dummy
-//! with your wand, cast a spell, pick up a spell cube, open the spellbook. Shown once (remembered); Enter (or a
-//! tap on it) skips a step; the range's menu starts them again.
+//! air, climb onto a rock, take a launch rune, ride a Tether, sprint,
+//! slide, hit a dummy with your wand, cast a spell, pick up a spell cube,
+//! open the spellbook. Shown once (remembered); Enter (or a tap on it)
+//! skips a step; the range's menu starts them again.
 
 use pixels::{wrap, Canvas, Rect, Rgba};
 use wandfall::laws::HOP_WINDOW;
@@ -28,6 +29,7 @@ enum Step {
     Air,
     Climb,
     Launch,
+    Tether,
     Sprint,
     Slide,
     Wand,
@@ -36,13 +38,14 @@ enum Step {
     Book,
 }
 
-const STEPS: [Step; 12] = [
+const STEPS: [Step; 13] = [
     Step::Move,
     Step::Jump,
     Step::Hop,
     Step::Air,
     Step::Climb,
     Step::Launch,
+    Step::Tether,
     Step::Sprint,
     Step::Slide,
     Step::Wand,
@@ -85,6 +88,14 @@ impl Step {
             (Step::Launch, _) => (
                 "launch: step on a rune of light",
                 "gold on your map: it throws you up to glide",
+            ),
+            (Step::Tether, false) => (
+                "tether: F at a rock or a tree",
+                "it hauls you there; jump to let go and fly on",
+            ),
+            (Step::Tether, true) => (
+                "tether: tap its icon at a rock or a tree",
+                "it hauls you there; jump to let go and fly on",
             ),
             (Step::Sprint, false) => (
                 "sprint: hold shift",
@@ -229,6 +240,7 @@ impl Lessons {
             Step::Air => !was.air_jumped && is.air_jumped,
             Step::Climb => was.mantle == 0 && is.mantle > 0,
             Step::Launch => was.ground && !was.glide && is.glide,
+            Step::Tether => was.tether == 0 && is.tether > 0,
             Step::Sprint => self.sprint > 30,
             Step::Slide => is.slide,
             _ => false,
