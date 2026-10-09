@@ -6,6 +6,7 @@
 pub mod ao;
 pub mod common;
 pub mod post;
+pub mod shafts;
 pub mod world;
 
 /// Bytes of `Globals`: four mat4s and eighteen vec4s.

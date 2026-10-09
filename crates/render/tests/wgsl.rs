@@ -43,6 +43,11 @@ fn the_shadow_and_post_shaders_are_valid() {
             &render::shaders::ao::ao(msaa),
             &["ao_vs", "ao_fs", "blur_fs", "apply_fs"],
         );
+        valid(
+            "shafts",
+            &render::shaders::shafts::shafts(msaa),
+            &["shafts_vs", "shafts_fs"],
+        );
     }
 }
 

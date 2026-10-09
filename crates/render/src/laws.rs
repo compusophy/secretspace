@@ -29,3 +29,7 @@ pub const AO_SLACK: f32 = 0.15;
 pub const AO_STRENGTH: f32 = 2.6;
 pub const AO_POWER: f32 = 2.0;
 pub const AO_FADE: f32 = 70.0;
+/// Shafts of sunlight: how strong, and how far about the sun on screen
+/// the sky shines into them (a share of the screen's height).
+pub const SHAFTS: f32 = 0.4;
+pub const SHAFT_GLOW: f32 = 0.22;

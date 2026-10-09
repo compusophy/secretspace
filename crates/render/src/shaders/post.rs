@@ -1,7 +1,8 @@
 //! The sun's shadow map (depth only, from the sun), and what follows the
 //! scene: bloom (a chain of halvings, then back up, each a little wider)
-//! and the finish (exposure, ACES tone mapping, a vignette, sRGB, the
-//! grade, and a dither so the sky's gradients do not band).
+//! and the finish (the sun's shafts added, exposure, ACES tone mapping,
+//! a vignette, sRGB, the grade, and a dither so the sky's gradients do
+//! not band).
 
 pub const SHADOW: &str = r#"
 struct Caster {
@@ -27,7 +28,7 @@ fn shadow_vs(v: CastIn) -> @builtin(position) vec4<f32> {
 
 pub const POST: &str = r#"
 struct Post {
-    texel: vec4<f32>,   // xy one texel of the source; zw unused
+    texel: vec4<f32>,   // xy one texel of the source (the finish: rgb the shafts' light)
     k: vec4<f32>,       // x bloom, y exposure, z vignette, w spread
 };
 
@@ -43,6 +44,7 @@ struct Grade {
 };
 
 @group(0) @binding(4) var<uniform> grade: Grade;
+@group(0) @binding(5) var shafts: texture_2d<f32>;
 
 struct Out {
     @builtin(position) clip: vec4<f32>,
@@ -127,7 +129,8 @@ fn graded(x: vec3<f32>) -> vec3<f32> {
 fn finish_fs(i: Out) -> @location(0) vec4<f32> {
     let hdr = textureSampleLevel(src, lin, i.uv, 0.0).rgb;
     let glow = textureSampleLevel(bloom, lin, i.uv, 0.0).rgb;
-    var c = mix(hdr, glow, pp.k.x) * pp.k.y;
+    let shaft = textureSampleLevel(shafts, lin, i.uv, 0.0).r;
+    var c = (mix(hdr, glow, pp.k.x) + pp.texel.rgb * shaft) * pp.k.y;
     c = aces(c);
     let q = i.uv - 0.5;
     c = c * (1.0 - pp.k.z * dot(q, q) * 1.6);

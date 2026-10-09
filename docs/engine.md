@@ -243,7 +243,11 @@ Done, across phases, in `crates/render`:
   puffs let grow to a share of the screen, every spark fading right by
   the eye; an `Energy` material (noise flowing over the surface: fire,
   ragged at its edges, or plasma, bright at its rim). Not yet: GPU
-  simulation, soft particles, ribbons.
+  simulation, soft particles, ribbons. Shafts of sunlight (`shafts.rs`):
+  from the depth at a quarter of the screen, each pixel marches toward
+  the sun on screen over the open sky near it, dimming as it goes; the
+  finish adds them in the sun's colour before tone mapping (High and
+  Medium; `?shafts=0` turns them off).
 - Phase 3: the sun's cascaded shadows (3 x 2048 on High, PCF 3x3, snapped
   to texels). Not yet: static caster caching, point shadows, froxels.
 - Phase 4 (part): ambient occlusion (`ao.rs`, `shaders/ao.rs`), HBAO

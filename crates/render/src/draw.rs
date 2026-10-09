@@ -428,7 +428,7 @@ impl Renderer {
                 format,
                 quality.msaa,
                 quality.bloom_levels,
-                quality.ao,
+                (quality.ao, quality.shafts),
             ),
             stats: Stats::default(),
         };
@@ -913,7 +913,7 @@ impl Renderer {
             }
         }
         if split {
-            self.post.occlude(encoder, &queue, &f.cam);
+            self.post.occlude(encoder, &queue, &f.cam, &f.look);
             let mut pass = t.pass(encoder, "lit", None, (false, false), false);
             pass.set_bind_group(0, &groups[0], &[]);
             lit(&mut pass, &mut stats);

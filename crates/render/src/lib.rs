@@ -19,6 +19,7 @@ mod ao;
 mod buffers;
 mod draw;
 mod post;
+mod shafts;
 
 pub use draw::{Renderer, Stats};
 pub use geo::{rgb, V3};
@@ -321,7 +322,8 @@ impl Default for Look {
 
 /// How much the renderer does: anti-aliasing samples, the sun's shadow
 /// (cascades and their size), grass (spacing and reach), bloom's depth,
-/// how many ways ambient occlusion looks out from a pixel (0 none).
+/// how many ways ambient occlusion looks out from a pixel (0 none),
+/// shafts of sunlight.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quality {
     pub msaa: u32,
@@ -331,12 +333,13 @@ pub struct Quality {
     pub grass_reach: f32,
     pub bloom_levels: u32,
     pub ao: u32,
+    pub shafts: bool,
 }
 
 impl Quality {
     /// The tier a page asked for (`?q=low|medium|high`), else one for
     /// this device: software adapters Low, touch screens Medium, else High;
-    /// `ao=0` turns occlusion off.
+    /// `ao=0` turns occlusion off, `shafts=0` the sun's shafts.
     pub fn pick(query: &str, software: bool, touch: bool) -> Quality {
         let q = match query {
             q if q.contains("q=low") => Quality::LOW,
@@ -348,19 +351,25 @@ impl Quality {
         };
         Quality {
             ao: if query.contains("ao=0") { 0 } else { q.ao },
+            shafts: q.shafts && !query.contains("shafts=0"),
             ..q
         }
     }
 
-    /// One tier down (None at the bottom); occlusion turned off stays off.
+    /// One tier down (None at the bottom); what was turned off stays off.
     pub fn lower(self) -> Option<Quality> {
         let tiers = [Quality::HIGH, Quality::MEDIUM, Quality::LOW];
-        let at = tiers
-            .iter()
-            .position(|t| Quality { ao: self.ao, ..*t } == self)?;
+        let at = tiers.iter().position(|t| {
+            Quality {
+                ao: self.ao,
+                shafts: self.shafts,
+                ..*t
+            } == self
+        })?;
         let next = *tiers.get(at + 1)?;
         Some(Quality {
             ao: if self.ao == 0 { 0 } else { next.ao },
+            shafts: self.shafts && next.shafts,
             ..next
         })
     }
@@ -373,6 +382,7 @@ impl Quality {
         grass_reach: 42.0,
         bloom_levels: 6,
         ao: 6,
+        shafts: true,
     };
     pub const MEDIUM: Quality = Quality {
         msaa: 4,
@@ -382,6 +392,7 @@ impl Quality {
         grass_reach: 28.0,
         bloom_levels: 5,
         ao: 4,
+        shafts: true,
     };
     pub const LOW: Quality = Quality {
         msaa: 1,
@@ -391,6 +402,7 @@ impl Quality {
         grass_reach: 0.0,
         bloom_levels: 4,
         ao: 0,
+        shafts: false,
     };
 }
 

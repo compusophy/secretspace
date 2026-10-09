@@ -7,6 +7,7 @@
 use gpu::wgpu;
 
 use crate::ao::Ao;
+use crate::shafts::{Shafts, SHAFT};
 use crate::{shaders, Camera, Look};
 
 pub const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -99,6 +100,9 @@ pub struct Post {
     finish_buf: wgpu::Buffer,
     grade_buf: wgpu::Buffer,
     ao: Option<Ao>,
+    shafts: Option<Shafts>,
+    /// No shafts: a texel of nothing for the finish.
+    dark: wgpu::TextureView,
 }
 
 pub(crate) fn texture(
@@ -151,7 +155,7 @@ impl Post {
         out: wgpu::TextureFormat,
         msaa: u32,
         levels: u32,
-        ao: u32,
+        (ao, shafts): (u32, bool),
     ) -> Post {
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -192,6 +196,7 @@ impl Post {
             binding: 4,
             ..common[2]
         });
+        with_bloom.push(tex(5));
         let finish_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("finish"),
             entries: &with_bloom,
@@ -272,18 +277,31 @@ impl Post {
                 mapped_at_creation: false,
             }),
             ao: (ao > 0).then(|| Ao::new(device, msaa, ao)),
+            shafts: shafts.then(|| Shafts::new(device, msaa)),
+            dark: texture(device, "dark", (1, 1), SHAFT, 1, true),
         }
     }
 
-    /// Whether the picture is occluded (`occlude`) before what glows.
+    /// Whether the scene's depth is read (`occlude`) once what is solid
+    /// is drawn, before what glows.
     pub fn occludes(&self) -> bool {
-        self.ao.is_some()
+        self.ao.is_some() || self.shafts.is_some()
     }
 
-    /// Ambient occlusion over the picture drawn so far.
-    pub fn occlude(&self, encoder: &mut wgpu::CommandEncoder, queue: &wgpu::Queue, cam: &Camera) {
+    /// Ambient occlusion over the picture drawn so far, and the sun's
+    /// shafts from its depth.
+    pub fn occlude(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        cam: &Camera,
+        look: &Look,
+    ) {
         if let (Some(ao), Some(t)) = (&self.ao, &self.targets) {
             ao.run(encoder, queue, &t.color, cam);
+        }
+        if let Some(sh) = &self.shafts {
+            sh.run(encoder, queue, cam, look);
         }
     }
 
@@ -294,9 +312,13 @@ impl Post {
         }
         self.size = size;
         let hdr = texture(device, "hdr", size, HDR, 1, true);
-        let depth = texture(device, "depth", size, DEPTH, self.msaa, self.ao.is_some());
+        let read = self.occludes();
+        let depth = texture(device, "depth", size, DEPTH, self.msaa, read);
         if let Some(ao) = &mut self.ao {
             ao.fit(device, &depth, size);
+        }
+        if let Some(sh) = &mut self.shafts {
+            sh.fit(device, &depth, size);
         }
         let targets = if self.msaa > 1 {
             Targets {
@@ -388,32 +410,43 @@ impl Post {
             });
         }
         self.passes = passes;
-        self.finish_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("finish"),
-            layout: &self.finish_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&hdr),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.finish_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(&self.chain[0]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: self.grade_buf.as_entire_binding(),
-                },
-            ],
-        }));
+        self.finish_group = Some(
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("finish"),
+                layout: &self.finish_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&hdr),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.finish_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&self.chain[0]),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self.grade_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::TextureView(
+                            self.shafts
+                                .as_ref()
+                                .and_then(|s| s.view.as_ref())
+                                .unwrap_or(&self.dark),
+                        ),
+                    },
+                ],
+            }),
+        );
         self.targets = Some(targets);
     }
 
@@ -425,10 +458,15 @@ impl Post {
         out: &wgpu::TextureView,
         look: &Look,
     ) {
+        let sun = if self.shafts.is_some() {
+            look.sun
+        } else {
+            [0.0; 3]
+        };
         let k = [
-            0.0,
-            0.0,
-            0.0,
+            sun[0],
+            sun[1],
+            sun[2],
             0.0,
             look.bloom,
             look.exposure,
