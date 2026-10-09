@@ -319,10 +319,12 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
         let hp = format!("{} / {}", o.hp, full);
         let ko = format!("knocked out {}", o.kills);
         if v.touch {
-            // Stacked at the top left: health and level, XP, knockouts.
-            let line = format!("{hp}   level {}", o.level);
-            c.text_shadowed(x, y - 12 * ui, &line, ui, INK);
-            c.text_shadowed(x, y + 16 * ui, &ko, ui, GOLD);
+            // Stacked at the top left: health, XP, level and knockouts
+            // (kept short of the menu button at the top's middle).
+            c.text_shadowed(x, y - 12 * ui, &hp, ui, INK);
+            let level = format!("level {}", o.level);
+            c.text_shadowed(x, y + 16 * ui, &level, ui, INK);
+            c.text_shadowed(x, y + 27 * ui, &ko, ui, GOLD);
         } else {
             c.text_centred(x + bw / 2, y + 2 * ui, &hp, ui, INK);
             let s = (MINI * ui).min(w / 4).min(h / 4);
