@@ -37,7 +37,7 @@ mod rope;
 pub use bolts::bolt;
 pub use casts::shows;
 pub use gallery::{gallery, NAMES};
-pub use marks::{dust, falls, on_wizard};
+pub use marks::{dust, falls, on_wizard, scars};
 pub use rain::rain;
 pub use rope::ropes;
 
@@ -54,6 +54,7 @@ pub struct Draw {
     pub items: Vec<Item>,
     pub lights: Vec<Light>,
     pub sparks: Vec<Spark>,
+    pub decals: Vec<render::Decal>,
 }
 
 const WHITE: V3 = [1.0; 3];

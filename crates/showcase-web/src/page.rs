@@ -69,6 +69,7 @@ impl OnGpu {
             items: &items,
             lights: &lights,
             sparks: &sparks,
+            decals: &[],
             view_fov: 0.9,
         };
         self.r.draw(&mut f.encoder, &f.view, self.g.size, &frame);

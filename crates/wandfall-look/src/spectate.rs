@@ -176,6 +176,7 @@ impl Spectator {
             items: &d.items,
             lights: &d.lights,
             sparks: &d.sparks,
+            decals: &d.decals,
             view_fov: 0.9,
         };
         r.draw(encoder, target, size, &frame);

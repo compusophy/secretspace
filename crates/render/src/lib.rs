@@ -1,8 +1,8 @@
 //! The engine: a retained 3D scene drawn on WebGPU. A game makes meshes
 //! once (`geo::Geo` into `Renderer::mesh`), sets what never moves once
 //! (`Renderer::statics`), and each frame hands over a `Frame`: the camera,
-//! its `Look`, what moves (`Item`s), its `Light`s and `Spark`s, and the
-//! first-person viewmodel. Generic: no game knowledge.
+//! its `Look`, what moves (`Item`s), its `Light`s, `Spark`s and `Decal`s,
+//! and the first-person viewmodel. Generic: no game knowledge.
 //!
 //! Space: x east, y up, z south. Depth is reversed (1 near, 0 at infinity)
 //! for precision across a kilometre-wide map.
@@ -18,6 +18,7 @@ pub mod terrain;
 mod ao;
 mod buffers;
 mod cull;
+mod decals;
 mod draw;
 mod globals;
 mod pipes;
@@ -152,6 +153,38 @@ pub struct Light {
     pub p: V3,
     pub r: f32,
     pub c: V3,
+}
+
+/// A mark laid on whatever lies under it (the ground, a rock, a step):
+/// a disc `r` across about `p`, turned `yaw`, cast down and up `depth`
+/// metres (fading toward both ends, and on what is steep). `c`: its
+/// colour, and how much of it (fade it out with this). Drawn once the
+/// scene's depth can be read (with ambient occlusion on).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Decal {
+    pub p: V3,
+    pub r: f32,
+    pub depth: f32,
+    pub yaw: f32,
+    pub c: [f32; 4],
+    pub mark: Mark,
+    /// 0..1: its noise its own.
+    pub seed: f32,
+}
+
+/// What a decal looks like.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mark {
+    /// Burnt black, ragged at its edge; cracks glowing `c` in its middle
+    /// (as bright as `c` is: give it black once it cools).
+    #[default]
+    Scorch = 0,
+    /// Rime laid over, `c`, lit by the sky, glinting.
+    Frost = 1,
+    /// A circle of runes glowing `c` (added).
+    Runes = 2,
+    /// A soft ring of light at its edge (added).
+    Ring = 3,
 }
 
 /// A spark: a point of light (or a puff) `size` metres across, facing
@@ -438,6 +471,7 @@ pub struct Frame<'a> {
     pub items: &'a [Item],
     pub lights: &'a [Light],
     pub sparks: &'a [Spark],
+    pub decals: &'a [Decal],
     /// The viewmodel's field of view (its `Pass::View` items).
     pub view_fov: f32,
 }

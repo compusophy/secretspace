@@ -4,13 +4,17 @@
 
 use std::collections::{HashMap, VecDeque};
 
-use wandfall::laws::TICK_HZ;
+use wandfall::laws::{spell, TICK_HZ};
 use wandfall::proto::{self, Ev, Frame, Loot, Seen};
 use wandfall::world::STORM;
 
 /// How far behind the newest frame others are drawn (ms).
 const BEHIND: f64 = 100.0;
 const MS_A_TICK: f64 = 1000.0 / TICK_HZ as f64;
+/// How long a spell's scar stays on the island (ms), and how many at
+/// most.
+pub const SCARS_MS: f64 = 25_000.0;
+const SCARS: usize = 64;
 
 /// A line in the feed: words, or a knockout (who, with what, whom).
 #[derive(Clone, Debug)]
@@ -47,6 +51,9 @@ pub struct State {
     pub dust: Vec<(f64, [f32; 3], f32)>,
     /// Where wizards fell: (when, where, who, facing which way).
     pub falls: Vec<(f64, [f32; 3], u16, u16)>,
+    /// Where spells left their mark on the island (a fireball's burn,
+    /// lightning's, the Lance's, frost's rime): (when, where, which).
+    pub scars: Vec<(f64, [f32; 3], u8)>,
     /// What last hurt each wizard.
     last_hit: HashMap<u16, u8>,
     pub joined: bool,
@@ -194,8 +201,29 @@ impl State {
                     }
                     self.shows.push((now, e));
                 }
+                Ev::Cast {
+                    spell: s,
+                    stage: 1,
+                    at,
+                    ..
+                } if matches!(s, spell::FIREBALL | spell::LIGHTNING | spell::FROST) => {
+                    self.scars.push((now, at, s));
+                    self.shows.push((now, e));
+                }
+                Ev::Beam {
+                    spell: spell::LANCE,
+                    to,
+                    ..
+                } => {
+                    self.scars.push((now, to, spell::LANCE));
+                    self.shows.push((now, e));
+                }
                 Ev::Cast { .. } | Ev::Beam { .. } => self.shows.push((now, e)),
             }
+        }
+        self.scars.retain(|s| now - s.0 < SCARS_MS);
+        if self.scars.len() > SCARS {
+            self.scars.drain(..self.scars.len() - SCARS);
         }
         while self.feed.len() > 6 {
             self.feed.pop_front();

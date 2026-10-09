@@ -64,8 +64,8 @@ crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   TextField, storage, audio
 crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
 crates/render     the engine: retained scene, geo, sculpt, terrain, shadows,
-                  HDR + AO + bloom + ACES, grass, sea, light grid;
-                  crates/showcase-web is its test page (/showcase/)
+                  HDR + AO + bloom + ACES, grass, sea, decals, light
+                  grid; its test page crates/showcase-web (/showcase/)
 crates/hub-web    the front page (cards, live counts, scroll, footer), watch
                   (wyrm's card, live, as a watcher), wand (Wandfall's)
 crates/wyrm       the game: laws world bots grid proto view mirror room
@@ -134,7 +134,7 @@ deviceScaleFactor: 3` at 390x844 for a phone.
 
 ## Gotchas
 
-- **`pkill -f server` kills your own shell** when the command line holds
+- **`pkill -f server` kills your shell** when the command line holds
   the pattern. Track its PID.
 - New people are ghosts for `GHOST_TICKS`: they cannot die or kill
   (without it, test players died in 8 s).

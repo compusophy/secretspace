@@ -387,8 +387,17 @@ Every phase:
   - VFX library v1 (for wand spells): bolt, beam, nova (AoE ring), shield
     bubble, heal motes, blink trail, root/snare chains, impact bursts,
     scorch decals.
-- [ ] Decals (projected boxes): scorch marks, spell circles on the ground,
-      the build ghost.
+- [x] Decals (projected boxes): scorch marks, spell circles on the ground,
+      the build ghost. Done (`decals.rs`, `shaders/decal.rs`): a game hands
+      `Frame::decals` (a disc about a point, cast down and up, turned, a
+      `Mark`: scorch, frost, runes, a ring); each is a box drawn inside
+      out over the scene once what stands still is drawn, every pixel
+      rebuilding where the scene stands from the depth and marking it
+      (premultiplied: soot lays over, light adds; light only on the ground
+      or what is level). What moves is drawn after, so no wizard is ever
+      painted. Needs the depth readable (medium and high). Wandfall leaves
+      a fireball's burn (cracks glowing, a shockwave ringing out), lightning's
+      and the Lance's, and frost's rime, for 25 s (`?fx=scars`).
 
 ### Phase 6: GPU-driven geometry and foliage (5-8 days)
 - [ ] Instancing everywhere: one mesh per kind with 2-3 LODs (a simple Rust

@@ -166,6 +166,7 @@ pub fn draw(
     }
     fx::falls(look, d, &falls, now);
     fx::dust(look, d, &st.dust, now);
+    fx::scars(d, &st.scars, now);
     anims.retain(|id, _| others.iter().any(|s| s.id == *id));
     let mut in_storm = false;
     if let Some(f) = &st.frame {

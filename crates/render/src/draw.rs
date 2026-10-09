@@ -2,7 +2,8 @@
 //! shadow (a pass a cascade), then the scene in HDR, multisampled: the
 //! sky, what is solid (statics, then what moves), grass, what is
 //! see-through (the sea among it), what glows, and sparks, once what is
-//! solid is occluded (`ao`); then, over a cleared depth, the viewmodel;
+//! solid is occluded (`ao`); decals laid on what stands still before
+//! what moves is drawn; then, over a cleared depth, the viewmodel;
 //! then bloom and the finish (`post`).
 
 use crate::buffers::{make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, Run};
@@ -52,6 +53,7 @@ pub struct Renderer {
     /// The see-through, the sea mirroring the picture so far; a sampler
     /// for that picture, and a stand-in when there is none.
     faint_ssr: wgpu::RenderPipeline,
+    decals: crate::decals::Decals,
     scene_samp: wgpu::Sampler,
     nothing: wgpu::TextureView,
     soft_group: Option<(wgpu::BindGroup, (u32, u32))>,
@@ -206,6 +208,10 @@ impl Renderer {
                 ..world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None)
             },
         );
+        let decals = crate::decals::Decals::new(&Shared {
+            layout: &soft_pl,
+            ..shared
+        });
         let grass = pipeline(
             &shared,
             Kind {
@@ -334,6 +340,7 @@ impl Renderer {
             soft_sparks,
             soft_layout,
             faint_ssr,
+            decals,
             scene_samp: device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("scene"),
                 mag_filter: wgpu::FilterMode::Linear,
@@ -718,6 +725,7 @@ impl Renderer {
             put_f32s(&mut b, &[s.v[0], s.v[1], s.v[2], shape]);
         }
         self.spark_buf.put(&device, &queue, &b);
+        self.decals.put((&device, &queue), f.decals, &mut b);
         self.bytes = b;
 
         let Some(groups) = &self.groups else {
@@ -793,6 +801,7 @@ impl Renderer {
             self.soft_group = Some((group, size));
         }
         let soft = self.soft_group.as_ref().filter(|_| split).map(|g| &g.0);
+        let marks = soft.filter(|_| !f.decals.is_empty());
         // The sea mirrors the picture so far (resolved into a copy first).
         let ssr = split && self.quality.ssr > 0 && t.resolve.is_some();
         let lit = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
@@ -845,13 +854,6 @@ impl Renderer {
                 &self.still_runs,
                 &mut stats,
             );
-            runs_of(
-                &mut pass,
-                meshes,
-                &self.moving.buf,
-                &runs[Pass::Opaque as usize],
-                &mut stats,
-            );
             let side = self.grass_side();
             if side > 0 {
                 pass.set_pipeline(&self.grass);
@@ -859,9 +861,38 @@ impl Renderer {
                 stats.draws += 1;
                 stats.grass = side * side;
             }
+            if marks.is_none() {
+                pass.set_pipeline(&self.opaque);
+                runs_of(
+                    &mut pass,
+                    meshes,
+                    &self.moving.buf,
+                    &runs[Pass::Opaque as usize],
+                    &mut stats,
+                );
+            }
             if !split {
                 lit(&mut pass, &mut stats);
             }
+        }
+        // Decals on what stands still (the depth only read), then what
+        // moves over them.
+        if let Some(group) = marks {
+            {
+                let mut pass = t.pass(encoder, "marks", None, (false, false), false);
+                pass.set_bind_group(0, &groups[0], &[]);
+                self.decals.draw(&mut pass, group, &mut stats);
+            }
+            let mut pass = t.pass(encoder, "moving", None, (false, true), false);
+            pass.set_bind_group(0, &groups[0], &[]);
+            pass.set_pipeline(&self.opaque);
+            runs_of(
+                &mut pass,
+                meshes,
+                &self.moving.buf,
+                &runs[Pass::Opaque as usize],
+                &mut stats,
+            );
         }
         if split {
             self.post.occlude(encoder, &queue, &f.cam, &f.look);

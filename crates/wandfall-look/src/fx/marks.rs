@@ -1,8 +1,9 @@
 //! The marks spells leave on wizards (a ward's bubble, frost's chill,
-//! mending), wizards knocked out, and dust where they land.
+//! mending) and on the island (burns, rime), wizards knocked out, and
+//! dust where they land.
 
 use render::geo::{self, mix, rgb, V3};
-use render::Spark;
+use render::{Decal, Mark, Spark};
 use wandfall::laws::spell;
 use wandfall::proto::{fx, Seen};
 
@@ -238,5 +239,60 @@ fn splash(look: &Look, d: &mut Draw, at: V3, (t, seed): (f32, i32), hard: f32) {
             0.5 * f,
             0.0,
         );
+    }
+}
+
+/// The scars spells leave on the island, as decals: a fireball's burn
+/// (embers in it a while, a shockwave out of it), lightning's (a flash
+/// ringing out), the Lance's small one, frost's rime; fading at the end.
+pub fn scars(d: &mut Draw, list: &[(f64, V3, u8)], now: f64) {
+    for &(when, at, s) in list {
+        let t = ((now - when) / 1000.0) as f32;
+        let seed = when as i32 ^ (at[0] * 17.0) as i32;
+        let yaw = rnd(seed, 0, 61) * std::f32::consts::TAU;
+        let last = crate::state::SCARS_MS as f32 / 1000.0;
+        let (r, depth, mark, col, hot, life) = match s {
+            spell::FIREBALL => (2.8, 2.2, Mark::Scorch, rgb(255, 110, 30), 4.0, last),
+            spell::LIGHTNING => (1.8, 1.6, Mark::Scorch, rgb(150, 190, 255), 1.5, last),
+            spell::LANCE => (0.5, 0.8, Mark::Scorch, rgb(255, 210, 120), 1.5, last * 0.5),
+            _ => (2.2, 2.0, Mark::Frost, rgb(205, 236, 255), 0.0, 9.0),
+        };
+        let fade = (1.0 - (t - life * 0.7) / (life * 0.3)).clamp(0.0, 1.0);
+        if fade <= 0.0 {
+            continue;
+        }
+        // Rime grows in fast; a burn is there at once.
+        let grow = if mark == Mark::Frost {
+            (t / 0.25).min(1.0)
+        } else {
+            1.0
+        };
+        let heat = if hot > 0.0 {
+            (1.0 - t / hot).max(0.0).powi(2)
+        } else {
+            1.0
+        };
+        d.decals.push(Decal {
+            p: at,
+            r: r * (0.6 + 0.4 * grow),
+            depth,
+            yaw,
+            c: [col[0] * heat, col[1] * heat, col[2] * heat, fade],
+            mark,
+            seed: rnd(seed, 1, 62),
+        });
+        // A ring of light rushing out over the ground.
+        let k = t / 0.45;
+        if mark == Mark::Scorch && s != spell::LANCE && k < 1.0 {
+            d.decals.push(Decal {
+                p: at,
+                r: r * (0.6 + 1.6 * k),
+                depth,
+                yaw,
+                c: [col[0], col[1], col[2], (1.0 - k) * 1.5],
+                mark: Mark::Ring,
+                seed: 0.0,
+            });
+        }
     }
 }

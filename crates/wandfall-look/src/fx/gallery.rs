@@ -1,6 +1,7 @@
 //! Any one effect on its own, to look at (the page's `?fx=name&age=ms`):
 //! made from the same events and bolts a match sends; `sparks`, one spark
-//! of each shape; `gesture` and a spell's number, a wizard casting it.
+//! of each shape; `scars`, what spells leave on the ground; `gesture`
+//! and a spell's number, a wizard casting it.
 
 use render::geo::{self, V3};
 use wandfall::laws::spell;
@@ -11,10 +12,10 @@ use super::{bolt, falls, on_wizard, shows, Draw};
 use crate::look::Look;
 
 /// The effects there are, by name.
-pub const NAMES: [&str; 23] = [
+pub const NAMES: [&str; 24] = [
     "wand", "fireball", "burst", "lance", "frost", "shatter", "mark", "strike", "blink", "arrive",
     "ward", "break", "mend", "gust", "level", "shield", "chill", "mending", "fall", "sparks",
-    "storm", "tether", "catch",
+    "storm", "tether", "catch", "scars",
 ];
 
 /// Effect `name` at `age` ms (`now` ms, `t` s), cast from `at` (feet)
@@ -143,6 +144,21 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
         }
         "fall" => {
             falls(look, d, &[(now - age, at, 1)], now);
+            None
+        }
+        // A burn to one side, lightning's ahead, frost's to the other
+        // side, the Lance's near.
+        "scars" => {
+            let side = [-fwd[2], 0.0, fwd[0]];
+            let by =
+                |m: f32, s: f32| geo::add(at, geo::add(geo::scale(fwd, m), geo::scale(side, s)));
+            let list = [
+                (now - age, by(2.0, 3.5), spell::FIREBALL),
+                (now - age, by(5.0, 0.0), spell::LIGHTNING),
+                (now - age, by(2.5, -3.5), spell::FROST),
+                (now - age, by(1.5, 0.8), spell::LANCE),
+            ];
+            super::scars(d, &list, now);
             None
         }
         // A rope to a point up ahead (`age` since it was thrown), and the

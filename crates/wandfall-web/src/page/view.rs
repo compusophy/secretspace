@@ -187,6 +187,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         items: &d.items,
         lights: &d.lights,
         sparks: &d.sparks,
+        decals: &d.decals,
         view_fov: 0.9,
     };
     let perf = p.perf.then(|| {
