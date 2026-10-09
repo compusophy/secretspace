@@ -28,6 +28,66 @@ pub struct Poi {
     pub level: f32,
 }
 
+/// Somewhere to stand above the ground: a stair winding about (x, z)
+/// between two radii, from `y0`, rising `rise` a turn for `turns` turns
+/// from the heading `from` (radians, turning toward +z); or a flat ring
+/// at `y` running `span` of a turn from `from`. Stood on from above, passed
+/// through from below.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Deck {
+    Stair {
+        x: f32,
+        z: f32,
+        r: (f32, f32),
+        y0: f32,
+        rise: f32,
+        turns: f32,
+        from: f32,
+    },
+    Ring {
+        x: f32,
+        z: f32,
+        r: (f32, f32),
+        y: f32,
+        from: f32,
+        span: f32,
+    },
+}
+
+impl Deck {
+    /// Its highest surface at (x, z) no higher than `top`, if any.
+    pub fn level(&self, px: f32, pz: f32, top: f32) -> Option<f32> {
+        let (x, z, r, from) = match *self {
+            Deck::Stair { x, z, r, from, .. } | Deck::Ring { x, z, r, from, .. } => (x, z, r, from),
+        };
+        let (dx, dz) = (px - x, pz - z);
+        let d2 = dx * dx + dz * dz;
+        if d2 < r.0 * r.0 || d2 > r.1 * r.1 {
+            return None;
+        }
+        // How far round from `from`, 0 to 1.
+        let t = (trig::atan2(dz, dx) - from) / std::f32::consts::TAU;
+        let t = t - t.floor();
+        match *self {
+            Deck::Stair {
+                y0, rise, turns, ..
+            } => {
+                let mut best: Option<f32> = None;
+                let mut u = t;
+                while u <= turns {
+                    let h = y0 + u * rise;
+                    if h <= top {
+                        best = Some(h);
+                    }
+                    u += 1.0;
+                }
+                best
+            }
+            Deck::Ring { y, span, .. } => (t <= span && y <= top).then_some(y),
+        }
+    }
+}
+
 impl Poi {
     pub fn dist(&self, x: f32, z: f32) -> f32 {
         let (dx, dz) = (x - self.x, z - self.z);
@@ -143,6 +203,47 @@ pub fn set(m: &mut Map) {
         match p.place {
             Place::Spire => {
                 stand(m, Kind::Tower, (p.x, p.z), TOWER_RADIUS, TOWER_HEIGHT, 0.0);
+                // A stair winds up about it to a balcony, merlons along
+                // the balcony's edge.
+                let foot = m.height(p.x, p.z) - 0.3;
+                let r = (TOWER_RADIUS - 0.2, TOWER_RADIUS + STAIR_WIDTH);
+                let from = STAIR_FROM;
+                m.decks.push(Deck::Stair {
+                    x: p.x,
+                    z: p.z,
+                    r,
+                    y0: foot + 0.3,
+                    rise: (BALCONY - 0.3) / STAIR_TURNS,
+                    turns: STAIR_TURNS,
+                    from,
+                });
+                m.decks.push(Deck::Ring {
+                    x: p.x,
+                    z: p.z,
+                    r,
+                    y: foot + BALCONY,
+                    from,
+                    span: BALCONY_SPAN,
+                });
+                let edge = r.1 - 0.3;
+                let n = 18;
+                for k in 0..n {
+                    let a = from
+                        + (0.03 + (BALCONY_SPAN - 0.06) * k as f32 / (n - 1) as f32)
+                            * std::f32::consts::TAU;
+                    let turn = trig::heading(a);
+                    let (x, z) = about(&p, turn, edge);
+                    m.put(Prop {
+                        kind: Kind::Merlon,
+                        x,
+                        z,
+                        y: foot + BALCONY,
+                        r: 0.32,
+                        h: 1.2,
+                        yaw: a,
+                        scale: 1.0,
+                    });
+                }
                 // Lamps about the plaza, and a chest between each pair.
                 for k in 0..8u32 {
                     let turn = (k * 8192 + 4096) as u16;

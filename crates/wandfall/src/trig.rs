@@ -39,6 +39,30 @@ pub fn look(yaw: u16, pitch: i16) -> [f32; 3] {
     [cy * cp, sp, sy * cp]
 }
 
+/// The angle of (x, y) from the x axis, -pi to pi, by arithmetic alone
+/// (error under 3e-4): the same bits on both ends.
+pub fn atan2(y: f32, x: f32) -> f32 {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let (ax, ay) = (x.abs(), y.abs());
+    let (lo, hi) = if ax < ay { (ax, ay) } else { (ay, ax) };
+    if hi == 0.0 {
+        return 0.0;
+    }
+    let a = lo / hi;
+    let s = a * a;
+    let mut r = ((-0.046_496_475 * s + 0.159_314_22) * s - 0.327_622_76) * s * a + a;
+    if ay > ax {
+        r = FRAC_PI_2 - r;
+    }
+    if x < 0.0 {
+        r = PI - r;
+    }
+    if y < 0.0 {
+        r = -r;
+    }
+    r
+}
+
 /// A heading from radians, and back (for the page and the bots, never
 /// for what must match bit for bit).
 pub fn heading(rad: f32) -> u16 {
@@ -66,6 +90,11 @@ mod tests {
                 (s - r.sin()).abs() < 1e-5 && (c - r.cos()).abs() < 1e-5,
                 "{a}"
             );
+        }
+        for k in 0..720 {
+            let a = k as f32 * 0.5f32.to_radians() - std::f32::consts::PI;
+            let (y, x) = (a.sin() * 7.0, a.cos() * 7.0);
+            assert!((atan2(y, x) - y.atan2(x)).abs() < 3e-4, "{k}");
         }
         let f = look(16384, 0);
         assert!(f[2] > 0.999, "16384 is south (+z)");

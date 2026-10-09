@@ -158,8 +158,9 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     p[0] = p[0].clamp(-lim, lim);
     p[2] = p[2].clamp(-lim, lim);
     map.push_out(&mut p, b.tall());
-    // The ground (the sea floor too: you wade, you do not swim).
-    let floor = map.height(p[0], p[2]).max(SEA - 0.9);
+    // The ground, or a deck under you (the sea floor too: you wade, you
+    // do not swim).
+    let floor = map.floor(p[0], p[2], b.p[1]).max(SEA - 0.9);
     if p[1] <= floor || (was && b.v[1] <= 0.0 && p[1] - floor < STEP) {
         p[1] = floor;
         b.v[1] = 0.0;
@@ -222,6 +223,40 @@ mod tests {
             step(&mut b, &Input::default(), &map);
         }
         assert!(b.ground, "down again");
+    }
+
+    #[test]
+    fn walks_up_the_spire_to_its_balcony() {
+        let map = Map::new(4);
+        let r = TOWER_RADIUS + STAIR_WIDTH / 2.0;
+        let a0 = STAIR_FROM + 0.05;
+        let mut b = Body {
+            p: [a0.cos() * r, PLATEAU_TOP, a0.sin() * r],
+            ground: true,
+            ..Body::default()
+        };
+        let top = map.height(0.0, 0.0) - 0.3 + BALCONY;
+        for _ in 0..40 * TICK_HZ {
+            // Facing along the stair, leaning in to keep to it.
+            let a = b.p[2].atan2(b.p[0]);
+            let d = (b.p[0] * b.p[0] + b.p[2] * b.p[2]).sqrt();
+            let yaw = a + std::f32::consts::FRAC_PI_2 + (d - r) * 0.3;
+            let i = Input {
+                keys: keys::FWD,
+                yaw: crate::trig::heading(yaw),
+                ..Input::default()
+            };
+            step(&mut b, &i, &map);
+            if b.p[1] >= top - 0.01 {
+                break;
+            }
+        }
+        assert!(b.ground, "standing");
+        assert!(
+            (b.p[1] - top).abs() < 0.05,
+            "on the balcony: {:?} of {top}",
+            b.p
+        );
     }
 
     #[test]

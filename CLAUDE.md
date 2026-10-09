@@ -74,7 +74,7 @@ crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
 crates/luciphon*  game #2, legacy: core, -look (2D), -web (WebGL2 3D)
 crates/wandfall   game #3's core: laws trig map places motion storm world bots
                   predict proto view room (spec: docs/plunder.md)
-crates/wandfall-web  its page: state look land rig fx hud bar sound page
+crates/wandfall-web  its page: state look land aura rig fx hud bar sound page
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/<game>/index.html each game's page

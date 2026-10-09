@@ -205,6 +205,21 @@ of combat styles and all varieties to counter all varieties".
       glimmer). Each shapes the ground, blocks as trees do, and keeps two
       chests. Between them: violet and teal wizard-wood, mushrooms, ruins;
       islets float over it all. Bots step around what stands ahead.
+- [x] **The Spire is climbed** (on the owner's word): a stone stair winds
+      twice about the tower, a gold rail on posts at its edge, up to a
+      balcony 23 m over the plaza with merlons to crouch behind; the view
+      runs to every place. Decks (`places::Deck`, a stair or a ring) are
+      stood on from above and passed through from below: feet stand on the
+      highest surface no more than a step above them (`Map::floor`), so
+      you walk up, drop off, or glide down onto them; bolts strike them.
+      The stair's heading is `trig::atan2`, arithmetic only, so the page
+      still predicts to the bit (`walks_up_the_spire_to_its_balcony`).
+- [x] **Dusk**, on the owner's word ("everything is a little too bright"):
+      a low amber sun, a violet sky with its first stars, dimmer stone; the
+      lamps, crystals and lava carry the light. Grass blades are hashed
+      from whole-numbered cells, so they no longer change as you walk; the
+      sea's octaves are turned from each other and its glint spreads with
+      distance, so it no longer crawls.
       `?cam=x,y,z,yaw,pitch` holds the camera to look (with `?orbit`).
 - [x] **Spell cubes and the spellbook**, on the owner's word ("pick up and
       rank up everything you run over, no button press... the spellbook B

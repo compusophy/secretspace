@@ -26,6 +26,14 @@ pub const PLATEAU: f32 = 20.0;
 pub const PLATEAU_FALL: f32 = 16.0;
 pub const TOWER_RADIUS: f32 = 4.6;
 pub const TOWER_HEIGHT: f32 = 30.0;
+/// Its stair: this wide, winding this many times about it up to the
+/// balcony, this high above its foot, which runs this much of a turn.
+pub const STAIR_WIDTH: f32 = 2.0;
+pub const STAIR_TURNS: f32 = 2.0;
+pub const BALCONY: f32 = 23.0;
+pub const BALCONY_SPAN: f32 = 0.8;
+/// Where the stair starts about the tower (radians from +x, toward +z).
+pub const STAIR_FROM: f32 = 0.35;
 /// The places about it (a stone circle, a demon rift, a crystal grove):
 /// this far out, this wide; how deep the rift's bowl is.
 pub const POI_RING: f32 = 76.0;

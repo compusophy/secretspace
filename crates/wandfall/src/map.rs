@@ -8,7 +8,7 @@
 use engine::rng::{splitmix, Rng};
 
 use crate::laws::*;
-use crate::places::{self, Poi};
+use crate::places::{self, Deck, Poi};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -16,9 +16,11 @@ pub enum Kind {
     Rock,
     Pillar,
     Shroom,
-    /// The Spire's tower, and the lamps about its plaza.
+    /// The Spire's tower, the lamps about its plaza, the merlons along
+    /// its balcony.
     Tower,
     Lamp,
+    Merlon,
     /// The stone circle's stones and altar.
     Stone,
     Altar,
@@ -53,6 +55,8 @@ pub struct Map {
     /// The places, the Spire first; where their chests wait.
     pub pois: Vec<Poi>,
     pub caches: Vec<[f32; 2]>,
+    /// Where to stand above the ground (the Spire's stair and balcony).
+    pub decks: Vec<Deck>,
     grid: Vec<Vec<u16>>,
 }
 
@@ -100,6 +104,7 @@ impl Map {
             props: Vec::new(),
             pois: places::find(seed, |x, z| hills(seed, x, z)),
             caches: Vec::new(),
+            decks: Vec::new(),
             grid: vec![Vec::new(); (CELLS * CELLS) as usize],
         };
         places::set(&mut m);
@@ -114,6 +119,25 @@ impl Map {
             h = p.shape(h, x, z);
         }
         h
+    }
+
+    /// What feet at `y` stand on at (x, z): the highest of the ground and
+    /// any deck no more than a step above them.
+    pub fn floor(&self, x: f32, z: f32, y: f32) -> f32 {
+        let mut f = self.height(x, z);
+        for d in &self.decks {
+            if let Some(h) = d.level(x, z, y + STEP) {
+                f = f.max(h);
+            }
+        }
+        f
+    }
+
+    /// Whether a deck's surface lies between heights `lo` and `hi` at (x, z).
+    fn deck_between(&self, x: f32, z: f32, lo: f32, hi: f32) -> bool {
+        self.decks
+            .iter()
+            .any(|d| d.level(x, z, hi).is_some_and(|h| h >= lo))
     }
 
     /// Whether (x, z) is clear of the places, `pad` metres to spare.
@@ -305,17 +329,22 @@ impl Map {
                 first = Some(t);
             }
         }
-        // The ground, a metre at a time.
+        // The ground, and the decks, a metre at a time.
         let steps = (len.max(d[1].abs()).ceil() as usize).max(1);
+        let mut was = a[1];
         for k in 1..=steps {
             let t = k as f32 / steps as f32;
             if first.is_some_and(|f| t >= f) {
                 break;
             }
             let p = [a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t];
-            if p[1] < self.height(p[0], p[2]).max(SEA) {
+            if p[1] < self.height(p[0], p[2]).max(SEA)
+                || (!self.decks.is_empty()
+                    && self.deck_between(p[0], p[2], p[1].min(was), p[1].max(was)))
+            {
                 return Some(t);
             }
+            was = p[1];
         }
         first
     }
@@ -377,6 +406,35 @@ mod tests {
             }
             assert!(m.caches.len() >= 8);
         }
+    }
+
+    #[test]
+    fn the_stair_climbs_the_tower_to_its_balcony() {
+        let m = Map::new(9);
+        let foot = m.height(0.0, 0.0) - 0.3;
+        let r = TOWER_RADIUS + STAIR_WIDTH / 2.0;
+        let at = |turns: f32| {
+            let a = STAIR_FROM + turns * std::f32::consts::TAU;
+            (a.cos() * r, a.sin() * r)
+        };
+        // A quarter turn up: a step above where it started, not the ground.
+        let (x, z) = at(0.25);
+        let up = foot + 0.3 + (BALCONY - 0.3) / STAIR_TURNS * 0.25;
+        assert!((m.floor(x, z, up) - up).abs() < 0.01);
+        assert!(
+            m.floor(x, z, PLATEAU_TOP) < up - 1.0,
+            "from below, the plaza"
+        );
+        // The second turn stands over the first.
+        let high = up + (BALCONY - 0.3) / STAIR_TURNS;
+        assert!((m.floor(x, z, high) - high).abs() < 0.01);
+        assert!((m.floor(x, z, high - 3.0) - up).abs() < 0.01);
+        // The balcony, half way round it.
+        let (x, z) = at(0.4);
+        assert!((m.floor(x, z, foot + BALCONY) - (foot + BALCONY)).abs() < 1e-4);
+        // A bolt dropping onto the balcony strikes it.
+        let y = foot + BALCONY;
+        assert!(m.strikes([x, y + 2.0, z], [x + 0.01, y - 2.0, z]).is_some());
     }
 
     #[test]

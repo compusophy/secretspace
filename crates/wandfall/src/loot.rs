@@ -97,7 +97,7 @@ pub fn drop_scroll(w: &mut World, spell: u8, rank: u8, at: [f32; 3], spread: f32
     let lim = MAP_HALF - 2.0;
     let (x, z) = (x.clamp(-lim, lim), z.clamp(-lim, lim));
     let id = fresh_id(w);
-    let y = w.map.height(x, z).max(SEA);
+    let y = w.map.floor(x, z, at[1] + 0.5).max(SEA);
     w.scrolls.push(Scroll {
         id,
         spell,

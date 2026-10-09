@@ -105,7 +105,11 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
         }
         spell::LIGHTNING => {
             let (to, _) = sight(w, by, eye, d, LIGHTNING_RANGE);
-            let at = [to[0], w.map.height(to[0], to[2]).max(SEA), to[2]];
+            let at = [
+                to[0],
+                w.map.floor(to[0], to[2], to[1] + 0.3).max(SEA),
+                to[2],
+            ];
             w.zones.push(Zone {
                 by,
                 at,

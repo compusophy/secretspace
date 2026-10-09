@@ -9,35 +9,33 @@
 use std::f32::consts::TAU;
 
 use render::geo::{self, hash, mix, rgb, unit, Geo, STRIDE, V3};
-use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark, Terrain};
+use render::{m4, Item, Material, Mesh, Renderer, Terrain};
 
-use crate::fx::Draw;
-use crate::look::Look;
-use wandfall::laws::{MAP_HALF, RIFT_DEPTH, SEA};
+use wandfall::laws::{MAP_HALF, SEA};
 use wandfall::map::{smooth as ease, Kind, Map};
-use wandfall::places::{Place, Poi};
+use wandfall::places::{Deck, Place, Poi};
 
 /// Metres between the ground's samples.
 const TERRAIN_CELL: f32 = 1.25;
 
-const VIOLET: V3 = rgb(178, 132, 255);
-const CYAN: V3 = rgb(110, 225, 255);
+pub(crate) const VIOLET: V3 = rgb(178, 132, 255);
+pub(crate) const CYAN: V3 = rgb(110, 225, 255);
 const AMETHYST: V3 = rgb(140, 80, 255);
 const AQUA: V3 = rgb(60, 190, 255);
-const EMBER: V3 = rgb(255, 92, 30);
-const GOLDEN: V3 = rgb(255, 206, 120);
+pub(crate) const EMBER: V3 = rgb(255, 92, 30);
+pub(crate) const GOLDEN: V3 = rgb(255, 206, 120);
 
 /// The island's meshes and where its lights and moving things are.
 pub struct Land {
     pub held: Vec<Mesh>,
-    pois: Vec<Poi>,
-    lamps: Vec<V3>,
-    crystals: Vec<(V3, V3)>,
+    pub(crate) pois: Vec<Poi>,
+    pub(crate) lamps: Vec<V3>,
+    pub(crate) crystals: Vec<(V3, V3)>,
     /// The rift's gate: its foot and its turn.
-    gate: (V3, f32),
+    pub(crate) gate: (V3, f32),
     /// The beacon's crystal, and a ring of runes a metre across.
-    gem: Mesh,
-    runes: Mesh,
+    pub(crate) gem: Mesh,
+    pub(crate) runes: Mesh,
 }
 
 fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
@@ -127,6 +125,126 @@ fn rune_ring(g: &mut Geo, glyphs: usize, seed: u32) {
                 [1.0; 3],
                 1.0,
             );
+        }
+    }
+}
+
+/// A block of a ring between radii `r`, from heading `a0` to `a1`, from
+/// `lo` up to `hi`: its top, outer side, ends and underside.
+fn wedge(g: &mut Geo, c: (f32, f32), r: (f32, f32), (a0, a1): (f32, f32), (lo, hi): (f32, f32)) {
+    let top = rgb(150, 142, 148);
+    let side = rgb(104, 96, 110);
+    let p = |rr: f32, a: f32, y: f32| [c.0 + a.cos() * rr, y, c.1 + a.sin() * rr];
+    g.quad(
+        p(r.0, a0, hi),
+        p(r.0, a1, hi),
+        p(r.1, a1, hi),
+        p(r.1, a0, hi),
+        top,
+        0.0,
+    );
+    g.quad(
+        p(r.1, a0, lo),
+        p(r.1, a0, hi),
+        p(r.1, a1, hi),
+        p(r.1, a1, lo),
+        side,
+        0.0,
+    );
+    g.quad(
+        p(r.0, a0, lo),
+        p(r.0, a0, hi),
+        p(r.1, a0, hi),
+        p(r.1, a0, lo),
+        side,
+        0.0,
+    );
+    g.quad(
+        p(r.0, a1, lo),
+        p(r.1, a1, lo),
+        p(r.1, a1, hi),
+        p(r.0, a1, hi),
+        side,
+        0.0,
+    );
+    g.quad(
+        p(r.0, a0, lo),
+        p(r.1, a0, lo),
+        p(r.1, a1, lo),
+        p(r.0, a1, lo),
+        side,
+        0.0,
+    );
+}
+
+/// Somewhere to stand above the ground, built: a stair of stone steps with
+/// a glowing rail on posts along its outer edge, or a ring of slabs.
+fn deck(g: &mut Geo, d: &Deck) {
+    const STEPS: f32 = 36.0;
+    match *d {
+        Deck::Stair {
+            x,
+            z,
+            r,
+            y0,
+            rise,
+            turns,
+            from,
+        } => {
+            let n = (turns * STEPS) as usize;
+            let inner = (r.0 - 0.2, r.1);
+            let at = |u: f32| from + u * TAU;
+            for k in 0..n {
+                let (u0, u1) = (k as f32 / STEPS, (k + 1) as f32 / STEPS);
+                let y = y0 + (u0 + u1) / 2.0 * rise;
+                wedge(g, (x, z), inner, (at(u0), at(u1)), (y - 0.45, y));
+                if k % 3 == 0 {
+                    let a = at(u0);
+                    let post = [x + a.cos() * (r.1 - 0.12), y, z + a.sin() * (r.1 - 0.12)];
+                    g.column(post, 4, (0.05, 0.04), 0.95, a, rgb(46, 40, 58), 0.0, true);
+                }
+            }
+            // The rail: a thin gold band, a step at a time.
+            let rr = r.1 - 0.12;
+            let pt = |u: f32, dy: f32| {
+                let a = at(u);
+                [
+                    x + a.cos() * rr,
+                    y0 + u * rise + 0.95 + dy,
+                    z + a.sin() * rr,
+                ]
+            };
+            for k in 0..n {
+                let (u0, u1) = (k as f32 / STEPS, (k + 1) as f32 / STEPS);
+                g.quad(
+                    pt(u0, -0.04),
+                    pt(u0, 0.04),
+                    pt(u1, 0.04),
+                    pt(u1, -0.04),
+                    GOLDEN,
+                    1.4,
+                );
+            }
+        }
+        Deck::Ring {
+            x,
+            z,
+            r,
+            y,
+            from,
+            span,
+        } => {
+            let n = (span * 48.0) as usize;
+            for k in 0..n {
+                let (u0, u1) = (k as f32 / 48.0, (k + 1) as f32 / 48.0);
+                wedge(
+                    g,
+                    (x, z),
+                    (r.0 - 0.3, r.1),
+                    (from + u0 * TAU, from + u1 * TAU),
+                    (y - 0.6, y),
+                );
+            }
         }
     }
 }
@@ -336,16 +454,10 @@ impl Land {
         let tower = smooth(r, |g| {
             let pale = rgb(172, 164, 160);
             let dark = rgb(120, 112, 132);
+            // Its foot flares a little (the stair starts beside it).
             g.lathe(
                 [0.0; 3],
-                &[(6.2, 0.0), (6.0, 1.2), (5.0, 1.3)],
-                8,
-                dark,
-                0.0,
-            );
-            g.lathe(
-                [0.0; 3],
-                &[(5.0, 1.2), (4.7, 4.0), (4.5, 12.0), (4.3, 21.6)],
+                &[(5.2, 0.0), (5.0, 0.8), (4.7, 4.0), (4.5, 12.0), (4.3, 21.6)],
                 24,
                 pale,
                 0.0,
@@ -359,9 +471,10 @@ impl Land {
                     0.15,
                 );
             }
+            // A shoulder where the shaft narrows (the balcony is a deck).
             g.lathe(
                 [0.0; 3],
-                &[(4.2, 21.4), (5.9, 22.4), (5.9, 23.0), (3.7, 23.0)],
+                &[(4.3, 21.5), (4.5, 22.4), (3.7, 23.0)],
                 24,
                 dark,
                 0.0,
@@ -388,29 +501,6 @@ impl Land {
             );
         });
         let trim = one(r, |g| {
-            let dark = rgb(120, 112, 132);
-            for k in 0..8 {
-                let a = k as f32 / 8.0 * TAU;
-                g.block(
-                    [a.cos() * 4.9, 1.2, a.sin() * 4.9],
-                    [1.4, 5.5, 0.8],
-                    a,
-                    dark,
-                    dark,
-                    0.0,
-                );
-            }
-            for k in 0..20 {
-                let a = (k as f32 + 0.5) / 20.0 * TAU;
-                g.block(
-                    [a.cos() * 5.6, 23.0, a.sin() * 5.6],
-                    [0.5, 0.8, 0.9],
-                    a,
-                    dark,
-                    dark,
-                    0.0,
-                );
-            }
             // The door, and the windows climbing the shaft.
             g.block(
                 [4.75, 1.2, 0.0],
@@ -456,6 +546,22 @@ impl Land {
             for k in 0..4 {
                 window(g, k as f32 / 4.0 * TAU + 0.4, 26.5, 3.68, 0.6, 1.4);
             }
+        });
+        let decks = one(r, |g| {
+            for d in &map.decks {
+                deck(g, d);
+            }
+        });
+        let merlon = one(r, |g| {
+            let dark = rgb(112, 104, 120);
+            g.block(
+                [0.0; 3],
+                [0.5, 1.2, 0.85],
+                0.0,
+                rgb(140, 132, 140),
+                dark,
+                0.0,
+            );
         });
         let lamp = one(r, |g| {
             let iron = rgb(46, 42, 58);
@@ -591,7 +697,10 @@ impl Land {
             );
         });
 
-        let mut statics = vec![Item::new(ground, m4::ID).material(Material::Terrain)];
+        let mut statics = vec![
+            Item::new(ground, m4::ID).material(Material::Terrain),
+            Item::new(decks, m4::ID).rough(0.85).detail(0.15),
+        ];
         let mut lamps = Vec::new();
         let mut gems = Vec::new();
         let mut gate_at = ([0.0; 3], 0.0);
@@ -643,6 +752,10 @@ impl Land {
                     let m = m4::place(at, 0.0, [1.0; 3]);
                     statics.push(Item::new(tower, m).rough(0.8).detail(0.12));
                     statics.push(Item::new(trim, m).rough(0.85).detail(0.1));
+                }
+                Kind::Merlon => {
+                    let m = m4::place(at, p.yaw, [1.0; 3]);
+                    statics.push(Item::new(merlon, m).rough(0.85).detail(0.15));
                 }
                 Kind::Lamp => {
                     statics.push(Item::new(lamp, m4::place(at, 0.0, [1.0; 3])).rough(0.5));
@@ -709,7 +822,8 @@ impl Land {
         });
         let runes = one(r, |g| rune_ring(g, 18, 5));
         let mut held = vec![
-            ground, trunk, pines, pillar, cap, tower, trim, lamp, menhir, altar, spike, gate, islet,
+            ground, trunk, pines, pillar, cap, tower, trim, lamp, menhir, altar, spike, gate,
+            islet, decks, merlon,
         ];
         held.extend(crowns);
         held.extend(rocks);
@@ -724,205 +838,6 @@ impl Land {
             gate: gate_at,
             gem,
             runes,
-        }
-    }
-}
-
-impl Look {
-    /// What moves at the places, and their light, `t` seconds in.
-    pub fn places(&self, d: &mut Draw, t: f32) {
-        let l = &self.land;
-        let glow = |d: &mut Draw, mesh: Mesh, m: render::M4, c: V3, a: f32| {
-            d.items
-                .push(Item::new(mesh, m).tint(c, a).glow(1.0).pass(Pass::Glow));
-        };
-        for &p in &l.lamps {
-            d.lights.push(Light {
-                p,
-                r: 9.0,
-                c: geo::scale(VIOLET, 1.6),
-            });
-        }
-        for &(p, c) in &l.crystals {
-            d.lights.push(Light {
-                p,
-                r: 8.0,
-                c: geo::scale(c, 1.2),
-            });
-        }
-        for p in &l.pois {
-            let base = [p.x, p.level, p.z];
-            match p.place {
-                Place::Spire => {
-                    // The beacon: a crystal turning over the hat, its
-                    // light up into the sky, runes wheeling about it.
-                    let foot = base[1] - 0.3;
-                    let top = [p.x, foot + 45.0 + (t * 1.3).sin() * 0.4, p.z];
-                    let m = m4::place(top, t * 0.8, [1.3, 2.0, 1.3]);
-                    d.items
-                        .push(Item::new(l.gem, m).tint(VIOLET, 1.0).glow(2.2));
-                    glow(
-                        d,
-                        self.beam,
-                        m4::place(top, 0.0, [0.5, 260.0, 0.5]),
-                        VIOLET,
-                        0.25,
-                    );
-                    glow(
-                        d,
-                        self.beam,
-                        m4::place(top, 0.0, [1.6, 260.0, 1.6]),
-                        VIOLET,
-                        0.06,
-                    );
-                    d.lights.push(Light {
-                        p: top,
-                        r: 40.0,
-                        c: geo::scale(VIOLET, 4.0),
-                    });
-                    for (y, r, w) in [
-                        (foot + 31.4, 6.2, 0.35),
-                        (foot + 35.4, 4.4, -0.5),
-                        (top[1], 2.4, 0.9),
-                    ] {
-                        glow(
-                            d,
-                            l.runes,
-                            m4::place([p.x, y, p.z], t * w, [r; 3]),
-                            GOLDEN,
-                            0.8,
-                        );
-                    }
-                    let floor = [p.x, base[1] + 0.04, p.z];
-                    glow(
-                        d,
-                        l.runes,
-                        m4::place(floor, -t * 0.05, [9.0; 3]),
-                        GOLDEN,
-                        0.35,
-                    );
-                }
-                Place::Circle => {
-                    let at = [p.x, base[1] + 0.5 + 1.9 + (t * 1.7).sin() * 0.12, p.z];
-                    d.items.push(
-                        Item::new(self.orb, m4::place(at, 0.0, [0.28; 3]))
-                            .tint(CYAN, 1.0)
-                            .glow(2.0),
-                    );
-                    glow(d, l.runes, m4::place(at, t * 0.6, [1.4; 3]), CYAN, 0.9);
-                    let floor = [p.x, base[1] + 0.56, p.z];
-                    glow(
-                        d,
-                        l.runes,
-                        m4::place(floor, -t * 0.1, [p.r * 0.4; 3]),
-                        CYAN,
-                        0.25,
-                    );
-                    d.lights.push(Light {
-                        p: at,
-                        r: 14.0,
-                        c: geo::scale(CYAN, 2.5),
-                    });
-                }
-                Place::Rift => {
-                    // The gate's swirl, and embers rising off the lava.
-                    let floor = base[1] - RIFT_DEPTH;
-                    let (foot, yaw) = l.gate;
-                    let (s, c) = yaw.sin_cos();
-                    let mid = [foot[0], foot[1] + 3.6, foot[2]];
-                    let face = |r: f32| {
-                        m4::basis(
-                            mid,
-                            [c * 0.06, 0.0, s * 0.06],
-                            [0.0, r, 0.0],
-                            [-s * r, 0.0, c * r],
-                        )
-                    };
-                    let pulse = 0.8 + 0.2 * (t * 3.0).sin();
-                    // A void, a red rim about it, runes wheeling in it.
-                    d.items.push(
-                        Item::new(self.ball, face(2.45))
-                            .tint(rgb(255, 50, 20), 0.55 * pulse)
-                            .glow(1.0)
-                            .material(Material::Rim)
-                            .pass(Pass::Glow),
-                    );
-                    d.items.push(
-                        Item::new(self.ball, face(2.25))
-                            .tint(rgb(14, 2, 8), 1.0)
-                            .rough(0.3),
-                    );
-                    for (r, w) in [(2.3, 0.7), (1.5, -1.1), (0.8, 1.6)] {
-                        let (sa, ca) = (t * w).sin_cos();
-                        let up = [0.0, ca * r, 0.0];
-                        let across = [-s * sa * r, 0.0, c * sa * r];
-                        let u = geo::add(up, across);
-                        let v = geo::sub([-s * ca * r, 0.0, c * ca * r], [0.0, sa * r, 0.0]);
-                        let m = m4::basis(
-                            geo::add(mid, [c * 0.08, 0.0, s * 0.08]),
-                            u,
-                            [c * 0.02, 0.0, s * 0.02],
-                            v,
-                        );
-                        let m2 = m4::basis(
-                            geo::sub(mid, [c * 0.08, 0.0, s * 0.08]),
-                            u,
-                            [c * 0.02, 0.0, s * 0.02],
-                            v,
-                        );
-                        glow(d, l.runes, m, EMBER, 0.8 * pulse);
-                        glow(d, l.runes, m2, EMBER, 0.8 * pulse);
-                    }
-                    d.lights.push(Light {
-                        p: mid,
-                        r: 18.0,
-                        c: geo::scale(EMBER, 3.5 * pulse),
-                    });
-                    d.lights.push(Light {
-                        p: [p.x, floor + 0.6, p.z],
-                        r: 12.0,
-                        c: geo::scale(EMBER, 2.0),
-                    });
-                    for k in 0..48 {
-                        let u = |i| unit(hash(k, i, 31));
-                        let f = (t / (3.0 + 2.0 * u(0)) + u(1)).fract();
-                        let a = u(2) * TAU;
-                        let r = 1.0 + 9.0 * u(3) + f * 1.5;
-                        d.sparks.push(Spark {
-                            p: [
-                                p.x + a.cos() * r,
-                                floor + 0.3 + f * (6.0 + 6.0 * u(4)),
-                                p.z + a.sin() * r,
-                            ],
-                            size: 0.07 + 0.06 * u(5),
-                            c: [
-                                EMBER[0],
-                                EMBER[1] * (1.0 - f * 0.5),
-                                EMBER[2],
-                                (1.0 - f) * 0.9,
-                            ],
-                        });
-                    }
-                }
-                Place::Grove => {
-                    for k in 0..36 {
-                        let u = |i| unit(hash(k, i, 41));
-                        let a = u(0) * TAU + t * 0.05 * (u(1) - 0.5);
-                        let r = p.r * u(2).sqrt();
-                        let y = base[1]
-                            + 0.8
-                            + 3.5 * u(3)
-                            + (t * (0.5 + u(4)) + u(5) * TAU).sin() * 0.4;
-                        let tw = 0.5 + 0.5 * (t * 2.0 + u(6) * TAU).sin();
-                        let c = mix(VIOLET, CYAN, u(7));
-                        d.sparks.push(Spark {
-                            p: [p.x + a.cos() * r, y, p.z + a.sin() * r],
-                            size: 0.06,
-                            c: [c[0], c[1], c[2], 0.8 * tw],
-                        });
-                    }
-                }
-            }
         }
     }
 }
