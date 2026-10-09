@@ -33,6 +33,8 @@ features = [
   "MessageEvent",
   "PointerEvent",
   "MouseEvent",
+  "WheelEvent",
+  "AddEventListenerOptions",
   "KeyboardEvent",
   "Storage",
   "Performance",

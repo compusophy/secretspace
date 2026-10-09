@@ -57,9 +57,7 @@ pub(super) fn hands(p: &mut Page) {
                     match p.spots.hit(lx, ly) {
                         Some(a) => act(p, a),
                         // Off the buttons, in a game, with no book open: play.
-                        None if !matches!(p.mode, Mode::Title) && !p.book => {
-                            kit::input::lock(p.g.canvas());
-                        }
+                        None if !matches!(p.mode, Mode::Title) && !p.book => grab(p),
                         None => {}
                     }
                 } else {
@@ -80,6 +78,12 @@ pub(super) fn hands(p: &mut Page) {
     }
     for code in p.hands.pressed() {
         p.sounds.audio.wake();
+        // Esc pauses (with the keyboard held it comes to the page instead
+        // of letting the mouse go; held, it leaves full screen).
+        if code == "Escape" && locked {
+            kit::input::unlock();
+            continue;
+        }
         if code == "KeyM" {
             let on = !p.sounds.audio.muted;
             p.sounds.mute(on);
@@ -131,7 +135,10 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
     if held("Space") {
         k |= keys::JUMP;
     }
-    if held("KeyC") {
+    // Ctrl crouches only while every key comes to the page (full screen,
+    // the keyboard held): otherwise Ctrl+W, running, would close the tab.
+    let ctrl = kit::input::keys_held() && (held("ControlLeft") || held("ControlRight"));
+    if held("KeyC") || ctrl {
         k |= keys::CROUCH;
     }
     if held("ShiftLeft") || held("ShiftRight") {

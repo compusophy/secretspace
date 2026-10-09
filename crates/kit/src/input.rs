@@ -3,12 +3,18 @@
 //! buttons each on its own, and its movement, locked or not (a first-person
 //! look). Events keep the browser's own timestamps.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
 use std::rc::Rc;
 
-use wasm_bindgen::JsCast;
-use web_sys::{EventTarget, KeyboardEvent, MouseEvent, PointerEvent};
+use wasm_bindgen::prelude::Closure;
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::{EventTarget, KeyboardEvent, MouseEvent, PointerEvent, WheelEvent};
+
+thread_local! {
+    /// The browser agreed to hold the keyboard (while full screen).
+    static HELD: Cell<bool> = const { Cell::new(false) };
+}
 
 pub use crate::pointer::Kind;
 
@@ -106,6 +112,11 @@ impl Hands {
                 let Ok(e) = e.dyn_into::<MouseEvent>() else {
                     return;
                 };
+                // Playing, the buttons are the game's: the side ones do
+                // not go back a page, the middle one does not scroll.
+                if locked() {
+                    e.prevent_default();
+                }
                 push(
                     &me,
                     Hand::Button {
@@ -162,6 +173,23 @@ impl Hands {
         let me = inner.clone();
         crate::on(window, "blur", move |_| me.borrow_mut().held.clear());
         crate::on(target, "contextmenu", |e| e.prevent_default());
+        // Nor does the wheel scroll or (with Ctrl) zoom the page. A wheel
+        // listener on the window is passive unless it says otherwise.
+        let opts = web_sys::AddEventListenerOptions::new();
+        opts.set_passive(false);
+        let wheel = Closure::<dyn FnMut(web_sys::Event)>::new(|e: web_sys::Event| {
+            if let Ok(e) = e.dyn_into::<WheelEvent>() {
+                if locked() || full() || e.ctrl_key() {
+                    e.prevent_default();
+                }
+            }
+        });
+        let _ = window.add_event_listener_with_callback_and_add_event_listener_options(
+            "wheel",
+            wheel.as_ref().unchecked_ref(),
+            &opts,
+        );
+        wheel.forget();
         Hands(inner)
     }
 
@@ -183,6 +211,56 @@ impl Hands {
 /// Take the mouse for looking around (it must come from a press).
 pub fn lock(el: &web_sys::Element) {
     el.request_pointer_lock();
+}
+
+/// Take everything for playing (it must come from a press): the whole
+/// screen, the keyboard where the browser allows it (Chrome and Edge, full
+/// screen: then even Ctrl+W comes to the game, and Esc must be held to
+/// leave), and the mouse.
+pub fn play(el: &web_sys::Element) {
+    let doc = crate::document();
+    if !full() {
+        if let Some(root) = doc.document_element() {
+            let _ = root.request_fullscreen();
+        }
+    }
+    hold_keys();
+    lock(el);
+}
+
+/// Whether the page has the whole screen.
+pub fn full() -> bool {
+    crate::document().fullscreen_element().is_some()
+}
+
+/// Whether every key comes to the page (the keyboard held, full screen):
+/// only then may a game use Ctrl, which otherwise closes tabs.
+pub fn keys_held() -> bool {
+    HELD.with(Cell::get) && full()
+}
+
+/// Ask for the keyboard (`navigator.keyboard.lock()`, where there is one).
+fn hold_keys() {
+    let nav: JsValue = crate::window().navigator().into();
+    let Ok(kb) = js_sys::Reflect::get(&nav, &"keyboard".into()) else {
+        return;
+    };
+    let Ok(lock) = js_sys::Reflect::get(&kb, &"lock".into()) else {
+        return;
+    };
+    let Some(lock) = lock.dyn_ref::<js_sys::Function>() else {
+        return;
+    };
+    let Ok(promise) = lock.call0(&kb) else {
+        return;
+    };
+    if let Ok(promise) = promise.dyn_into::<js_sys::Promise>() {
+        let ok = Closure::once(|_: JsValue| HELD.with(|h| h.set(true)));
+        let no = Closure::once(|_: JsValue| HELD.with(|h| h.set(false)));
+        let _ = promise.then2(&ok, &no);
+        ok.forget();
+        no.forget();
+    }
 }
 
 pub fn unlock() {

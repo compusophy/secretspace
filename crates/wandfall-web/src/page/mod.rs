@@ -201,7 +201,16 @@ fn online(p: &mut Page) {
     let link = kit::Link::open("wandfall", p.session.hello(&p.session.name(), false), false);
     p.mode = Mode::Online(link);
     if !p.touch {
+        grab(p);
+    }
+}
+
+/// Take the screen, keys and mouse to play (`?windowed`: the mouse only).
+fn grab(p: &Page) {
+    if query("windowed") {
         kit::input::lock(p.g.canvas());
+    } else {
+        kit::input::play(p.g.canvas());
     }
 }
 

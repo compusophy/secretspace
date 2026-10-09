@@ -6,7 +6,7 @@ use wandfall::practice;
 use wandfall::proto::{Up, PROTO};
 use wandfall::room::Wandfall;
 
-use super::{leave, online, query, query_value, send, Mode, Page, ME, PRACTICE_SEED};
+use super::{grab, leave, online, query, query_value, send, Mode, Page, ME, PRACTICE_SEED};
 use crate::menu::Act;
 
 pub(super) fn practise(p: &mut Page) {
@@ -52,7 +52,7 @@ pub(super) fn practise(p: &mut Page) {
         p.pitch = it.next().unwrap_or(0.0).to_radians();
     }
     if !p.touch {
-        kit::input::lock(p.g.canvas());
+        grab(p);
     }
 }
 
@@ -80,7 +80,7 @@ pub(super) fn act(p: &mut Page, a: Act) {
         Act::Resume => {
             p.paused = false;
             if !p.touch {
-                kit::input::lock(p.g.canvas());
+                grab(p);
             }
         }
         Act::Book => {
@@ -91,7 +91,7 @@ pub(super) fn act(p: &mut Page, a: Act) {
         Act::CloseBook => {
             p.book = false;
             if !p.touch {
-                kit::input::lock(p.g.canvas());
+                grab(p);
             }
         }
         Act::Slot(k) => p.book_slot = k,

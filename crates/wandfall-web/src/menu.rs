@@ -143,17 +143,56 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
     }
 }
 
+/// The keys, in lines no wider than `width`, each holding whole ones.
+fn keys_help(width: i32, ui: i32) -> Vec<String> {
+    const KEYS: [&str; 11] = [
+        "WASD move",
+        "shift sprint",
+        "space jump",
+        "C or ctrl crouch",
+        "crouch at a sprint: slide",
+        "click cast",
+        "right click aim",
+        "Q E R F spells",
+        "B spellbook",
+        "M sound",
+        "Esc pause",
+    ];
+    let mut lines: Vec<String> = Vec::new();
+    for k in KEYS {
+        match lines.last_mut() {
+            Some(l) if pixels::text_width(&format!("{l} - {k}"), ui) <= width => {
+                l.push_str(" - ");
+                l.push_str(k);
+            }
+            _ => lines.push(k.to_string()),
+        }
+    }
+    lines
+}
+
 /// The pause menu.
 pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: bool) {
     let (w, h) = (c.w, c.h);
     let bw = (200 * ui).min(w - 24 * ui) as f32;
     let bh = 28.0 * ui as f32;
     let n = if practice { 3.0 } else { 2.0 };
+    // The keys, inside the panel (a touch screen has its buttons), a
+    // line holding as many whole ones as fit.
+    let help = if touch {
+        Vec::new()
+    } else {
+        keys_help(bw as i32, ui)
+    };
+    let tall = 44.0 * ui as f32
+        + n * (bh + 8.0 * ui as f32)
+        + 24.0 * ui as f32
+        + help.len() as f32 * 10.0 * ui as f32;
     let panel = Rect::new(
         (w as f32 - bw) / 2.0 - 12.0 * ui as f32,
-        h as f32 / 2.0 - 70.0 * ui as f32,
+        ((h as f32 - tall) / 2.0).max(4.0 * ui as f32),
         bw + 24.0 * ui as f32,
-        44.0 * ui as f32 + n * (bh + 8.0 * ui as f32) + 24.0 * ui as f32,
+        tall,
     );
     c.round_rect(panel, 6.0 * ui as f32, PANEL);
     let x = (w as f32 - bw) / 2.0;
@@ -198,11 +237,8 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
         ui,
     );
     y += bh + 10.0 * ui as f32;
-    if !touch {
-        let help =
-            "WASD move - shift sprint - space jump - C crouch (sprinting: slide) - click cast - right click aim - Q E R F spells - B spellbook - M sound";
-        let k = pixels::fit_scale(help, w - 16 * ui, ui);
-        c.text_centred(w / 2, y as i32, help, k, DIM);
+    for (n, line) in help.iter().enumerate() {
+        c.text_centred(w / 2, y as i32 + n as i32 * 10 * ui, line, ui, DIM);
     }
 }
 
