@@ -169,6 +169,17 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     let look = p.sky.look((hour, weather), in_storm, now);
     let wet = p.sky.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32);
     fx::rain(&mut d, cam.eye, t, wet, look.wind);
+    // Lightning far off: thunder a while after (the farther, the later).
+    if let Some(at) = sky::lightning(now, wet) {
+        if p.thunder.0 != at {
+            let far = 1500.0 + (at.fract() * 2000.0);
+            p.thunder = (at, Some((now + far, (at * 7.3).sin() as f32)));
+        }
+    }
+    if let Some((_, pan)) = p.thunder.1.filter(|t| now >= t.0) {
+        p.sounds.ambience.thunder(&p.sounds.audio, pan);
+        p.thunder.1 = None;
+    }
     let scene = Frame {
         cam,
         look,

@@ -28,7 +28,7 @@ use crate::menu::{self, Act, Spots};
 use crate::rig;
 use crate::scene;
 use crate::settings::Settings;
-use crate::sky::{Hour, Sky, Weather};
+use crate::sky::{self, Hour, Sky, Weather};
 use crate::sound::Sounds;
 use crate::state::State;
 use crate::touch::Touch;
@@ -129,6 +129,9 @@ struct Page {
     sky: Sky,
     hour: Option<Hour>,
     weather: Option<Weather>,
+    /// The last lightning far off (s), and its thunder still to come
+    /// (when, from which side).
+    thunder: (f64, Option<(f64, f32)>),
     /// How each wizard has been moving (for its stride).
     anims: HashMap<u16, rig::Anim>,
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
@@ -320,6 +323,7 @@ pub fn start() {
                 sky: Sky::default(),
                 hour: query_value("hour").and_then(|h| Hour::named(&h)),
                 weather: query_value("weather").and_then(|w| Weather::named(&w)),
+                thunder: (0.0, None),
                 anims: HashMap::new(),
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,

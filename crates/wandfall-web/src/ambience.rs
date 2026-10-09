@@ -207,6 +207,34 @@ fn rain() -> Vec<f32> {
     s.looped(0.45, 1.0)
 }
 
+/// Thunder far off: a crack softened by distance, rolling away in low
+/// rumbles.
+fn thunder() -> Vec<f32> {
+    let mut s = Synth::new(3.2);
+    s.noise(
+        (0.0, 0.5),
+        Env::new(0.5, 0.02, 0.15),
+        (150.0, 80.0),
+        (1400.0, 400.0),
+        0.3,
+    )
+    .noise(
+        (0.15, 3.0),
+        Env::new(1.0, 0.25, 0.7),
+        (30.0, 25.0),
+        (260.0, 120.0),
+        0.5,
+    )
+    .noise(
+        (0.9, 2.2),
+        Env::new(0.6, 0.2, 0.5),
+        (35.0, 30.0),
+        (200.0, 110.0),
+        0.6,
+    );
+    s.done(0.8)
+}
+
 /// Where you are, for the island's sound: the ear (where, facing which
 /// way), how high over the ground, on a broom, how fast; the rift and the
 /// Spire's beacon; the storm's circle if it stands (centre, radius).
@@ -234,6 +262,8 @@ pub struct Ambience {
     crickets: usize,
     birds: usize,
     rain: usize,
+    /// Thunder far off, played once after each flash in the rain.
+    thunder: usize,
 }
 
 impl Ambience {
@@ -250,6 +280,7 @@ impl Ambience {
             crickets: hum(crickets()),
             birds: hum(birds()),
             rain: hum(rain()),
+            thunder: audio.add(&thunder(), engine::synth::RATE),
         }
     }
 
@@ -298,6 +329,11 @@ impl Ambience {
         // Rain all round, a little less inside the storm's roar.
         audio.tune(self.rain, 0.5 * h.rain * (1.0 - 0.5 * roar) * k, 0.0);
     }
+
+    /// Thunder rolling in from far off (`pan`: from which side).
+    pub fn thunder(&self, audio: &Audio, pan: f32) {
+        audio.play(self.thunder, 0.7, pan, 0.9 + 0.2 * pan.abs());
+    }
 }
 
 #[cfg(test)]
@@ -323,5 +359,9 @@ mod tests {
                 "{name}: long enough to loop"
             );
         }
+        // Thunder: once, not round and round.
+        let t = thunder();
+        let top = t.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(top <= 0.81 && t.len() > engine::synth::RATE as usize * 2);
     }
 }

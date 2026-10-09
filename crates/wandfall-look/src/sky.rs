@@ -185,7 +185,18 @@ impl Sky {
         let t = smooth(((s - since) as f32 / TURN).clamp(0.0, 1.0));
         let clear = blend(&clear_of(from), &clear_of(to), t);
         let k = from.0.storm() + (to.0.storm() - from.0.storm()) * t;
-        blend(&clear, &storm(&clear, k), smooth(self.storm))
+        let wet = (from.1 == Weather::Rain) as i32 as f32 * (1.0 - t)
+            + (to.1 == Weather::Rain) as i32 as f32 * t;
+        let mut l = blend(&clear, &storm(&clear, k), smooth(self.storm));
+        // Lightning far off in the rain: the sky flashes.
+        let f = flash(now, wet);
+        if f > 0.0 {
+            let lit = |c: V3, k: f32| geo::add(c, geo::scale([0.55, 0.58, 0.75], f * k));
+            l.sky = lit(l.sky, 0.6);
+            l.zenith = lit(l.zenith, 0.5);
+            l.horizon = lit(l.horizon, 0.9);
+        }
+        l
     }
 
     /// A number for each hour and weather (how loud the crickets are,
@@ -199,6 +210,48 @@ impl Sky {
         let (a, b) = (f(from.0, from.1), f(to.0, to.1));
         a + (b - a) * t
     }
+}
+
+/// How long apart lightning may come in the rain (s): one now and then
+/// in each such stretch.
+const FLASHES: f64 = 9.0;
+
+fn rnd(n: f64, k: u64) -> f64 {
+    let mut h = (n as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ k;
+    h ^= h >> 31;
+    h = h.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    (h >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// When lightning last struck far off (s), in a rain `wet` of a downpour,
+/// if it is still flashing at `now` (ms).
+pub fn lightning(now: f64, wet: f32) -> Option<f64> {
+    if wet < 0.5 {
+        return None;
+    }
+    let s = now / 1000.0;
+    let n = (s / FLASHES).floor();
+    if rnd(n, 1) < 0.4 {
+        return None;
+    }
+    let at = n * FLASHES + rnd(n, 2) * (FLASHES - 1.0);
+    (s >= at && s - at < 0.7).then_some(at)
+}
+
+/// How bright lightning far off makes the sky now: a flash, a flicker
+/// after it, and dark again.
+pub fn flash(now: f64, wet: f32) -> f32 {
+    let Some(at) = lightning(now, wet) else {
+        return 0.0;
+    };
+    let dt = (now / 1000.0 - at) as f32;
+    let first = (-dt * 14.0).exp();
+    let again = if dt > 0.2 {
+        0.7 * (-(dt - 0.2) * 16.0).exp()
+    } else {
+        0.0
+    };
+    (first + again) * wet
 }
 
 /// The sky at `hour`, at once; violet and close in the storm.
@@ -479,5 +532,19 @@ mod tests {
         let rain = |s: &Sky, now| s.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32);
         assert_eq!(rain(&s, 1000.0), 0.0);
         assert_eq!(rain(&s, 1000.0 + TURN as f64 * 1000.0), 1.0);
+    }
+
+    #[test]
+    fn lightning_flashes_now_and_then_in_the_rain_only() {
+        let flashes = (0..600_000)
+            .step_by(50)
+            .filter(|&ms| flash(ms as f64, 1.0) > 0.5)
+            .count();
+        // Ten minutes of rain: a flash in most stretches, each a few
+        // bright frames.
+        assert!(flashes > 40 && flashes < 400, "{flashes}");
+        assert!((0..600_000)
+            .step_by(50)
+            .all(|ms| flash(ms as f64, 0.2) == 0.0));
     }
 }
