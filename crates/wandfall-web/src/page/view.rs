@@ -323,6 +323,8 @@ fn camera(
         let hurt = (1.0 - (now - p.st.hurt_at) / 220.0).max(0.0) as f32;
         cam.yaw += (now as f32 * 0.09).sin() * 0.012 * hurt;
         cam.pitch += (now as f32 * 0.13).sin() * 0.012 * hurt;
+        // And when something bursts near you.
+        camera::shake(&mut cam, camera::rumble(&p.st.shows, now, feet), now);
         return (cam, None, None);
     }
     // Out: over the shoulder of the winner, or someone still in it.

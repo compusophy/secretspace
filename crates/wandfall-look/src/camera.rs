@@ -10,8 +10,9 @@
 
 use render::geo::{self, V3};
 use render::Camera;
+use wandfall::laws::spell;
 use wandfall::map::{Kind, Map, Prop};
-use wandfall::proto::Seen;
+use wandfall::proto::{Ev, Seen};
 
 use crate::fx;
 use crate::rig::Spring;
@@ -36,6 +37,63 @@ const THIN: f32 = 0.6;
 /// Fields of view (radians, up and down): walking, aiming.
 pub const FOV: f32 = 1.15;
 pub const FOV_AIM: f32 = 0.78;
+/// A blast near you shakes the view: how far it is felt (m), how long
+/// (ms), and how hard at its heart (radians).
+const RUMBLE_REACH: f32 = 20.0;
+const RUMBLE_FOR: f64 = 450.0;
+const RUMBLE: f32 = 0.035;
+
+/// How hard the blasts in `shows` shake a view at `at`, `now` ms: a
+/// fireball bursting, lightning striking, a ward shattering, each by how
+/// near and how fresh (0 none).
+pub fn rumble(shows: &[(f64, Ev)], now: f64, at: V3) -> f32 {
+    shows
+        .iter()
+        .filter_map(|&(when, e)| {
+            let age = now - when;
+            let (p, k) = match e {
+                Ev::Cast {
+                    spell: spell::FIREBALL,
+                    stage: 1,
+                    at,
+                    ..
+                } => (at, 1.0),
+                Ev::Cast {
+                    spell: spell::LIGHTNING,
+                    stage: 1,
+                    at,
+                    ..
+                } => (at, 1.2),
+                Ev::Cast {
+                    spell: spell::WARD,
+                    stage: 2,
+                    at,
+                    ..
+                } => (at, 0.5),
+                _ => return None,
+            };
+            if !(0.0..RUMBLE_FOR).contains(&age) {
+                return None;
+            }
+            let d = geo::dot(geo::sub(p, at), geo::sub(p, at)).sqrt();
+            let near = (1.0 - d / RUMBLE_REACH).max(0.0);
+            let fresh = 1.0 - (age / RUMBLE_FOR) as f32;
+            Some(k * near * near * fresh * fresh)
+        })
+        .fold(0.0, f32::max)
+}
+
+/// The view shaken by `k` (`rumble`), `now` ms: turned a little this way
+/// and that, quickly and unevenly.
+pub fn shake(cam: &mut Camera, k: f32, now: f64) {
+    if k <= 0.0 {
+        return;
+    }
+    let t = now as f32;
+    let a = RUMBLE * k;
+    cam.yaw += ((t * 0.071).sin() + 0.6 * (t * 0.113 + 1.7).sin()) * a;
+    cam.pitch += ((t * 0.089 + 0.4).sin() + 0.5 * (t * 0.131).sin()) * a;
+}
 
 /// What the wizard is doing, for the camera.
 #[derive(Clone, Copy, Debug, Default)]
@@ -218,6 +276,26 @@ pub fn toward(eye: V3, at: V3, cam: &Camera) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blast_near_you_shakes_the_view_and_far_or_old_ones_do_not() {
+        let burst = |at: V3| Ev::Cast {
+            by: 1,
+            spell: spell::FIREBALL,
+            stage: 1,
+            at,
+        };
+        let me = [0.0, 0.0, 0.0];
+        let near = rumble(&[(1000.0, burst([2.0, 0.0, 0.0]))], 1050.0, me);
+        let far = rumble(&[(1000.0, burst([40.0, 0.0, 0.0]))], 1050.0, me);
+        let old = rumble(&[(1000.0, burst([2.0, 0.0, 0.0]))], 2000.0, me);
+        assert!(near > 0.6, "{near}");
+        assert_eq!((far, old), (0.0, 0.0));
+        let mut cam = Camera::default();
+        let was = (cam.yaw, cam.pitch);
+        shake(&mut cam, near, 1050.0);
+        assert!((cam.yaw, cam.pitch) != was);
+    }
 
     #[test]
     fn running_through_a_wood_the_view_never_leaps() {
