@@ -41,8 +41,12 @@ pub fn island(map: &Map) -> Canvas {
             c.pixel(i, j, col);
         }
     }
-    // The places: the Spire's plaza and tower, the circle, the rift, the grove.
     let px = |v: f32| (v + MAP_HALF) / (2.0 * MAP_HALF) * MINI as f32;
+    // The launch runes: gold points.
+    for q in &map.pads {
+        c.circle(px(q[0]), px(q[2]), 1.6, Rgba::rgb(255, 200, 110));
+    }
+    // The places: the Spire's plaza and tower, the circle, the rift, the grove.
     for p in &map.pois {
         let (x, y) = (px(p.x), px(p.z));
         match p.place {

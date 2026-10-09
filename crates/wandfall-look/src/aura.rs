@@ -1,4 +1,5 @@
 //! What moves at the island's places each frame, and their light: the
+//! launch runes (a turning circle, a shaft of light, rising motes), the
 //! beacon turning over the Spire and its rune rings, the lamps' violet
 //! flames, the circle's orb in its shell of light, the rift's gate
 //! burning and swirling, embers streaking up off its lava into smoke, the
@@ -11,6 +12,9 @@ use render::{m4, Item, Light, Material, Mesh, Pass, Shape, Spark};
 
 use crate::fx::Draw;
 use crate::land::{CYAN, EMBER, GOLDEN, VIOLET};
+
+/// A launch rune's colour: a warm sky-gold.
+const PAD: V3 = rgb(255, 200, 110);
 use crate::look::Look;
 use wandfall::laws::RIFT_DEPTH;
 use wandfall::places::Place;
@@ -41,6 +45,52 @@ impl Look {
                 p,
                 r: 9.0,
                 c: geo::scale(VIOLET, 1.6 * flick),
+            });
+        }
+        // Launch runes: a circle of runes turning on the ground, a shaft
+        // of light up out of it, motes rising; its light.
+        for (k, &p) in l.pads.iter().enumerate() {
+            let floor = [p[0], p[1] + 0.25, p[2]];
+            let pulse = 0.75 + 0.25 * (t * 2.6 + k as f32).sin();
+            let r = wandfall::laws::PAD_R;
+            glow(
+                d,
+                self.sigil,
+                m4::place(floor, t * 0.7, [r * 1.15, 1.0, r * 1.15]),
+                PAD,
+                0.9 * pulse,
+            );
+            glow(
+                d,
+                self.ring,
+                m4::place(floor, -t, [r * 1.5, 1.0, r * 1.5]),
+                PAD,
+                0.5,
+            );
+            glow(
+                d,
+                self.beam,
+                m4::place(floor, 0.0, [r * 0.7, 9.0, r * 0.7]),
+                PAD,
+                0.12 * pulse,
+            );
+            for n in 0..10 {
+                let u = |i: u32| unit(hash(k as i32, n, 61 + i));
+                let f = (t * (0.5 + 0.3 * u(0)) + u(1)).fract();
+                let a = u(2) * TAU + t * 1.5;
+                let rr = r * (0.3 + 0.6 * u(3));
+                d.sparks.push(Spark {
+                    p: [p[0] + a.cos() * rr, floor[1] + f * 6.0, p[2] + a.sin() * rr],
+                    size: 0.1,
+                    c: [PAD[0], PAD[1], PAD[2], 1.0 - f],
+                    v: [0.0, 0.5, 0.0],
+                    ..Default::default()
+                });
+            }
+            d.lights.push(Light {
+                p: [p[0], p[1] + 1.0, p[2]],
+                r: 7.0,
+                c: geo::scale(PAD, 1.4 * pulse),
             });
         }
         for &(p, c) in &l.crystals {

@@ -317,6 +317,15 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
         }
         b.buffer = 0;
     }
+    // A launch rune underfoot: up into the sky, onto your broom.
+    if b.ground && !b.glide && map.pad_under(b.p).is_some() {
+        b.v[1] = PAD_UP;
+        b.glide = true;
+        b.ground = false;
+        b.slide = false;
+        b.coyote = 0;
+        b.buffer = 0;
+    }
     // A ledge within reach as you push toward it in the air (and would
     // fall short of it): up and over, timed to come down on its middle,
     // steering held till then.
@@ -543,6 +552,26 @@ mod tests {
         };
         assert!(!climb(false), "one jump falls short");
         assert!(climb(true), "an air jump reaches it");
+    }
+
+    #[test]
+    fn a_launch_rune_throws_you_up_onto_your_broom_and_you_glide_down() {
+        let map = Map::new(11);
+        let q = map.pads[0];
+        let mut b = on(&map, [q[0], q[2]], [0.0, 0.0]);
+        step(&mut b, &east(0), &map);
+        assert!(b.glide && !b.ground && b.v[1] > 20.0, "{b:?}");
+        let mut top = b.p[1];
+        let mut k = 0;
+        while !b.ground && k < 600 {
+            step(&mut b, &east(keys::FWD), &map);
+            top = top.max(b.p[1]);
+            k += 1;
+        }
+        assert!(top > q[1] + 14.0, "high: {top} over {}", q[1]);
+        assert!(b.ground && !b.glide, "down again, off the broom: {b:?}");
+        let went = (b.p[0] - q[0]).hypot(b.p[2] - q[2]);
+        assert!(went > 30.0, "and far: {went}");
     }
 
     /// A body on the plaza (flat), and a step under `keys` heading `yaw`.

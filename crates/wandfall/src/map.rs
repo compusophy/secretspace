@@ -80,6 +80,9 @@ pub struct Map {
     pub caches: Vec<[f32; 2]>,
     /// Where to stand above the ground (the Spire's stair and balcony).
     pub decks: Vec<Deck>,
+    /// Launch runes: step on one and it throws you up onto your broom
+    /// (each its middle, on the ground).
+    pub pads: Vec<[f32; 3]>,
     grid: Vec<Vec<u16>>,
 }
 
@@ -128,11 +131,59 @@ impl Map {
             pois: places::find(seed, |x, z| hills(seed, x, z)),
             caches: Vec::new(),
             decks: Vec::new(),
+            pads: Vec::new(),
             grid: vec![Vec::new(); (CELLS * CELLS) as usize],
         };
         places::set(&mut m);
         m.scatter();
+        m.launchers();
         m
+    }
+
+    /// The launch runes: one by each place, the rest out in the wild, far
+    /// apart; from a stream of their own, so nothing else moves.
+    fn launchers(&mut self) {
+        let mut rng = Rng::new(self.seed ^ 0x1a0c_4e55);
+        let mut unit = move || (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
+        let fits = |m: &Map, x: f32, z: f32| {
+            m.land(x, z)
+                && m.height(x, z) > SEA + 1.0
+                && m.near(x, z, PAD_R + 1.5).next().is_none()
+                && m.pads
+                    .iter()
+                    .all(|q| (q[0] - x).powi(2) + (q[2] - z).powi(2) > PAD_APART * PAD_APART)
+        };
+        for k in 0..self.pois.len() {
+            let p = self.pois[k];
+            for _ in 0..16 {
+                let (s, c) = crate::trig::sin_cos((unit() * 65536.0) as u16);
+                let (x, z) = (p.x + c * p.r * 1.25, p.z + s * p.r * 1.25);
+                if fits(self, x, z) {
+                    self.pads.push([x, self.height(x, z), z]);
+                    break;
+                }
+            }
+        }
+        let (mut n, mut tries) = (0, 0);
+        while n < PADS_WILD && tries < 600 {
+            tries += 1;
+            let (x, z) = (
+                (unit() * 2.0 - 1.0) * SHORE * 0.8,
+                (unit() * 2.0 - 1.0) * SHORE * 0.8,
+            );
+            if fits(self, x, z) && self.wild(x, z, 6.0) {
+                self.pads.push([x, self.height(x, z), z]);
+                n += 1;
+            }
+        }
+    }
+
+    /// The launch rune feet at `p` stand on, if any.
+    pub fn pad_under(&self, p: [f32; 3]) -> Option<[f32; 3]> {
+        self.pads.iter().copied().find(|q| {
+            (q[0] - p[0]).powi(2) + (q[2] - p[2]).powi(2) < PAD_R * PAD_R
+                && (p[1] - q[1]).abs() < 1.0
+        })
     }
 
     /// The ground's height at (x, z): the hills, as the places shape them.
@@ -437,6 +488,11 @@ mod tests {
         let trees = m.props.iter().filter(|p| p.kind == Kind::Tree).count();
         assert!(trees > TREES / 2, "trees: {trees}");
         assert!(m.props.iter().any(|p| p.kind == Kind::Pillar));
+        // Launch runes: by the places and out in the wild, on land, clear.
+        assert!(m.pads.len() >= PADS_WILD, "{}", m.pads.len());
+        for q in &m.pads {
+            assert!(m.land(q[0], q[2]) && m.near(q[0], q[2], PAD_R).next().is_none());
+        }
         assert_eq!(Map::new(7).props, m.props, "the same seed, the same island");
     }
 

@@ -236,6 +236,9 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
             }
         } else if was.ground && !is.ground && is.v[1] > 1.0 {
             p.sounds.hop();
+        } else if was.ground && is.glide && !was.glide {
+            // Thrown up by a launch rune: a rush of wind.
+            p.sounds.cast(spell::GUST, None, p.ear);
         } else if was.mantle == 0 && is.mantle > 0 {
             // Pulling up onto a ledge.
             p.sounds.hop();

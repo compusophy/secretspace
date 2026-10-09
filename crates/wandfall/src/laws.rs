@@ -104,6 +104,13 @@ pub const MANTLE_NEAR: f32 = 0.35;
 pub const MANTLE_AHEAD: f32 = 0.5;
 pub const MANTLE_OVER: f32 = 0.35;
 pub const MANTLE_PUSH: f32 = 3.5;
+/// Launch runes: how many out in the wild (and one by each place), how
+/// wide one is (m), how far apart they lie (m), and how hard one throws
+/// you up (m/s; onto your broom, to glide where you will).
+pub const PADS_WILD: usize = 8;
+pub const PAD_R: f32 = 1.3;
+pub const PAD_APART: f32 = 45.0;
+pub const PAD_UP: f32 = 33.0;
 /// A boulder's top over its trunk's (its look is rounder and taller).
 pub const ROCK_TOP: f32 = 1.15;
 pub const AIR_JUMP_STAMINA: u16 = STAMINA / 6;

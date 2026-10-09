@@ -40,6 +40,8 @@ pub struct Land {
     /// The beacon's crystal, and a ring of runes a metre across.
     pub(crate) gem: Mesh,
     pub(crate) runes: Mesh,
+    /// The launch runes (their middles, on the ground).
+    pub(crate) pads: Vec<V3>,
 }
 
 fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
@@ -821,6 +823,7 @@ impl Land {
             gate: gate_at,
             gem,
             runes,
+            pads: map.pads.clone(),
         }
     }
 }

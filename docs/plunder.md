@@ -314,7 +314,9 @@ of combat styles and all varieties to counter all varieties".
       in the air, pushing toward a top within 1.3 m over your feet, you
       pull up and over, steering held till you are over it, timed to
       come down on its middle (a short pillar takes a jump, a tall one
-      an air jump too; PROTO 10).
+      an air jump too; PROTO 10). Launch runes (one by each place, eight
+      in the wild, gold on the map): step on one and it throws you 18 m
+      up onto your broom, to glide down wherever you steer (PROTO 11).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half
