@@ -392,6 +392,12 @@ of combat styles and all varieties to counter all varieties".
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.
 - A season of names.
+  - [x] The hall of wizards (`wandfall/src/hall.rs`): matches won and
+        wizards knocked out, by soul (people only: no bots, no guests),
+        over every match; kept in the room's snapshot (schema 1) across
+        deploys, the best ten sent to every page (tag 6, bounded and
+        fuzzed), shown down the lobby's left. Seasons (a reset now and
+        then, the last one's best remembered) are still to come.
 - Netcode at scale (`docs/engine.md` §9): 40-60 people, lag-compensated hits.
   - [x] The Lance, lag-compensated (PROTO 15): each input says the tick
         its page drew everyone else at; the world keeps where everyone

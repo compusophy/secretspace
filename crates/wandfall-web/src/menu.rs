@@ -565,8 +565,9 @@ pub fn book(
     );
 }
 
-/// The online lobby: who is here, waiting for the match.
-pub fn lobby(c: &mut Canvas, ui: i32, names: &[String]) {
+/// The online lobby: who is here, waiting for the match; under them,
+/// the hall of wizards.
+pub fn lobby(c: &mut Canvas, ui: i32, names: &[String], hall: &[(String, u32, u32)]) {
     let w = c.w;
     let mut y = 30 * ui;
     let head = format!("{} in the lobby - warm up, nothing hurts here", names.len());
@@ -581,6 +582,39 @@ pub fn lobby(c: &mut Canvas, ui: i32, names: &[String]) {
         .join("   ");
     for l in pixels::wrap(&line, w * 2 / 3, ui) {
         c.text_centred(w / 2, y, &l, ui, INK);
+        y += 10 * ui;
+    }
+    // The hall of wizards, down the left.
+    if hall.is_empty() {
+        return;
+    }
+    let rows = hall.len().min(5) as i32;
+    let pw = (164 * ui).min(w / 2 - 12 * ui);
+    let panel = Rect::new(
+        (8 * ui) as f32,
+        (y + 8 * ui) as f32,
+        pw as f32,
+        (18 * ui + rows * 10 * ui) as f32,
+    );
+    c.round_rect(panel, 4.0 * ui as f32, PANEL);
+    let (x, mut y) = (panel.x as i32 + 6 * ui, panel.y as i32 + 5 * ui);
+    // Two columns at the right: matches won, wizards knocked out.
+    let right = panel.x as i32 + pw - 6 * ui;
+    let col = |c: &mut Canvas, edge: i32, y: i32, t: &str, ink: Rgba| {
+        c.text_shadowed(edge - pixels::text_width(t, ui), y, t, ui, ink);
+    };
+    c.text_shadowed(x, y, "hall of wizards", ui, GOLD);
+    col(c, right - 28 * ui, y, "won", DIM);
+    col(c, right, y, "ko", DIM);
+    y += 12 * ui;
+    let room = pw - 12 * ui - 10 * ui - 28 * ui - 30 * ui;
+    for (n, (name, wins, outs)) in hall.iter().take(5).enumerate() {
+        let mut shown = name.clone();
+        while pixels::text_width(&shown, ui) > room && shown.pop().is_some() {}
+        c.text_shadowed(x, y, &format!("{}", n + 1), ui, DIM);
+        c.text_shadowed(x + 10 * ui, y, &shown, ui, INK);
+        col(c, right - 28 * ui, y, &wins.to_string(), INK);
+        col(c, right, y, &outs.to_string(), INK);
         y += 10 * ui;
     }
 }

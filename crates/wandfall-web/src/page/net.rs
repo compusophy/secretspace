@@ -67,6 +67,10 @@ fn receive(p: &mut Page, b: &[u8], now: f64) {
         p.st.events(list, now);
         return;
     }
+    if let Some(h) = proto::read_hall(b) {
+        p.st.hall = h;
+        return;
+    }
     if let Some(l) = proto::Loot::decode(b) {
         p.sounds.loot(&p.st.loot, &l, p.ear);
         p.st.loot = l;

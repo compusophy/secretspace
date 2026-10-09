@@ -5,6 +5,7 @@
 //! code (`motion`, `predict`), so movement is exact on both ends.
 
 pub mod bots;
+pub mod hall;
 pub mod laws;
 pub mod loot;
 pub mod map;

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use engine::room::{Outbox, Room, Who};
 
+use crate::hall::Hall;
 use crate::laws::{BOT_NAMES, TICK_HZ};
 use crate::proto::{self, Ev, Up, PROTO};
 use crate::view;
@@ -15,6 +16,8 @@ pub struct Wandfall {
     /// Each connection's wizard (0: not joined).
     you: HashMap<u32, u16>,
     whos: HashMap<u32, Who>,
+    /// The hall of wizards (kept in the room's snapshot).
+    hall: Hall,
 }
 
 impl Wandfall {
@@ -23,6 +26,7 @@ impl Wandfall {
             world: World::new(seed),
             you: HashMap::new(),
             whos: HashMap::new(),
+            hall: Hall::default(),
         }
     }
 
@@ -108,6 +112,7 @@ impl Room for Wandfall {
         out.send(conn, proto::welcome(0, self.world.seed(), TICK_HZ as u8));
         out.send(conn, self.roster());
         out.send(conn, view::loot(&self.world).encode());
+        out.send(conn, proto::hall(&self.hall.best()));
     }
 
     fn who(&mut self, conn: u32, who: &Who) {
@@ -174,6 +179,12 @@ impl Room for Wandfall {
 
     fn tick(&mut self, out: &mut Outbox) {
         let ev = self.world.step();
+        if self.world.practice.is_none() && self.hall.heed(&self.world, &ev) {
+            let h = proto::hall(&self.hall.best());
+            for &conn in self.you.keys() {
+                out.send(conn, h.clone());
+            }
+        }
         if self.world.roster_dirty {
             self.world.roster_dirty = false;
             let r = self.roster();
@@ -201,6 +212,19 @@ impl Room for Wandfall {
         for (&conn, &id) in &self.you {
             out.send(conn, view::frame(&self.world, id).encode());
         }
+    }
+
+    fn save(&self) -> Option<Vec<u8>> {
+        (!self.hall.rows.is_empty()).then(|| self.hall.save())
+    }
+
+    fn load(&mut self, bytes: &[u8]) -> Result<(), &'static str> {
+        self.hall = Hall::load(bytes).ok_or("not a hall of wizards")?;
+        Ok(())
+    }
+
+    fn schema(&self) -> u16 {
+        1
     }
 
     fn people(&self) -> usize {

@@ -51,6 +51,8 @@ pub struct State {
     last_hit: HashMap<u16, u8>,
     pub joined: bool,
     pub loot: Loot,
+    /// The hall of wizards' best: (name, wins, knockouts).
+    pub hall: Vec<(String, u32, u32)>,
     /// Spells cast and landing, leaps and levels, for their effects:
     /// (when, what).
     pub shows: Vec<(f64, Ev)>,

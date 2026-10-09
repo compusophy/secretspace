@@ -21,6 +21,7 @@ pub mod tag {
     pub const ROSTER: u8 = 3;
     pub const EVENTS: u8 = 4;
     pub const LOOT: u8 = 5;
+    pub const HALL: u8 = 6;
 }
 
 /// At most this many inputs in one message.
@@ -430,6 +431,33 @@ pub fn read_welcome(b: &[u8]) -> Option<(u8, u16, u64, u8)> {
     Some((r.u8()?, r.u16()?, r.u64()?, r.u8()?))
 }
 
+/// The hall of wizards' best: (name, wins, knockouts).
+pub fn hall(rows: &[(String, u32, u32)]) -> Vec<u8> {
+    let mut w = Writer::default();
+    let n = rows.len().min(crate::hall::SHOWN);
+    w.u8(tag::HALL).u8(n as u8);
+    for (name, wins, outs) in &rows[..n] {
+        w.str(name).u32(*wins).u32(*outs);
+    }
+    w.0
+}
+
+pub fn read_hall(b: &[u8]) -> Option<Vec<(String, u32, u32)>> {
+    let mut r = Reader::new(b);
+    if r.u8()? != tag::HALL {
+        return None;
+    }
+    let n = r.u8()? as usize;
+    if n > crate::hall::SHOWN {
+        return None;
+    }
+    let mut v = Vec::with_capacity(n);
+    for _ in 0..n {
+        v.push((r.str()?, r.u32()?, r.u32()?));
+    }
+    Some(v)
+}
+
 /// Everyone's id, whether a bot, and name.
 pub fn roster(list: &[(u16, bool, String)]) -> Vec<u8> {
     let mut w = Writer::default();
@@ -645,8 +673,11 @@ mod tests {
                 let _ = read_events(&b);
                 let _ = read_welcome(&b);
                 let _ = Loot::decode(&b);
+                let _ = read_hall(&b);
             }
         }
+        let rows = vec![("ash".to_string(), 3, 17), ("bo".to_string(), 0, 2)];
+        assert_eq!(read_hall(&hall(&rows)), Some(rows));
     }
 
     #[test]

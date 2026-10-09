@@ -261,7 +261,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                         .filter(|n| !n.1)
                         .map(|n| n.0.clone())
                         .collect();
-                menu::lobby(&mut p.g.hud, ui, &names);
+                menu::lobby(&mut p.g.hud, ui, &names, &p.st.hall);
             }
             if p.book {
                 // The range's tools (ranks, levels, rules) only there.
