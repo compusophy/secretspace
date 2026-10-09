@@ -165,6 +165,16 @@ pub const GLIDE_FALL: f32 = 5.0;
 pub const GLIDE_SPEED: f32 = 14.0;
 /// Seconds the winner is shown before the next lobby.
 pub const OVER_SECS: u32 = 9;
+/// A page's inputs, one a tick: at most this many wait their turn (a
+/// flood is cut short); this many are kept back against the network's
+/// jitter (more, and it catches up); steps are banked a tick at a time
+/// up to this many (a page that stalled catches up at once, one that
+/// floods runs no faster than the clock); and after this many ticks with
+/// none, a stalled page's wizard stands and falls on its own.
+pub const INPUT_QUEUE: usize = 30;
+pub const INPUT_JITTER: usize = 3;
+pub const INPUT_BANK: u32 = TICK_HZ / 3;
+pub const INPUT_IDLE: u32 = TICK_HZ / 3;
 
 // The storm: a circle closing in phases. Each phase: seconds it waits,
 // seconds it shrinks, the radius it shrinks to, damage a second outside.

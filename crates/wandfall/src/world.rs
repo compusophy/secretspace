@@ -65,6 +65,9 @@ pub struct Player {
     pub behind: u32,
     /// Ticks since an input came (a stalled page still falls).
     pub idle: u32,
+    /// Steps it may take now: one more each tick, banked up to
+    /// `INPUT_BANK` (never more steps than ticks, give or take the bank).
+    pub credit: u32,
     pub hurt_at: u32,
     pub mind: Mind,
     /// 1 to MAX_LEVEL, and XP toward the next.
@@ -260,6 +263,7 @@ impl World {
             queue: VecDeque::new(),
             behind: 0,
             idle: 0,
+            credit: 0,
             hurt_at: 0,
             mind: Mind::default(),
             level: 1,
@@ -308,7 +312,6 @@ impl World {
         self.roster_dirty = true;
     }
 
-    /// A page's inputs, to apply one a tick. A flood is cut short.
     /// The spellbook: put a spell `id` knows in one of its slots.
     pub fn equip(&mut self, id: u16, slot: usize, spell: u8) -> bool {
         let lobby = self.phase == Phase::Lobby;
@@ -317,9 +320,10 @@ impl World {
             .is_some_and(|p| loot::equip(p, slot, spell))
     }
 
+    /// A page's inputs, to apply one a tick. A flood is cut short.
     pub fn input(&mut self, id: u16, i: Input) {
         if let Some(p) = self.players.iter_mut().find(|p| p.id == id && !p.bot) {
-            if p.queue.len() < 30 {
+            if p.queue.len() < INPUT_QUEUE {
                 p.queue.push_back(i);
             }
         }
@@ -583,10 +587,10 @@ impl World {
                 p.queue.clear();
                 continue;
             }
-            let mut steps = 1;
-            if p.queue.len() > 3 {
-                steps += p.queue.len() - 3;
-            }
+            // One input a tick, and those held back past the jitter's
+            // allowance caught up on, as far as the bank goes.
+            p.credit = (p.credit + 1).min(INPUT_BANK);
+            let steps = (1 + p.queue.len().saturating_sub(INPUT_JITTER)).min(p.credit as usize);
             for _ in 0..steps {
                 let i = match p.queue.pop_front() {
                     Some(i) => {
@@ -595,7 +599,7 @@ impl World {
                     }
                     None => {
                         p.idle += 1;
-                        if p.idle < TICK_HZ / 3 {
+                        if p.idle < INPUT_IDLE {
                             break;
                         }
                         Input {
@@ -605,6 +609,7 @@ impl World {
                         }
                     }
                 };
+                p.credit -= 1;
                 p.yaw = i.yaw;
                 p.pitch = i.pitch.clamp(-16000, 16000);
                 motion::step(&mut p.body, &i, &self.map);
@@ -629,6 +634,15 @@ impl World {
                         [e[0] + d[0] * 0.5, e[1] + d[1] * 0.5, e[2] + d[2] * 0.5],
                         [d[0] * BOLT_SPEED, d[1] * BOLT_SPEED, d[2] * BOLT_SPEED],
                     ));
+                }
+            }
+            // A page running ahead of the clock: what it sent beyond the
+            // jitter's allowance is dropped (its prediction corrects), its
+            // casts kept for the next.
+            while p.queue.len() > INPUT_JITTER {
+                let cast = p.queue.pop_front().map_or(0, |i| i.cast);
+                if let Some(next) = p.queue.front_mut() {
+                    next.cast |= cast;
                 }
             }
         }
