@@ -382,6 +382,13 @@ Every phase:
 - [ ] Instancing everywhere: one mesh per kind with 2-3 LODs (a simple Rust
       quadric or vertex-clustering simplifier) and per-instance transform,
       tint and material.
+- [ ] Culling statics. Tried (October 2026): statics in chunks of the
+      ground (48 or 80 m) culled against the view's and each cascade's
+      side planes cut triangles only ~20% (1220k to 950k on the range) but
+      split the runs, so draws went from 410 to 900-1260: reverted. The
+      way: GPU-driven, instance data in a storage buffer read through a
+      per-frame list of visible indices (a few KB a frame), so culling
+      adds no draws.
 - [ ] Compute culling: frustum plus Hi-Z occlusion from last frame's depth
       pyramid, writing indirect args. A path without
       `indirect-first-instance`.
