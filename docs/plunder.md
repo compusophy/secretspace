@@ -304,6 +304,12 @@ of combat styles and all varieties to counter all varieties".
       arms at a sprint; sliding, it sits low, a leg out ahead, leaning
       back, dust behind; the view widens. All of it is in the shared step,
       so the page still predicts to the bit (PROTO 6: keys are 16 bits).
+      A jump is a press, never a hold (the owner: "auto bunny hopping if I
+      hold space... you have to time it"); a hop pressed within 0.1 s of
+      landing (or just before) keeps its speed and adds 0.6 m/s, to 12.5,
+      so timed hops outrun a sprint and late ones lose to the ground; and
+      once in the air a second jump turns you the way you steer, for a
+      sixth of your stamina (PROTO 9).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half

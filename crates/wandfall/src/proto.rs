@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 8;
+pub const PROTO: u8 = 9;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -235,11 +235,14 @@ impl Frame {
                     | (b.crouch as u8) << 2
                     | (b.sprint as u8) << 3
                     | (b.slide as u8) << 4
-                    | (b.winded as u8) << 5)
+                    | (b.winded as u8) << 5
+                    | (b.held as u8) << 6
+                    | (b.air_jumped as u8) << 7)
                     .u8(b.coyote.min(15) | b.buffer.min(15) << 4)
                     .u8(b.slide_cd)
                     .u16(b.spent)
                     .u8(b.breath)
+                    .u8(b.landed)
                     .u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
@@ -310,7 +313,7 @@ impl Frame {
             let g = r.u8()?;
             let jump = r.u8()?;
             let slide_cd = r.u8()?;
-            let (spent, breath) = (r.u16()?, r.u8()?);
+            let (spent, breath, landed) = (r.u16()?, r.u8()?, r.u8()?);
             let mut o = Own {
                 body: Body {
                     p,
@@ -321,6 +324,9 @@ impl Frame {
                     sprint: g & 8 != 0,
                     slide: g & 16 != 0,
                     winded: g & 32 != 0,
+                    held: g & 64 != 0,
+                    air_jumped: g & 128 != 0,
+                    landed,
                     slide_cd,
                     spent,
                     breath,
@@ -645,6 +651,9 @@ mod tests {
                     spent: 1234,
                     breath: 9,
                     winded: true,
+                    held: true,
+                    landed: 2,
+                    air_jumped: true,
                 },
                 seq: 65535,
                 hp: 252,

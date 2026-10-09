@@ -83,6 +83,17 @@ pub const JUMP: f32 = 8.0;
 /// jump pressed early waits for the ground.
 pub const COYOTE: u8 = 4;
 pub const JUMP_BUFFER: u8 = 4;
+/// A jump is a press (holding does not hop again). Pressed within this
+/// many ticks of landing (or just before), a hop keeps its speed and adds
+/// a little, up to a most: timed hops carry you faster than a sprint;
+/// late ones, the ground has slowed.
+pub const HOP_WINDOW: u8 = 3;
+pub const HOP_BOOST: f32 = 0.6;
+pub const HOP_MAX: f32 = 12.5;
+/// Once in the air, a second jump (magic): this fast up, the way you
+/// steer; it costs stamina, so not when winded.
+pub const AIR_JUMP: f32 = 7.0;
+pub const AIR_JUMP_STAMINA: u16 = STAMINA / 6;
 /// Crouching: this much of the speed, eyes this high, a body this tall.
 pub const CROUCH_SLOW: f32 = 0.5;
 pub const CROUCH_EYE: f32 = 1.05;

@@ -220,6 +220,10 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
             }
         } else if was.ground && !is.ground && is.v[1] > 1.0 {
             p.sounds.hop();
+        } else if !was.air_jumped && is.air_jumped {
+            // The air jump: a hop, and a puff of magic under the feet.
+            p.sounds.hop();
+            p.st.dust.push((kit::now(), is.p, 0.6));
         }
         p.cool = p.cool.saturating_sub(1);
         if k & keys::FIRE != 0 && p.cool == 0 && !p.pred.body.glide {

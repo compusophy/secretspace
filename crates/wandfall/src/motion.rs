@@ -63,6 +63,11 @@ pub struct Body {
     pub spent: u16,
     pub breath: u8,
     pub winded: bool,
+    /// Jump held last tick (a jump is a press); ticks on the ground since
+    /// it landed; its air jump spent (till it lands).
+    pub held: bool,
+    pub landed: u8,
+    pub air_jumped: bool,
 }
 
 impl Body {
@@ -244,9 +249,12 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
         }
     }
     b.chill = b.chill.saturating_sub(1);
-    // A jump pressed a moment early waits for the ground; one a moment
-    // after running off an edge still goes.
-    b.buffer = if has(keys::JUMP) {
+    // A jump is a press: holding it does not hop again. Pressed a moment
+    // early it waits for the ground; a moment after running off an edge
+    // it still goes.
+    let press = has(keys::JUMP) && !b.held;
+    b.held = has(keys::JUMP);
+    b.buffer = if press {
         JUMP_BUFFER
     } else {
         b.buffer.saturating_sub(1)
@@ -256,12 +264,52 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     } else {
         b.coyote.saturating_sub(1)
     };
+    if b.ground {
+        b.landed = b.landed.saturating_add(1);
+        b.air_jumped = false;
+    }
     if b.buffer > 0 && (b.ground || b.coyote > 0) && b.v[1] <= 0.5 && !b.glide {
-        // Out of a slide, the slide's speed goes with it.
+        // Out of a slide, the slide's speed goes with it. Timed to the
+        // landing, a hop keeps its speed and gains a little.
+        let sp = (b.v[0] * b.v[0] + b.v[2] * b.v[2]).sqrt();
+        if b.landed <= HOP_WINDOW && sp > RUN * 0.8 && sp < HOP_MAX {
+            let k = (sp + HOP_BOOST).min(HOP_MAX) / sp;
+            b.v[0] *= k;
+            b.v[2] *= k;
+        }
         b.v[1] = JUMP;
         b.ground = false;
         b.slide = false;
         b.coyote = 0;
+        b.buffer = 0;
+    } else if press
+        && !b.ground
+        && b.coyote == 0
+        && !b.glide
+        && !b.air_jumped
+        && !b.winded
+        && b.spent + AIR_JUMP_STAMINA <= STAMINA
+    {
+        // The air jump: up again, turned the way you steer.
+        b.air_jumped = true;
+        b.spent += AIR_JUMP_STAMINA;
+        b.breath = 0;
+        b.v[1] = AIR_JUMP;
+        if len > 1e-6 {
+            let sp = (b.v[0] * b.v[0] + b.v[2] * b.v[2]).sqrt().max(RUN * 0.8);
+            let (mut dx, mut dz) = if sp > 1e-4 {
+                (
+                    b.v[0] / sp * 0.35 + wx * 0.65,
+                    b.v[2] / sp * 0.35 + wz * 0.65,
+                )
+            } else {
+                (wx, wz)
+            };
+            let d = (dx * dx + dz * dz).sqrt().max(1e-6);
+            (dx, dz) = (dx / d, dz / d);
+            b.v[0] = dx * sp;
+            b.v[2] = dz * sp;
+        }
         b.buffer = 0;
     }
     let pull = if b.v[1] > 0.0 && has(keys::JUMP) {
@@ -289,6 +337,9 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     if p[1] <= floor || (was && b.v[1] <= 0.0 && p[1] - floor < STEP) {
         p[1] = floor;
         b.v[1] = 0.0;
+        if !was {
+            b.landed = 0;
+        }
         b.ground = true;
         b.glide = false;
     } else {
@@ -389,6 +440,104 @@ mod tests {
             yaw: 0,
             ..Input::default()
         }
+    }
+
+    /// A body on the plaza (flat), and a step under `keys` heading `yaw`.
+    fn plaza(map: &Map) -> Body {
+        let (flat, _) = grounds(map);
+        Body {
+            p: [flat[0], map.height(flat[0], flat[1]), flat[1]],
+            ground: true,
+            ..Body::default()
+        }
+    }
+
+    fn go(b: &mut Body, keys: u16, yaw: u16, map: &Map) {
+        step(
+            b,
+            &Input {
+                seq: 0,
+                yaw,
+                pitch: 0,
+                keys,
+                cast: 0,
+            },
+            map,
+        );
+    }
+
+    #[test]
+    fn holding_jump_hops_once_not_again_and_again() {
+        let map = Map::new(3);
+        let mut b = plaza(&map);
+        let mut hops = 0;
+        for _ in 0..90 {
+            let was = b.ground;
+            go(&mut b, keys::JUMP, 0, &map);
+            hops += (was && !b.ground) as i32;
+        }
+        assert_eq!(hops, 1, "held: one hop");
+        // Pressed again (released between), it hops again.
+        go(&mut b, 0, 0, &map);
+        go(&mut b, keys::JUMP, 0, &map);
+        assert!(b.v[1] > 1.0, "a fresh press hops");
+    }
+
+    #[test]
+    fn hops_timed_to_the_landing_build_speed_and_late_ones_do_not() {
+        let map = Map::new(3);
+        // Back and forth across the plaza would turn it; run east from
+        // its west edge, hopping each time it lands (on time, or late).
+        let hop = |late: u32| {
+            let mut b = plaza(&map);
+            b.p[0] -= 12.0;
+            b.p[1] = map.height(b.p[0], b.p[2]);
+            for _ in 0..30 {
+                go(&mut b, keys::FWD | keys::SPRINT, 0, &map);
+            }
+            let mut wait = 0;
+            for _ in 0..90 {
+                let mut k = keys::FWD;
+                if b.ground {
+                    wait += 1;
+                    if wait > late {
+                        k |= keys::JUMP;
+                        wait = 0;
+                    }
+                }
+                go(&mut b, k, 0, &map);
+            }
+            (b.v[0] * b.v[0] + b.v[2] * b.v[2]).sqrt()
+        };
+        let (timed, late) = (hop(0), hop(8));
+        assert!(timed > SPRINT + 1.0, "timed hops gain: {timed}");
+        assert!(timed <= HOP_MAX + 0.01, "but not past the most: {timed}");
+        assert!(late < SPRINT, "late ones do not: {late}");
+    }
+
+    #[test]
+    fn one_air_jump_turns_you_and_costs_stamina() {
+        let map = Map::new(3);
+        let mut b = plaza(&map);
+        go(&mut b, keys::JUMP, 0, &map);
+        for _ in 0..6 {
+            go(&mut b, 0, 0, &map);
+        }
+        assert!(!b.ground && !b.air_jumped);
+        // Pressed in the air, steering right: up again, turned right.
+        go(&mut b, keys::JUMP | keys::RIGHT, 0, &map);
+        assert!(b.air_jumped && b.v[1] > AIR_JUMP - 1.5, "{b:?}");
+        assert!(b.v[2] > 3.0, "turned the way it steers: {b:?}");
+        assert!(b.spent >= AIR_JUMP_STAMINA);
+        // Only once till it lands.
+        go(&mut b, 0, 0, &map);
+        let up = b.v[1];
+        go(&mut b, keys::JUMP, 0, &map);
+        assert!(b.v[1] < up, "no second air jump");
+        for _ in 0..90 {
+            go(&mut b, 0, 0, &map);
+        }
+        assert!(b.ground && !b.air_jumped, "landed, it has it again");
     }
 
     #[test]
