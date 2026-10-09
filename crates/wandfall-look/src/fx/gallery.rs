@@ -11,9 +11,10 @@ use super::{bolt, falls, on_wizard, shows, Draw};
 use crate::look::Look;
 
 /// The effects there are, by name.
-pub const NAMES: [&str; 20] = [
+pub const NAMES: [&str; 21] = [
     "wand", "fireball", "burst", "lance", "frost", "shatter", "mark", "strike", "blink", "arrive",
     "ward", "break", "mend", "gust", "level", "shield", "chill", "mending", "fall", "sparks",
+    "storm",
 ];
 
 /// Effect `name` at `age` ms (`now` ms, `t` s), cast from `at` (feet)
@@ -112,6 +113,11 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
                     ..Default::default()
                 });
             }
+            None
+        }
+        "storm" => {
+            let c = geo::sub(at, geo::scale(fwd, -20.0));
+            look.storm(d, [c[0], c[2]], 26.0, at, t);
             None
         }
         "fall" => {

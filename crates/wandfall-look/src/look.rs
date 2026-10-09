@@ -180,9 +180,10 @@ impl Look {
         }
     }
 
-    /// The storm's wall: a circle of violet light from the sea to the sky.
-    /// Its edge glows where you see it side on; where it meets the ground
-    /// it burns; nearest you, it crackles (`eye`, `t` seconds).
+    /// The storm's wall: a circle of violet light from the sea to the sky,
+    /// storm cloud flowing up it. Its edge glows where you see it side on;
+    /// where it meets the ground it burns; nearest you, it crackles
+    /// (`eye`, `t` seconds).
     pub fn storm(&self, d: &mut Draw, centre: [f32; 2], r: f32, eye: V3, t: f32) {
         if r <= 0.5 {
             return;
@@ -201,6 +202,21 @@ impl Look {
                 .material(Material::Rim)
                 .pass(Pass::Glow),
         );
+        // Storm cloud flowing up the wall, broad and then fine.
+        for (grow, grain, a) in [(0.9, 0.045, 0.6), (1.4, 0.16, 0.35)] {
+            d.items.push(
+                Item::new(
+                    self.wall,
+                    m4::place(at, -t * 0.02, [r + grow, 75.0, r + grow]),
+                )
+                .tint(rgb(185, 110, 255), a)
+                .glow(0.25)
+                .detail(grain)
+                .rough(0.55)
+                .material(Material::Energy)
+                .pass(Pass::Glow),
+            );
+        }
         let foot = [centre[0], SEA - 0.5, centre[1]];
         d.items.push(
             Item::new(self.wall, m4::place(foot, 0.0, [r + 0.2, 3.0, r + 0.2]))
