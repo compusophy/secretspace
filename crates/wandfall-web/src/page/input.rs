@@ -234,6 +234,7 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
             pitch: trig::pitch(p.aim.1),
             keys: k,
             cast: asked | tapped,
+            view: p.st.view_tick(kit::now()) as u16,
         };
         p.prev = p.pred.body;
         p.pred.push(i, &island.map);

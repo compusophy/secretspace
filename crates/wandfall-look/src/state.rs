@@ -206,6 +206,14 @@ impl State {
     }
 
     /// Everyone as they were a moment ago, smoothly between frames.
+    /// The tick everyone else is drawn at now (a little behind the
+    /// newest frame).
+    pub fn view_tick(&self, now: f64) -> u32 {
+        ((self.server_ms(now) - BEHIND) / MS_A_TICK)
+            .round()
+            .max(0.0) as u32
+    }
+
     pub fn others(&self, now: f64) -> Vec<Seen> {
         let t = (self.server_ms(now) - BEHIND) / MS_A_TICK;
         let Some(last) = self.snaps.back() else {

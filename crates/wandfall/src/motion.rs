@@ -20,6 +20,9 @@ pub struct Input {
     pub keys: u16,
     /// Spells cast this input (a bit a slot).
     pub cast: u8,
+    /// The tick the page drew everyone else at, as it sent this (the low
+    /// 16 bits): where it saw them, for the Lance (motion ignores it).
+    pub view: u16,
 }
 
 pub mod cast {
@@ -625,6 +628,7 @@ mod tests {
                 pitch: 0,
                 keys,
                 cast: 0,
+                view: 0,
             },
             map,
         );
@@ -725,6 +729,7 @@ mod tests {
                         pitch: 0,
                         keys,
                         cast: 0,
+                        view: 0,
                     },
                     &map,
                 );

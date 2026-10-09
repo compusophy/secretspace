@@ -362,6 +362,9 @@ pub const FIREBALL_SPEED: f32 = 48.0;
 pub const FIREBALL_LIFE: u32 = 45;
 pub const FIREBALL_RADIUS: f32 = 3.5;
 pub const LANCE_RANGE: f32 = 80.0;
+/// The Lance strikes others where its caster's page drew them, but never
+/// from further back than this (ticks; a third of a second).
+pub const REWIND: u32 = 10;
 /// Frost: shards in a fan, this far apart (of 65536 a turn), how fast and
 /// how long they fly, and how long and how much they chill.
 pub const FROST_SHARDS: usize = 7;

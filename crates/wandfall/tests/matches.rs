@@ -146,6 +146,7 @@ fn the_page_predicts_its_wizard_exactly() {
                         | keys::SPRINT
                         | keys::CROUCH),
                 cast: 0,
+                view: 0,
             };
             page.push(i, &w.map);
             w.input(me, i);

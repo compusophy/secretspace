@@ -254,6 +254,7 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
         pitch,
         keys,
         cast,
+        view: 0,
     };
     (input, m)
 }

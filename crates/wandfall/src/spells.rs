@@ -51,6 +51,39 @@ pub fn sight(w: &World, by: u16, eye: [f32; 3], d: [f32; 3], range: f32) -> ([f3
     (ahead(eye, d, range * first.0), first.1)
 }
 
+/// As `sight`, but others where they stood at the end of tick `then` (as
+/// a page saw them), if that is still known.
+pub fn sight_then(
+    w: &World,
+    by: u16,
+    (eye, d): ([f32; 3], [f32; 3]),
+    range: f32,
+    then: u32,
+) -> ([f32; 3], u16) {
+    let Some((_, then)) = w.past.iter().find(|p| p.0 == then && then < w.tick) else {
+        return sight(w, by, eye, d, range);
+    };
+    let end = ahead(eye, d, range);
+    let mut first = (w.map.strikes(eye, end).unwrap_or(1.0), 0);
+    let fight = w.phase == Phase::Fight;
+    for &(id, feet, tall) in then {
+        // Still in it, now: a page cannot strike the knocked out.
+        let in_it = w
+            .players
+            .iter()
+            .any(|p| p.id == id && p.alive && p.entrant == fight);
+        if id == by || !in_it {
+            continue;
+        }
+        if let Some(t) = through(eye, end, feet, tall) {
+            if t < first.0 {
+                first = (t, id);
+            }
+        }
+    }
+    (ahead(eye, d, range * first.0), first.1)
+}
+
 /// `k` casts the spell in `slot`, if it is ready.
 pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
     let tick = w.tick;
@@ -86,7 +119,9 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
     match s.spell {
         spell::FIREBALL => w.bolt(bolt(d, FIREBALL_SPEED, FIREBALL_LIFE)),
         spell::LANCE => {
-            let (to, who) = sight(w, by, eye, d, LANCE_RANGE);
+            // Where its caster's page saw them (not too far back).
+            let then = tick.saturating_sub(w.players[k].behind.min(REWIND));
+            let (to, who) = sight_then(w, by, (eye, d), LANCE_RANGE, then);
             ev.push(Event::Beam {
                 by,
                 spell: s.spell,
@@ -492,6 +527,37 @@ mod tests {
         assert!(w.players[0].cds[3] > 0, "and now it cools down");
         cast(&mut w, 0, 3, &mut ev);
         assert_eq!(w.players[0].body.p, after, "not twice");
+    }
+
+    #[test]
+    fn the_lance_strikes_where_your_page_saw_them() {
+        let (mut w, _, b) = duel(30.0);
+        give(&mut w, 0, 0, spell::LANCE);
+        w.step();
+        w.step();
+        let seen = w.tick;
+        // Then they step out of the line.
+        let k = w.players.iter().position(|p| p.id == b).unwrap();
+        w.players[k].body.p[2] += 3.0;
+        w.step();
+        let hp = w.players[k].hp;
+        let mut ev = Vec::new();
+        cast(&mut w, 0, 0, &mut ev);
+        assert_eq!(w.players[k].hp, hp, "missed, where they are now");
+        // As the caster's page saw them a tick ago: struck.
+        w.players[0].cds[0] = 0;
+        w.players[0].behind = w.tick - seen;
+        cast(&mut w, 0, 0, &mut ev);
+        assert!(w.players[k].hp < hp, "struck where it saw them");
+        // A page cannot ask for further back than REWIND.
+        let hp = w.players[k].hp;
+        for _ in 0..REWIND + 2 {
+            w.step();
+        }
+        w.players[0].cds[0] = 0;
+        w.players[0].behind = w.tick - seen;
+        cast(&mut w, 0, 0, &mut ev);
+        assert_eq!(w.players[k].hp, hp, "too far back: as now");
     }
 
     #[test]

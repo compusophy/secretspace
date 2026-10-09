@@ -60,6 +60,9 @@ pub struct Player {
     /// The last input applied (its seq is what the page is told).
     pub last: Input,
     pub queue: VecDeque<Input>,
+    /// How many ticks behind its page drew everyone else when it last
+    /// cast (0: as they are now).
+    pub behind: u32,
     /// Ticks since an input came (a stalled page still falls).
     pub idle: u32,
     pub hurt_at: u32,
@@ -145,6 +148,9 @@ pub enum Event {
     },
 }
 
+/// Where a wizard stood at the end of a tick: who, its feet, how tall.
+pub type Stood = (u16, [f32; 3], f32);
+
 pub struct World {
     pub tick: u32,
     pub map: Map,
@@ -158,6 +164,9 @@ pub struct World {
     pub bolts: Vec<Bolt>,
     pub scrolls: Vec<Scroll>,
     pub zones: Vec<Zone>,
+    /// Where everyone stood at the end of each of the last few ticks:
+    /// (tick, [(who, feet, how tall)]), for what a page saw (`REWIND`).
+    pub(crate) past: VecDeque<(u32, Vec<Stood>)>,
     pub winner: u16,
     pub matches: u32,
     /// The hour of the island's day (`HOURS`): its look, nothing else.
@@ -186,6 +195,7 @@ impl World {
             bolts: Vec::new(),
             scrolls: Vec::new(),
             zones: Vec::new(),
+            past: VecDeque::new(),
             winner: 0,
             matches: 0,
             hour: (seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 56) as u8 % HOURS,
@@ -245,6 +255,7 @@ impl World {
             cool: 0,
             last: Input::default(),
             queue: VecDeque::new(),
+            behind: 0,
             idle: 0,
             hurt_at: 0,
             mind: Mind::default(),
@@ -520,6 +531,17 @@ impl World {
         spells::tick(self, &mut ev);
         loot::touch(self, &mut ev);
         self.weather(&mut ev);
+        // Where everyone stands now, for the pages that will see it.
+        let now: Vec<_> = self
+            .players
+            .iter()
+            .filter(|p| p.alive)
+            .map(|p| (p.id, p.body.p, p.body.tall()))
+            .collect();
+        self.past.push_back((self.tick, now));
+        while self.past.len() > REWIND as usize + 2 {
+            self.past.pop_front();
+        }
         ev
     }
 
@@ -543,6 +565,7 @@ impl World {
     fn move_all(&mut self) -> Vec<(usize, usize)> {
         let mut shots = Vec::new();
         let mut casts = Vec::new();
+        let tick = self.tick;
         for (k, p) in self.players.iter_mut().enumerate() {
             p.cool = p.cool.saturating_sub(1);
             if !p.alive {
@@ -575,6 +598,11 @@ impl World {
                 p.pitch = i.pitch.clamp(-16000, 16000);
                 motion::step(&mut p.body, &i, &self.map);
                 p.last = i;
+                if i.cast != 0 {
+                    // What its page saw as it cast (a bot sees now).
+                    let back = (tick as u16).wrapping_sub(i.view) as u32;
+                    p.behind = if p.bot { 0 } else { back.min(REWIND) };
+                }
                 for (slot, bit) in cast::SLOT.iter().enumerate() {
                     if i.cast & bit != 0 && !casts.contains(&(k, slot)) {
                         casts.push((k, slot));

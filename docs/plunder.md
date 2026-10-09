@@ -389,3 +389,9 @@ of combat styles and all varieties to counter all varieties".
 - A queue screen; matches start at N people or after a wait; duos.
 - A season of names.
 - Netcode at scale (`docs/engine.md` §9): 40-60 people, lag-compensated hits.
+  - [x] The Lance, lag-compensated (PROTO 15): each input says the tick
+        its page drew everyone else at; the world keeps where everyone
+        stood the last few ticks, and a Lance strikes them where its
+        caster's page saw them, never more than `REWIND` (a third of a
+        second) back, and never someone already out. Bolts fly in the
+        world's own time (you lead them, as anyone would a thrown thing).

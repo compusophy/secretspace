@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 14;
+pub const PROTO: u8 = 15;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -52,7 +52,12 @@ impl Up {
             Up::Inputs(v) => {
                 w.u8(tag::INPUT).u8(v.len().min(MAX_INPUTS) as u8);
                 for i in v.iter().take(MAX_INPUTS) {
-                    w.u16(i.seq).u16(i.yaw).i16(i.pitch).u16(i.keys).u8(i.cast);
+                    w.u16(i.seq)
+                        .u16(i.yaw)
+                        .i16(i.pitch)
+                        .u16(i.keys)
+                        .u8(i.cast)
+                        .u16(i.view);
                 }
             }
         }
@@ -80,6 +85,7 @@ impl Up {
                         pitch: r.i16()?,
                         keys: r.u16()?,
                         cast: r.u8()?,
+                        view: r.u16()?,
                     });
                 }
                 Some(Up::Inputs(v))
@@ -719,6 +725,7 @@ mod tests {
             pitch: -3,
             keys: 33,
             cast: 17,
+            view: 40_000,
         }]);
         assert_eq!(Up::decode(&up.encode()), Some(up));
         let ev = vec![
