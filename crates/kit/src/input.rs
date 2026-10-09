@@ -213,24 +213,38 @@ pub fn lock(el: &web_sys::Element) {
     el.request_pointer_lock();
 }
 
-/// Take everything for playing (it must come from a press): the whole
-/// screen, the keyboard where the browser allows it (Chrome and Edge, full
-/// screen: then even Ctrl+W comes to the game, and Esc must be held to
-/// leave), and the mouse.
-pub fn play(el: &web_sys::Element) {
-    let doc = crate::document();
-    if !full() {
-        if let Some(root) = doc.document_element() {
-            let _ = root.request_fullscreen();
+/// Take what playing needs (it must come from a press): the mouse, and
+/// with `whole`, the whole screen and the keyboard where the browser
+/// allows it (Chrome and Edge, full screen: then even Ctrl+W and Esc come
+/// to the game, so Esc can open its menu; a held Esc still leaves). A game
+/// gives them back with `release`.
+pub fn play(el: &web_sys::Element, whole: bool) {
+    if whole {
+        if !full() {
+            if let Some(root) = crate::shell::outer_document().document_element() {
+                let _ = root.request_fullscreen();
+            }
         }
+        hold_keys();
     }
-    hold_keys();
     lock(el);
 }
 
-/// Whether the page has the whole screen.
+/// Give everything back: the mouse, the keyboard and the whole screen.
+pub fn release() {
+    unlock();
+    let_keys_go();
+    if full() {
+        crate::shell::outer_document().exit_fullscreen();
+    }
+}
+
+/// Whether the page has the whole screen (in the front page's frame: the
+/// front page has it).
 pub fn full() -> bool {
-    crate::document().fullscreen_element().is_some()
+    crate::shell::outer_document()
+        .fullscreen_element()
+        .is_some()
 }
 
 /// Whether every key comes to the page (the keyboard held, full screen):
@@ -239,9 +253,10 @@ pub fn keys_held() -> bool {
     HELD.with(Cell::get) && full()
 }
 
-/// Ask for the keyboard (`navigator.keyboard.lock()`, where there is one).
-fn hold_keys() {
-    let nav: JsValue = crate::window().navigator().into();
+/// Ask for the keyboard (`navigator.keyboard.lock()`, where there is one;
+/// only the outer page may hold it).
+pub(crate) fn hold_keys() {
+    let nav: JsValue = crate::shell::outer().navigator().into();
     let Ok(kb) = js_sys::Reflect::get(&nav, &"keyboard".into()) else {
         return;
     };
@@ -260,6 +275,20 @@ fn hold_keys() {
         let _ = promise.then2(&ok, &no);
         ok.forget();
         no.forget();
+    }
+}
+
+/// Let the keyboard go (`navigator.keyboard.unlock()`, where there is one).
+fn let_keys_go() {
+    HELD.with(|h| h.set(false));
+    let nav: JsValue = crate::shell::outer().navigator().into();
+    let Ok(kb) = js_sys::Reflect::get(&nav, &"keyboard".into()) else {
+        return;
+    };
+    if let Ok(f) = js_sys::Reflect::get(&kb, &"unlock".into()) {
+        if let Some(f) = f.dyn_ref::<js_sys::Function>() {
+            let _ = f.call0(&kb);
+        }
     }
 }
 

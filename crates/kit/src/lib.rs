@@ -4,15 +4,20 @@
 //! `Link` to its room (or a plain `Socket`), the `Session` that says who
 //! this is, one `Pointer` at a time (or every hand at once, `input`), the
 //! page's `version`, an invisible `TextField` (so a phone still offers its
-//! keyboard), storage, `audio`, and a frame loop. Rust only: the page's
-//! one line of script just starts the wasm.
+//! keyboard), storage, `audio`, a frame loop, `report`s to the server
+//! (feedback, crashes), the menu every game shares (`meta`), and the
+//! `shell` the front page opens games in. Rust only: the page's one line
+//! of script just starts the wasm.
 
 pub mod audio;
 pub mod gl;
 pub mod input;
 pub mod link;
+pub mod meta;
 pub mod pointer;
+pub mod report;
 pub mod session;
+pub mod shell;
 pub mod version;
 
 pub use link::{Link, Net};
@@ -317,6 +322,11 @@ impl Socket {
         if self.up() {
             let _ = self.ws.send_with_u8_array(bytes);
         }
+    }
+
+    /// Hang up (its `on_close` still comes).
+    pub fn close(&self) {
+        let _ = self.ws.close();
     }
 }
 

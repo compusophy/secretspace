@@ -23,8 +23,11 @@ const LIT: Rgba = Rgba(70, 64, 40, 240);
 pub enum Act {
     Online,
     Practice,
-    Resume,
+    /// Leave the match (or the range) for the title.
     Leave,
+    /// The settings panel, over the shared menu, and back from it.
+    Settings,
+    CloseSettings,
     Book,
     CloseBook,
     Slot(usize),
@@ -171,7 +174,7 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
 }
 
 /// The keys, in lines no wider than `width`, each holding whole ones.
-fn keys_help(width: i32, ui: i32) -> Vec<String> {
+pub fn keys_help(width: i32, ui: i32) -> Vec<String> {
     const KEYS: [&str; 11] = [
         "WASD move",
         "shift sprint",
@@ -183,7 +186,7 @@ fn keys_help(width: i32, ui: i32) -> Vec<String> {
         "Q E R F spells",
         "B spellbook",
         "M sound",
-        "Esc pause",
+        "Esc menu",
     ];
     let mut lines: Vec<String> = Vec::new();
     for k in KEYS {
@@ -198,105 +201,37 @@ fn keys_help(width: i32, ui: i32) -> Vec<String> {
     lines
 }
 
-/// The pause menu.
-pub fn pause(
-    c: &mut Canvas,
-    spots: &mut Spots,
-    ui: i32,
-    (practice, touch): (bool, bool),
-    set: &Settings,
-) {
+/// The settings, over the shared menu (its "settings"): how fast the view
+/// turns, how loud, the picture; and back to the menu.
+pub fn settings_panel(c: &mut Canvas, spots: &mut Spots, ui: i32, set: &Settings) {
     let (w, h) = (c.w, c.h);
-    let bw = (200 * ui).min(w - 24 * ui) as f32;
-    let n = if practice { 4.0 } else { 2.0 };
-    // Buttons as big as fit: a short window gets smaller ones, and keeps
-    // its settings.
     let u = ui as f32;
-    let room = (h - 8 * ui) as f32 - (68.0 + SETTINGS) * u;
-    let bh = (room / n - 8.0 * u).clamp(16.0 * u, 28.0 * u);
-    // The keys, inside the panel (a touch screen has its buttons), a
-    // line holding as many whole ones as fit.
-    let mut help = if touch {
-        Vec::new()
-    } else {
-        keys_help(bw as i32, ui)
-    };
-    let tall = |lines: usize| {
-        44.0 * ui as f32
-            + n * (bh + 8.0 * ui as f32)
-            + 24.0 * ui as f32
-            + SETTINGS * ui as f32
-            + lines as f32 * 10.0 * ui as f32
-    };
-    // A short window keeps the buttons and lets the keys go.
-    if tall(help.len()) > (h - 8 * ui) as f32 {
-        help.clear();
-    }
-    let tall = tall(help.len());
+    let bw = (220 * ui).min(w - 32 * ui) as f32;
+    let tall = (12.0 + 26.0 + SETTINGS + 10.0 + 22.0 + 12.0) * u;
     let panel = Rect::new(
-        (w as f32 - bw) / 2.0 - 12.0 * ui as f32,
-        ((h as f32 - tall) / 2.0).max(4.0 * ui as f32),
-        bw + 24.0 * ui as f32,
+        (w as f32 - bw) / 2.0 - 14.0 * u,
+        ((h as f32 - tall) / 2.0).max(6.0 * u),
+        bw + 28.0 * u,
         tall,
     );
-    c.round_rect(panel, 6.0 * ui as f32, PANEL);
+    c.fill_rect(0, 0, w, h, Rgba(4, 6, 14, 150));
+    c.round_rect(panel, 7.0 * u, PANEL);
+    spots.0.push((panel, Act::Stay));
     let x = (w as f32 - bw) / 2.0;
-    let mut y = panel.y + 10.0 * ui as f32;
-    let title = if practice {
-        "practice range"
-    } else {
-        "wandfall"
-    };
-    c.text_centred(w / 2, y as i32, title, 2 * ui, GOLD);
-    y += 24.0 * ui as f32;
-    let resume = if touch { "back to it" } else { "click to play" };
-    button(
-        c,
-        spots,
-        Rect::new(x, y, bw, bh),
-        resume,
-        true,
-        Act::Resume,
-        ui,
-    );
-    y += bh + 8.0 * ui as f32;
-    if practice {
-        button(
-            c,
-            spots,
-            Rect::new(x, y, bw, bh),
-            "spellbook (B)",
-            false,
-            Act::Book,
-            ui,
-        );
-        y += bh + 8.0 * ui as f32;
-        button(
-            c,
-            spots,
-            Rect::new(x, y, bw, bh),
-            "lessons",
-            false,
-            Act::Lessons,
-            ui,
-        );
-        y += bh + 8.0 * ui as f32;
-    }
-    button(
-        c,
-        spots,
-        Rect::new(x, y, bw, bh),
-        "leave to the title",
-        false,
-        Act::Leave,
-        ui,
-    );
-    y += bh + 10.0 * ui as f32;
+    let mut y = panel.y + 12.0 * u;
+    c.text_centred(w / 2, y as i32, "settings", 2 * ui, GOLD);
+    y += 26.0 * u;
     settings(c, spots, (x, y, bw), ui, set);
-    y += SETTINGS * ui as f32;
-    for (n, line) in help.iter().enumerate() {
-        c.text_centred(w / 2, y as i32 + n as i32 * 10 * ui, line, ui, DIM);
-    }
+    y += (SETTINGS + 10.0) * u;
+    button(
+        c,
+        spots,
+        Rect::new(x, y, bw, 22.0 * u),
+        "back",
+        false,
+        Act::CloseSettings,
+        ui,
+    );
 }
 
 /// How tall the settings are (in ui units).

@@ -3,7 +3,9 @@
 //! the link to its room) and the game. The link says Hello first, so the
 //! server knows this soul and the name it goes by; when the server holds
 //! still (a deploy) the last picture stays, dimmed, and the snake carries
-//! on where it was once the link is back.
+//! on where it was once the link is back. Esc (or, between lives on a
+//! phone, the menu button) opens the menu every game shares
+//! (`kit::meta`): feedback, and the only way out of the game.
 
 mod menu;
 mod render;
@@ -61,6 +63,8 @@ struct Page {
     beat_at: f64,
     menu: bool,
     spots: menu::Spots,
+    /// The menu every game shares.
+    meta: kit::meta::Meta,
 }
 
 thread_local! {
@@ -202,7 +206,12 @@ fn tick(p: &mut Page, now: f64) {
     if menu && p.st.death.is_some() && p.version.newer() {
         kit::version::reload();
     }
-    if menu {
+    if p.meta.is_open() {
+        // The shared menu over everything: the name waits.
+        p.field.place(None);
+        p.field.blur();
+        p.screen.cursor("default");
+    } else if menu {
         let name = p.field.value();
         let look = menu::Look {
             u: p.screen.ui(),
@@ -220,7 +229,7 @@ fn tick(p: &mut Page, now: f64) {
         }
         let over = p
             .pointer
-            .is_some_and(|(x, y)| p.spots.play.contains(x, y) || p.spots.back.contains(x, y));
+            .is_some_and(|(x, y)| p.spots.play.contains(x, y) || p.spots.menu.contains(x, y));
         p.screen.cursor(if over { "pointer" } else { "default" });
     } else if p.menu {
         p.field.place(None);
@@ -228,6 +237,24 @@ fn tick(p: &mut Page, now: f64) {
         p.screen.cursor("crosshair");
     }
     p.menu = menu;
+    if p.meta.is_open() {
+        p.meta.context = format!(
+            "game: wyrm\nplaying: {}\nconnected: {}\nbest: {}\n",
+            p.st.playing(),
+            p.st.connected,
+            p.st.best
+        );
+        let s = p.screen.scale;
+        let u = p.screen.ui();
+        p.meta.draw(&mut p.screen.px, u, &[], &[], now, |r| {
+            (
+                r.x as f64 * s,
+                r.y as f64 * s,
+                r.w as f64 * s,
+                r.h as f64 * s,
+            )
+        });
+    }
     p.screen.present();
 
     if p.st.playing() {
@@ -255,11 +282,20 @@ fn aim(p: &mut Page, x: f32, y: f32) {
 fn down(p: &mut Page, e: &PointerEvent) {
     let (x, y) = p.screen.to_px(e.client_x() as f64, e.client_y() as f64);
     p.pointer = Some((x, y));
+    if p.meta.is_open() {
+        match p.meta.click(x, y, kit::now()) {
+            Some(Some(kit::meta::Pick::Exit)) => kit::shell::exit(),
+            Some(_) => {}
+            // Off the menu: back to the game.
+            None => p.meta.hide(),
+        }
+        return;
+    }
     if p.menu {
         if p.spots.play.contains(x, y) {
             play(p);
-        } else if p.spots.back.contains(x, y) {
-            kit::go("/");
+        } else if p.spots.menu.contains(x, y) {
+            p.meta.show();
         } else if !p.spots.name.contains(x, y) {
             p.field.blur();
         }
@@ -315,8 +351,10 @@ pub fn start() -> Result<(), JsValue> {
             beat_at: 0.0,
             menu: false,
             spots: menu::Spots::default(),
+            meta: kit::meta::Meta::new("wyrm"),
         })
     });
+    kit::report::on_panic();
     kit::frames(|now| {
         with(|p| tick(p, now));
     });
@@ -337,7 +375,8 @@ pub fn start() -> Result<(), JsValue> {
             with(|p| {
                 let (x, y) = p.screen.to_px(e.client_x() as f64, e.client_y() as f64);
                 p.pointer = Some((x, y));
-                if !p.menu && p.boost_finger != Some(e.pointer_id()) {
+                // Under the menu the snake keeps its heading.
+                if !p.menu && !p.meta.is_open() && p.boost_finger != Some(e.pointer_id()) {
                     aim(p, x, y);
                 }
             });
@@ -367,6 +406,18 @@ pub fn start() -> Result<(), JsValue> {
     kit::on(&kit::window(), "keydown", |e| {
         if let Ok(e) = e.dyn_into::<KeyboardEvent>() {
             with(|p| {
+                // Esc: the shared menu (open it, step back, close it).
+                if e.key() == "Escape" {
+                    e.prevent_default();
+                    p.meta.escape();
+                    return;
+                }
+                if p.meta.is_open() {
+                    if e.key() == "Enter" {
+                        p.meta.enter(kit::now());
+                    }
+                    return;
+                }
                 if p.menu {
                     if e.key() == "Enter" {
                         play(p);

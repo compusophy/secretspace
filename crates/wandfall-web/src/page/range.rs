@@ -7,7 +7,7 @@ use wandfall::proto::{Up, PROTO};
 use wandfall::room::Wandfall;
 
 use super::{
-    grab, leave, online, query, query_value, repaint, send, Mode, Page, ME, PRACTICE_SEED,
+    grab, leave, online, query, query_value, repaint, resume, send, Mode, Page, ME, PRACTICE_SEED,
 };
 use crate::menu::Act;
 
@@ -98,15 +98,14 @@ pub(super) fn act(p: &mut Page, a: Act) {
                 repaint(p, q);
             }
         }
-        Act::Resume => {
-            p.paused = false;
-            if !p.touch {
-                grab(p);
-            }
+        Act::Settings => {
+            kit::input::unlock();
+            p.meta.game_panel();
         }
+        Act::CloseSettings => p.meta.back(),
         Act::Book => {
             p.book = true;
-            p.paused = false;
+            p.meta.hide();
             kit::input::unlock();
         }
         Act::CloseBook => {
@@ -118,10 +117,7 @@ pub(super) fn act(p: &mut Page, a: Act) {
         Act::Slot(k) => p.book_slot = k,
         Act::Lessons => {
             p.lessons.again();
-            p.paused = false;
-            if !p.touch {
-                grab(p);
-            }
+            resume(p);
         }
         Act::Stay => {}
         // Online or on the range, the room puts a spell you know in.

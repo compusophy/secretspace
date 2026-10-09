@@ -105,7 +105,9 @@ struct Page {
     was_locked: bool,
     skip: u8,
     book_slot: usize,
-    paused: bool,
+    /// The menu every game shares (Esc): back to the game, this game's
+    /// own entries (`items`), feedback, leaving.
+    meta: kit::meta::Meta,
     session: kit::Session,
     version: kit::Version,
     last: f64,
@@ -217,7 +219,7 @@ fn fresh(p: &mut Page) {
     p.st.seed = seed;
     p.alive = false;
     p.book = false;
-    p.paused = false;
+    p.meta.hide();
     p.inbox.clear();
     p.pred.reset(Body::default());
 }
@@ -243,28 +245,101 @@ fn online(p: &mut Page) {
 
 /// Take the screen, keys and mouse to play (`?windowed`: the mouse only).
 fn grab(p: &Page) {
-    if query("windowed") {
-        kit::input::lock(p.g.canvas());
-    } else {
-        kit::input::play(p.g.canvas());
+    kit::input::play(p.g.canvas(), !query("windowed"));
+}
+
+/// Whether a menu is up (the title, the spellbook, the shared menu, or
+/// the mouse let go).
+fn in_menu(p: &Page) -> bool {
+    matches!(p.mode, Mode::Title)
+        || p.book
+        || p.meta.is_open()
+        || (!p.touch && !kit::input::locked())
+}
+
+/// This game's own entries in the shared menu, as it stands.
+fn items(p: &Page) -> Vec<(&'static str, Act)> {
+    match p.mode {
+        Mode::Title => vec![("settings", Act::Settings)],
+        Mode::Practice(_) => vec![
+            ("spellbook (B)", Act::Book),
+            ("lessons", Act::Lessons),
+            ("settings", Act::Settings),
+            ("leave the range", Act::Leave),
+        ],
+        Mode::Online(_) => vec![("settings", Act::Settings), ("leave the match", Act::Leave)],
     }
 }
 
-/// Whether a menu is up (the title, the spellbook, or paused).
-fn in_menu(p: &Page) -> bool {
-    matches!(p.mode, Mode::Title) || p.book || p.paused || (!p.touch && !kit::input::locked())
+/// The shared menu up (the mouse let go), knowing what a report should.
+fn open_menu(p: &mut Page) {
+    kit::input::unlock();
+    p.meta.context = context(p);
+    p.meta.show();
+}
+
+/// Back to the game from a menu: the mouse taken again (not on the title,
+/// not on a phone).
+fn resume(p: &mut Page) {
+    p.meta.hide();
+    if !p.touch && !matches!(p.mode, Mode::Title) {
+        grab(p);
+    }
+}
+
+/// What the shared menu's pick does.
+fn picked(p: &mut Page, pick: kit::meta::Pick) {
+    match pick {
+        kit::meta::Pick::Resume => resume(p),
+        kit::meta::Pick::Game(i) => {
+            if let Some(&(_, a)) = items(p).get(i) {
+                act(p, a);
+            }
+        }
+        kit::meta::Pick::Exit => {
+            if let Mode::Online(link) = &p.mode {
+                link.close();
+            }
+            kit::shell::exit();
+        }
+    }
+}
+
+/// What a report says of the game: where you are and how it draws.
+fn context(p: &Page) -> String {
+    let mode = match p.mode {
+        Mode::Title => "title",
+        Mode::Online(_) => "online",
+        Mode::Practice(_) => "range",
+    };
+    let f = p.st.frame.as_ref();
+    format!(
+        "game: wandfall\nmode: {mode}\nphase: {}\nalive: {}\nplayers: {}\nfps: {:.0}\nquality: {:?}\npicture: {}\nadapter: {}\nsoftware: {}\n",
+        f.map_or(-1, |f| f.phase as i32),
+        p.alive,
+        f.map_or(0, |f| f.players.len()),
+        p.fps,
+        p.r.quality(),
+        p.set.picture,
+        p.g.caps.adapter,
+        p.g.caps.software,
+    )
 }
 
 #[wasm_bindgen(start)]
 pub fn start() {
     wasm_bindgen_futures::spawn_local(async {
+        kit::report::on_panic();
+        // Who cannot play, and why, is worth knowing too.
         if !gpu::offered() {
+            kit::report::send("no webgpu", "game: wandfall\n", "");
             say("Wandfall is drawn with WebGPU, which this browser does not offer yet. It runs in Chrome or Edge (desktop and Android), and Safari 26.");
             return;
         }
         let g = match gpu::Gpu::new("screen", MIN_SHORT, MAX_DPR).await {
             Ok(g) => g,
             Err(e) => {
+                kit::report::send("no webgpu", "game: wandfall\n", &e.to_string());
                 say(&format!("Wandfall could not start WebGPU here ({e}). Try Chrome or Edge with hardware acceleration on."));
                 return;
             }
@@ -305,7 +380,7 @@ pub fn start() {
                 was_locked: false,
                 skip: 0,
                 book_slot: 0,
-                paused: false,
+                meta: kit::meta::Meta::new("wandfall"),
                 session,
                 version: kit::Version::watch(VERSION_EVERY),
                 last: kit::now(),

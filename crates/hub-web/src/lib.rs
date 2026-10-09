@@ -2,7 +2,9 @@
 //! are in it right now, and along the bottom how many are online anywhere
 //! and how many visits there have ever been. The numbers come live from
 //! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`),
-//! and Wandfall's its match while one is on (`wand`).
+//! and Wandfall's its match while one is on (`wand`). A card opens its
+//! game over the page, full screen at once (`kit::shell`); the page rests
+//! till the game is left.
 //! Every pixel is drawn here, in Rust.
 
 mod luci;
@@ -192,6 +194,19 @@ fn watch_wyrm(h: &mut Hub) {
             with(|h| h.watch.closed(kit::now()));
         },
     );
+}
+
+/// A game is open over the page: let its connections go (the player is
+/// counted in the game; the cards are not watched unseen). They come back
+/// once it is left.
+fn rest(h: &mut Hub) {
+    if let Some(s) = h.socket.take() {
+        s.close();
+    }
+    if let Some(s) = h.watch.socket.take() {
+        s.close();
+    }
+    h.wand.rest();
 }
 
 fn draw(h: &mut Hub, now: f64) {
@@ -435,8 +450,13 @@ pub fn start() -> Result<(), JsValue> {
             }
         });
     }
+    kit::report::on_panic();
+    kit::shell::listen();
     kit::frames(|now| {
-        with(|h| draw(h, now));
+        // A game is open over the page: nothing here to see.
+        if !kit::shell::playing() {
+            with(|h| draw(h, now));
+        }
     });
     kit::on(&kit::window(), "resize", |_| {
         with(|h| h.screen.fit());
@@ -493,7 +513,8 @@ pub fn start() -> Result<(), JsValue> {
             })
             .flatten();
             if let Some(path) = to {
-                kit::go(path);
+                kit::shell::open(path);
+                with(rest);
             }
         }
     });

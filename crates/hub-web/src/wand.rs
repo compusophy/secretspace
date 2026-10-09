@@ -119,6 +119,13 @@ impl WandWatch {
         });
     }
 
+    /// Stop watching (a game is open over the page); `poll` opens again.
+    pub fn rest(&mut self) {
+        if let Some(link) = self.link.take() {
+            link.close();
+        }
+    }
+
     fn poll(&mut self, now: f64) {
         let link = self
             .link

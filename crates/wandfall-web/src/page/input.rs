@@ -12,6 +12,17 @@ pub(super) fn hands(p: &mut Page) {
     if locked && !p.was_locked {
         p.skip = 2;
     }
+    // The mouse let go while playing (the browser's own Esc, a switch
+    // away): the menu, as if Esc had come to the page.
+    if p.was_locked
+        && !locked
+        && !p.touch
+        && !p.book
+        && !p.meta.is_open()
+        && !matches!(p.mode, Mode::Title)
+    {
+        open_menu(p);
+    }
     p.was_locked = locked;
     for h in p.hands.drain() {
         // A browser lets sound play once a person acts.
@@ -50,9 +61,7 @@ pub(super) fn hands(p: &mut Page) {
                 ..
             } if p.touch && in_menu(p) => {
                 let (lx, ly) = p.g.to_px(x, y);
-                if let Some(a) = p.spots.hit(lx, ly) {
-                    act(p, a);
-                }
+                tap(p, lx, ly);
             }
             // Out, a tap watches the next one still in it.
             Hand::Finger {
@@ -85,19 +94,7 @@ pub(super) fn hands(p: &mut Page) {
             } => {
                 if down && !locked && !p.touch {
                     let (lx, ly) = p.g.to_px(x, y);
-                    match p.spots.hit(lx, ly) {
-                        Some(a) => act(p, a),
-                        // Off the buttons, in a game: play (closing the
-                        // book if it is open).
-                        None if !matches!(p.mode, Mode::Title) => {
-                            if p.book {
-                                act(p, Act::CloseBook);
-                            } else {
-                                grab(p);
-                            }
-                        }
-                        None => {}
-                    }
+                    tap(p, lx, ly);
                 } else {
                     p.firing = down && locked;
                 }
@@ -112,18 +109,36 @@ pub(super) fn hands(p: &mut Page) {
         p.aiming = false;
     }
     if std::mem::take(&mut p.pad.menu) {
-        p.paused = !p.paused;
+        if p.meta.is_open() {
+            p.meta.hide();
+        } else {
+            open_menu(p);
+        }
     }
     for code in p.hands.pressed() {
         p.sounds.audio.wake();
-        // Esc pauses (with the keyboard held it comes to the page instead
-        // of letting the mouse go; held, it leaves full screen).
+        // Esc: the shared menu (with the keyboard held, full screen, it
+        // comes to the page; a held Esc still leaves full screen).
         if code == "Escape" {
             if p.book {
                 act(p, Act::CloseBook);
-            } else if locked {
-                kit::input::unlock();
+            } else if p.meta.is_open() {
+                if p.meta.escape() == Some(kit::meta::Pick::Resume) {
+                    resume(p);
+                }
+            } else {
+                open_menu(p);
             }
+            continue;
+        }
+        // Writing to us: the keys are the field's (Enter sends).
+        if p.meta.typing() {
+            if code == "Enter" {
+                p.meta.enter(kit::now());
+            }
+            continue;
+        }
+        if p.meta.is_open() {
             continue;
         }
         if code == "Enter" && matches!(p.mode, Mode::Practice(_)) {
@@ -171,8 +186,9 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
         p.acc = 0.0;
         return;
     }
-    // With the book open you still move (the mouse is the book's).
-    let busy = p.paused;
+    // With the book open you still move (the mouse is the book's); with
+    // the shared menu up you stand.
+    let busy = p.meta.is_open();
     let held = |k: &str| p.hands.held(k) && !busy;
     let mut k = 0;
     if held("KeyW") || held("ArrowUp") {
@@ -315,4 +331,25 @@ fn on_lesson(p: &Page, x: f64, y: f64) -> bool {
     let (lx, ly) = p.g.to_px(x, y);
     p.lesson_panel
         .is_some_and(|r| lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h)
+}
+
+/// A press on the menus at (x, y) on the layer: the shared menu first,
+/// then the page's own buttons; off them all, in a game, back to it.
+fn tap(p: &mut Page, x: f32, y: f32) {
+    if p.meta.is_open() && !p.meta.in_game_panel() {
+        match p.meta.click(x, y, kit::now()) {
+            Some(Some(pick)) => picked(p, pick),
+            Some(None) => {}
+            None => resume(p),
+        }
+        return;
+    }
+    match p.spots.hit(x, y) {
+        Some(a) => act(p, a),
+        // Off the settings: the menu again.
+        None if p.meta.in_game_panel() => p.meta.back(),
+        None if p.book => act(p, Act::CloseBook),
+        None if !p.touch && !matches!(p.mode, Mode::Title) => grab(p),
+        None => {}
+    }
 }

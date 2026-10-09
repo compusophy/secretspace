@@ -10,7 +10,8 @@ use crate::state::State;
 pub struct Spots {
     pub name: Rect,
     pub play: Rect,
-    pub back: Rect,
+    /// On a phone (no Esc), the button that opens the shared menu.
+    pub menu: Rect,
 }
 
 pub struct Look<'a> {
@@ -31,26 +32,35 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
     let narrow = w / uf < 420.0;
     let t = (now / 1000.0) as f32;
 
-    // Back to every game.
-    let back = Rect::new(
-        8.0 * uf,
-        8.0 * uf,
-        text_width("< ALL GAMES", u) as f32 + 12.0 * uf,
-        16.0 * uf,
-    );
-    let over_back = look.pointer.is_some_and(|(x, y)| back.contains(x, y));
-    c.round_rect(
-        back,
-        4.0 * uf,
-        Rgba(255, 255, 255, if over_back { 40 } else { 18 }),
-    );
-    c.text(
-        (back.x + 6.0 * uf) as i32,
-        (back.y + 5.0 * uf) as i32,
-        "< ALL GAMES",
-        u,
-        if over_back { INK } else { DIM },
-    );
+    // The shared menu (Esc; on a phone, this button, here between lives
+    // only): feedback, leaving the game.
+    let menu = if look.touch {
+        let b = Rect::new(
+            8.0 * uf,
+            8.0 * uf,
+            text_width("MENU", u) as f32 + 12.0 * uf,
+            16.0 * uf,
+        );
+        c.round_rect(b, 4.0 * uf, Rgba(255, 255, 255, 18));
+        c.text(
+            (b.x + 6.0 * uf) as i32,
+            (b.y + 5.0 * uf) as i32,
+            "MENU",
+            u,
+            DIM,
+        );
+        b
+    } else {
+        let hint = "esc: menu";
+        c.text(
+            (w as i32) - text_width(hint, u) - 8 * u,
+            (h as i32) - 14 * u,
+            hint,
+            u,
+            Rgba(244, 241, 255, 70),
+        );
+        Rect::new(0.0, 0.0, 0.0, 0.0)
+    };
 
     let panel_w = (230.0 * uf).min(w - 24.0 * uf);
     let x = (w - panel_w) / 2.0;
@@ -196,7 +206,7 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
     };
     c.text_centred(w as i32 / 2, y as i32, &online, u, Rgba(141, 255, 177, 230));
 
-    Spots { name, play, back }
+    Spots { name, play, menu }
 }
 
 /// Centred text, wrapped to the screen; returns where the next line goes.

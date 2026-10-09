@@ -267,13 +267,13 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                     cast_at,
                     book: p.book,
                 });
-                let menu = p.book || p.paused || (!p.touch && !kit::input::locked());
+                let menu = p.book || p.meta.is_open() || (!p.touch && !kit::input::locked());
                 if !menu {
                     p.lesson_panel = p.lessons.draw(&mut p.g.hud, ui, p.touch, now);
                 }
             }
             let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
-            if p.touch && p.alive && !p.book && !p.paused {
+            if p.touch && p.alive && !p.book && !p.meta.is_open() {
                 p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);
             }
             // The online lobby: who is waiting.
@@ -299,8 +299,19 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                 if let Some(o) = own {
                     menu::book(&mut p.g.hud, &mut p.spots, ui, o, p.book_slot, rules);
                 }
-            } else if (p.paused || (!p.touch && !kit::input::locked())) && p.orbit.is_none() {
-                menu::pause(&mut p.g.hud, &mut p.spots, ui, (practice, p.touch), &p.set);
+            } else if p.meta.in_game_panel() {
+                menu::settings_panel(&mut p.g.hud, &mut p.spots, ui, &p.set);
+            } else if !p.touch && !p.meta.is_open() && !kit::input::locked() && p.orbit.is_none() {
+                // The mouse is free: a word on how to get back to it.
+                let c = &mut p.g.hud;
+                let k = pixels::fit_scale("click to play", c.w - 16 * ui, 2 * ui);
+                c.text_shadowed(
+                    (c.w - pixels::text_width("click to play", k)) / 2,
+                    c.h / 2 + 30 * ui,
+                    "click to play",
+                    k,
+                    pixels::Rgba::rgb(250, 246, 236),
+                );
             }
         }
         (None, _) => {
@@ -313,6 +324,24 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                 pixels::Rgba::rgb(250, 246, 236),
             );
         }
+    }
+    // The menu every game shares, over everything.
+    if p.meta.is_open() {
+        let help = if p.touch || matches!(p.mode, Mode::Title) {
+            Vec::new()
+        } else {
+            menu::keys_help((210 * ui).min(p.g.hud.w - 32 * ui), ui)
+        };
+        let labels: Vec<&str> = items(p).iter().map(|i| i.0).collect();
+        let s = p.g.scale;
+        p.meta.draw(&mut p.g.hud, ui, &labels, &help, now, |r| {
+            (
+                r.x as f64 * s,
+                r.y as f64 * s,
+                r.w as f64 * s,
+                r.h as f64 * s,
+            )
+        });
     }
     p.g.present(fr);
     if let Some(line) = perf {

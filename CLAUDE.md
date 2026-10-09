@@ -29,8 +29,8 @@ engine's first consumer.
    pixel is drawn by `pixels` into a buffer and shown once a frame, except
    3D: WebGPU (`gpu`, WGSL) or WebGL2 (`kit::gl`, GLSL), shaders as Rust
    strings, with a `pixels` HUD layer over it. The only DOM besides the
-   canvas is `kit::TextField`, an invisible input so phones offer their
-   keyboard.
+   canvas: `kit::TextField` (an invisible input, so phones offer their
+   keyboard) and the frame the hub opens a game in (`kit::shell`).
 2. **`engine`, `pixels` have no dependencies; a game's core (`wyrm`)
    depends only on `engine`.** std only, shared by server and page. How
    it looks (`wyrm-look`) is shared by its page and the hub's preview.
@@ -61,7 +61,8 @@ crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   ui text scale), gl (WebGL2 + a pixel layer), input (keys,
                   fingers, mouse, pointer lock), Link (reconnects, Hello
                   first), Session (the key), Pointer, Version, Socket,
-                  TextField, storage, audio
+                  TextField, storage, audio, meta (every game's Esc menu),
+                  shell (games open over the hub, full screen), report
 crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
 crates/render     the engine: retained scene, geo, sculpt, terrain, shadows,
                   HDR + AO + bloom + ACES, grass, sea, decals, light
@@ -78,7 +79,7 @@ crates/wandfall-look  its look (page + hub): look land basalt aura
                   rig/ fx/ state icon scene spectate camera sky
 crates/wandfall-web  its page: page/ bar hud menu sound ambience steps touch lessons
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
-                  store (snapshots) souls (names) signal (SIGTERM)
+                  store (snapshots) souls (names) signal (SIGTERM) feedback
 web/index.html    the hub page; web/<game>/index.html each game's page
 scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
                   ship.sh (ship/: image for Railway), caps.sh
@@ -86,7 +87,8 @@ scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
 
 Server routes: `/ws/<room>` a game (`/ws` and `/ws/arena` are wyrm, for
 old pages; `?watch=1` only looks), `/ws/hub` the live Stats once a second,
-`/health` (`ok <build> ...`), `/stats` (JSON); with `--static dist` the pages (`/arena`
+`/health` (`ok <build> ...`), `/stats` (JSON), `/feedback` (POST a report;
+GET `?key=$FEEDBACK_KEY` reads them); with `--static dist` the pages (`/arena`
 redirects to `/wyrm/`, as `web/vercel.json` does). A page's first connection carries
 `?v=1` and counts a visit; visits persist in `$DATA_DIR/visits` (the image
 sets `/data`; a volume there keeps them across deploys), as are `souls`
@@ -94,21 +96,18 @@ and `rooms/<id>/snap-*.bin`. A deploy is a Stillness: SIGTERM, each room
 `still()`s and saves, pages keep their picture and resume on reconnect.
 CI ships the server only when its build hash differs from live /health.
 
-Pixels: `kit::Screen` makes a buffer pixel `scale` CSS pixels (~960 wide
-at most), shown sharp; `ui()` is the text scale that reads the same on any
-screen (2 phone, 1 desktop).
+Pixels: `kit::Screen` makes a buffer pixel `scale` CSS pixels (~960
+wide at most); `ui()` is the text scale (2 phone, 1 desktop).
 
 ## A new game, from the template
 
-1. Copy `crates/wyrm`, `crates/wyrm-look` and `crates/wyrm-web` to
-   `crates/<id>`, `<id>-look`, `<id>-web`; rename packages; its world,
-   wire, view and look are yours.
-2. Its `room.rs` implements `engine::room::Room` with `id() == "<id>"`
-   (watchers: see wyrm's); add it to `rooms` in `crates/server/src/main.rs`.
+1. Copy `crates/wyrm`, `-look`, `-web` to `crates/<id>`, `<id>-look`,
+   `<id>-web`; rename packages; world, wire, view and look are yours.
+2. Its `room.rs` implements `engine::room::Room` (`id() == "<id>"`;
+   watchers: see wyrm's); add it to `ROOMS` in `crates/server/src/main.rs`.
 3. Its page: `web/<id>/index.html` (copy wyrm's), a `page` line in
-   `scripts/build-web.sh`, a card in `crates/hub-web/src/lib.rs` `CARDS`
-   (a live preview like `watch.rs`, or a still one), and its pkg path in
-   `web/vercel.json`.
+   `scripts/build-web.sh`, a hub-web `CARDS` card (live like `watch.rs`,
+   or still), its pkg path in `web/vercel.json`; Esc opens `kit::meta`.
 
 ## Commands
 
@@ -136,13 +135,10 @@ deviceScaleFactor: 3` at 390x844 for a phone.
 
 - **`pkill -f server` kills your shell** when the command line holds
   the pattern. Track its PID.
-- New people are ghosts for `GHOST_TICKS`: they cannot die or kill
-  (without it, test players died in 8 s).
+- New people are ghosts for `GHOST_TICKS` (else test players die in 8 s).
 - Bodies are rebuilt into the grid after deaths and before spawning; a
   stale grid indexes snakes that are gone.
 - The page steers by the pointer's angle from the screen's centre, where
   the camera keeps your head.
-- A ring or `outside_circle` as big as the arena shades only on-screen
-  pixels; skip it when its edge is out of view.
 - Text sized for a desktop overflows a 390-px phone: wrap it (`wrap`) or
   fit it (`fit_scale`); check a phone shot.

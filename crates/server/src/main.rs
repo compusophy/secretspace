@@ -8,15 +8,18 @@
 //! thread and a writer thread, and a browser that cannot keep up is let go
 //! rather than allowed to hold its room back. `/ws/hub` is told once a
 //! second who is online where and how many visits there have been. A page
-//! counts as a visit when its first connection asks with `?v=1`.
+//! counts as a visit when its first connection asks with `?v=1`. Pages
+//! send what players tell us, and their crashes, to `/feedback`.
 //!
-//! What is kept, under `$DATA_DIR`: `visits`, `souls`, `rooms/<id>/`. A
+//! What is kept, under `$DATA_DIR`: `visits`, `souls`, `rooms/<id>/`,
+//! `feedback`. A
 //! SIGTERM (a deploy) holds every room still and saves it first (`signal`).
 //!
 //! Optionally serves the pages too (`--static dist`). std only.
 //!
 //! `server [--port 8787] [--static dist]`; PORT in the environment wins.
 
+mod feedback;
 mod host;
 mod signal;
 mod souls;
@@ -75,6 +78,7 @@ struct Shared {
     hub: AtomicUsize,
     visits: AtomicU64,
     souls: Mutex<Souls>,
+    feedback: feedback::Feedback,
 }
 
 impl Shared {
@@ -142,6 +146,7 @@ fn main() {
         hub: AtomicUsize::new(0),
         visits: AtomicU64::new(visits),
         souls: Mutex::new(souls),
+        feedback: feedback::Feedback::new(data.as_deref()),
     });
     {
         let (s, d) = (shared.clone(), data.clone());
@@ -250,6 +255,21 @@ fn serve(
         })
     };
     let mut out = stream;
+    // Railway's edge says who is really asking.
+    let addr = header("X-Forwarded-For")
+        .and_then(|f| f.split(',').next().map(|a| a.trim().to_string()))
+        .unwrap_or(peer);
+    if path == "/feedback" {
+        return feedback(
+            &mut out,
+            &mut reader,
+            &request,
+            query,
+            &addr,
+            shared,
+            header("Content-Length"),
+        );
+    }
     if let Some(room) = path.strip_prefix("/ws") {
         let room = room.trim_start_matches('/');
         // Pages from before the hub (`/ws`) and before the rename (`arena`)
@@ -274,10 +294,6 @@ fn serve(
             shared.visits.fetch_add(1, Ordering::Relaxed);
         }
         let watch = query.split('&').any(|kv| kv == "watch=1");
-        // Railway's edge says who is really asking.
-        let addr = header("X-Forwarded-For")
-            .and_then(|f| f.split(',').next().map(|a| a.trim().to_string()))
-            .unwrap_or(peer);
         return match game {
             Some(game) => play(reader, out, conn, watch, &addr, &game, shared),
             None => hub(reader, out, shared),
@@ -299,6 +315,52 @@ fn serve(
     match root {
         Some(root) => file(&mut out, root, path),
         None => respond(&mut out, "200 OK", "text/plain", b"secretspace\n"),
+    }
+}
+
+/// `POST /feedback`: a report from a page, kept (`feedback`). `GET
+/// /feedback?key=`: the newest kept, for whoever holds `$FEEDBACK_KEY`.
+fn feedback(
+    out: &mut TcpStream,
+    reader: &mut impl Read,
+    request: &str,
+    query: &str,
+    addr: &str,
+    shared: &Shared,
+    length: Option<String>,
+) -> std::io::Result<()> {
+    if request.starts_with("GET ") {
+        let key = query
+            .split('&')
+            .find_map(|kv| kv.strip_prefix("key="))
+            .unwrap_or("");
+        return match shared.feedback.read(key) {
+            Some(body) => respond(out, "200 OK", "text/plain; charset=utf-8", &body),
+            None => respond(out, "404 Not Found", "text/plain", b"no"),
+        };
+    }
+    if !request.starts_with("POST ") {
+        return respond(
+            out,
+            "405 Method Not Allowed",
+            "text/plain",
+            b"POST a report",
+        );
+    }
+    let Some(n) = length.and_then(|l| l.parse::<usize>().ok()) else {
+        return respond(out, "411 Length Required", "text/plain", b"how long?");
+    };
+    if n > feedback::MOST {
+        return respond(out, "413 Payload Too Large", "text/plain", b"too long");
+    }
+    let mut body = vec![0u8; n];
+    reader.read_exact(&mut body)?;
+    match shared.feedback.take(addr, &body, unix()) {
+        Ok(()) => respond(out, "200 OK", "text/plain", b"thank you"),
+        Err(feedback::Refused::TooMany) => {
+            respond(out, "429 Too Many Requests", "text/plain", b"later")
+        }
+        Err(_) => respond(out, "400 Bad Request", "text/plain", b"no"),
     }
 }
 
@@ -324,10 +386,11 @@ fn stats_json(shared: &Shared) -> String {
         })
         .collect();
     format!(
-        "{{\"build\":\"{BUILD}\",\"online\":{},\"visits\":{},\"souls\":{},\"games\":{{{}}},\"rooms\":{{{}}}}}\n",
+        "{{\"build\":\"{BUILD}\",\"online\":{},\"visits\":{},\"souls\":{},\"feedback\":{},\"games\":{{{}}},\"rooms\":{{{}}}}}\n",
         s.online,
         s.visits,
         shared.souls().len(),
+        shared.feedback.count(),
         games.join(","),
         rooms.join(",")
     )

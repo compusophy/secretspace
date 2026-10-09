@@ -20,6 +20,9 @@ js-sys = "0.3"
 version = "0.3"
 features = [
   "Window",
+  "console",
+  "HtmlIFrameElement",
+  "History",
   "Document",
   "Element",
   "HtmlElement",
