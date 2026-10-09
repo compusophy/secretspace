@@ -68,6 +68,8 @@ pub struct Body {
     pub held: bool,
     pub landed: u8,
     pub air_jumped: bool,
+    /// Ticks left of a climb onto a ledge (steering held till it is over).
+    pub mantle: u8,
 }
 
 impl Body {
@@ -170,7 +172,9 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
             b.winded = false;
         }
     }
-    if b.slide && b.ground {
+    if b.mantle > 0 {
+        // Climbing a ledge: carried over it, not steered.
+    } else if b.slide && b.ground {
         // Gravity down the slope; friction; a little steering, no faster.
         let k = GRAVITY * DT / (1.0 + gx * gx + gz * gz);
         b.v[0] -= gx * k;
@@ -287,6 +291,7 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
         && b.coyote == 0
         && !b.glide
         && !b.air_jumped
+        && b.mantle == 0
         && !b.winded
         && b.spent + AIR_JUMP_STAMINA <= STAMINA
     {
@@ -312,7 +317,28 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
         }
         b.buffer = 0;
     }
-    let pull = if b.v[1] > 0.0 && has(keys::JUMP) {
+    // A ledge within reach as you push toward it in the air (and would
+    // fall short of it): up and over, timed to come down on its middle,
+    // steering held till then.
+    if b.mantle > 0 {
+        b.mantle -= 1;
+    } else if !b.ground && !b.glide && len > 1e-6 {
+        if let Some((top, mid)) = map.ledge(b.p, (wx, wz)) {
+            let need = (2.0 * GRAVITY * (top + MANTLE_OVER - b.p[1])).sqrt();
+            if b.v[1] < need {
+                let (dx, dz) = (mid[0] - b.p[0], mid[1] - b.p[2]);
+                let d = (dx * dx + dz * dz).sqrt().max(1e-4);
+                // Up against its side till the feet clear it, then over
+                // in the time they take to rise past its top and come
+                // back down to it.
+                let over = (2.0 * MANTLE_OVER / GRAVITY).sqrt();
+                let push = (d / (2.0 * over)).min(MANTLE_PUSH);
+                b.v = [dx / d * push, need, dz / d * push];
+                b.mantle = ((need / GRAVITY + over) / DT) as u8 + 2;
+            }
+        }
+    }
+    let pull = if b.v[1] > 0.0 && has(keys::JUMP) && b.mantle == 0 {
         GRAVITY_UP
     } else {
         GRAVITY
@@ -330,7 +356,11 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     let lim = MAP_HALF - 1.0;
     p[0] = p[0].clamp(-lim, lim);
     p[2] = p[2].clamp(-lim, lim);
-    map.push_out(&mut p, b.tall());
+    // Out of anything standing there; coming down onto a top from over
+    // it, it holds you rather than pushing you off it.
+    let mut out = [p[0], p[1].max(b.p[1]), p[2]];
+    map.push_out(&mut out, b.tall());
+    (p[0], p[2]) = (out[0], out[2]);
     // The ground, or a deck under you (the sea floor too: you wade, you
     // do not swim).
     let floor = map.floor(p[0], p[2], b.p[1]).max(SEA - 0.9);
@@ -342,6 +372,7 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
         }
         b.ground = true;
         b.glide = false;
+        b.mantle = 0;
     } else {
         b.ground = false;
     }
@@ -440,6 +471,78 @@ mod tests {
             yaw: 0,
             ..Input::default()
         }
+    }
+
+    /// A pillar whose top stands `lo..hi` over open ground just west of
+    /// it (where a wizard faces it, looking east): it, and that spot.
+    fn pillar(map: &Map, (lo, hi): (f32, f32)) -> (crate::map::Prop, [f32; 2]) {
+        map.props
+            .iter()
+            .filter(|q| q.kind == crate::map::Kind::Pillar)
+            .find_map(|q| {
+                let at = [q.x - (q.r + RADIUS + 0.7), q.z];
+                let rise = q.y + q.h - map.height(at[0], at[1]);
+                let clear = map.near(at[0], at[1], RADIUS + 0.5).next().is_none();
+                let (gx, gz) = slope(map, at[0], at[1]);
+                (rise > lo
+                    && rise < hi
+                    && clear
+                    && map.land(at[0], at[1])
+                    && gx * gx + gz * gz < 0.04)
+                    .then_some((*q, at))
+            })
+            .expect("a pillar")
+    }
+
+    #[test]
+    fn a_jump_at_a_pillar_climbs_onto_it_and_it_holds_you() {
+        let map = Map::new(11);
+        let (q, at) = pillar(&map, (2.0, 2.8));
+        let top = q.y + q.h;
+        let mut b = on(&map, at, [0.0, 0.0]);
+        // Walking into it, you do not climb it.
+        for _ in 0..30 {
+            step(&mut b, &east(keys::FWD), &map);
+        }
+        assert!(b.p[1] < top - 1.0, "walked into, not up: {b:?}");
+        // Jumping at it: up and onto its top.
+        let mut up = false;
+        for _ in 0..40 {
+            step(&mut b, &east(keys::FWD | keys::JUMP), &map);
+            if b.ground && (b.p[1] - top).abs() < 0.01 {
+                up = true;
+                break;
+            }
+        }
+        assert!(up, "onto the top at {top}: {b:?}");
+        // And it holds you.
+        for _ in 0..30 {
+            step(&mut b, &east(0), &map);
+        }
+        assert!(b.ground && (b.p[1] - top).abs() < 0.01, "{b:?}");
+    }
+
+    #[test]
+    fn a_pillar_too_tall_for_one_jump_takes_an_air_jump_too() {
+        let map = Map::new(11);
+        let (q, at) = pillar(&map, (3.4, 4.0));
+        let top = q.y + q.h;
+        let climb = |air: bool| {
+            let mut b = on(&map, at, [0.0, 0.0]);
+            for k in 0..60 {
+                // Jump (held, for the higher arc), let go near its top,
+                // and (`air`) jump again, held.
+                let jump = k <= 10 || (air && k >= 12);
+                let keys = keys::FWD | if jump { keys::JUMP } else { 0 };
+                step(&mut b, &east(keys), &map);
+                if b.ground && (b.p[1] - top).abs() < 0.01 {
+                    return true;
+                }
+            }
+            false
+        };
+        assert!(!climb(false), "one jump falls short");
+        assert!(climb(true), "an air jump reaches it");
     }
 
     /// A body on the plaza (flat), and a step under `keys` heading `yaw`.

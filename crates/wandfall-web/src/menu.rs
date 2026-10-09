@@ -152,7 +152,7 @@ fn keys_help(width: i32, ui: i32) -> Vec<String> {
     const KEYS: [&str; 11] = [
         "WASD move",
         "shift sprint",
-        "space jump (again in the air)",
+        "space jump (again in the air; at a ledge: climb)",
         "C or ctrl crouch",
         "crouch at a sprint: slide",
         "click cast",
@@ -183,15 +183,22 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
     let n = if practice { 4.0 } else { 2.0 };
     // The keys, inside the panel (a touch screen has its buttons), a
     // line holding as many whole ones as fit.
-    let help = if touch {
+    let mut help = if touch {
         Vec::new()
     } else {
         keys_help(bw as i32, ui)
     };
-    let tall = 44.0 * ui as f32
-        + n * (bh + 8.0 * ui as f32)
-        + 24.0 * ui as f32
-        + help.len() as f32 * 10.0 * ui as f32;
+    let tall = |lines: usize| {
+        44.0 * ui as f32
+            + n * (bh + 8.0 * ui as f32)
+            + 24.0 * ui as f32
+            + lines as f32 * 10.0 * ui as f32
+    };
+    // A short window keeps the buttons and lets the keys go.
+    if tall(help.len()) > (h - 8 * ui) as f32 {
+        help.clear();
+    }
+    let tall = tall(help.len());
     let panel = Rect::new(
         (w as f32 - bw) / 2.0 - 12.0 * ui as f32,
         ((h as f32 - tall) / 2.0).max(4.0 * ui as f32),

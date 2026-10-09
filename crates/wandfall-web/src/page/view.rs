@@ -189,7 +189,8 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                     cast_at,
                     book: p.book,
                 });
-                if !p.book && !p.paused {
+                let menu = p.book || p.paused || (!p.touch && !kit::input::locked());
+                if !menu {
                     p.lesson_panel = p.lessons.draw(&mut p.g.hud, ui, p.touch, now);
                 }
             }

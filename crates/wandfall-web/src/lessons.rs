@@ -1,7 +1,7 @@
 //! The range's first lessons, a step at a time under the top line, each
 //! ticked off as you do it: move, jump, hop as you land, jump again in the
-//! air, sprint, slide, hit a dummy with your wand, cast a spell, pick up a
-//! spell cube, open the spellbook. Shown once (remembered); Enter (or a
+//! air, climb onto a rock, sprint, slide, hit a dummy with your wand, cast
+//! a spell, pick up a spell cube, open the spellbook. Shown once (remembered); Enter (or a
 //! tap on it) skips a step; the range's menu starts them again.
 
 use pixels::{wrap, Canvas, Rect, Rgba};
@@ -26,6 +26,7 @@ enum Step {
     Jump,
     Hop,
     Air,
+    Climb,
     Sprint,
     Slide,
     Wand,
@@ -34,11 +35,12 @@ enum Step {
     Book,
 }
 
-const STEPS: [Step; 10] = [
+const STEPS: [Step; 11] = [
     Step::Move,
     Step::Jump,
     Step::Hop,
     Step::Air,
+    Step::Climb,
     Step::Sprint,
     Step::Slide,
     Step::Wand,
@@ -73,6 +75,10 @@ impl Step {
             (Step::Air, true) => (
                 "tap jump again in the air",
                 "it turns you the way you steer, for some stamina",
+            ),
+            (Step::Climb, _) => (
+                "climb: jump at a rock or a pillar",
+                "push toward its top and you pull yourself up",
             ),
             (Step::Sprint, false) => (
                 "sprint: hold shift",
@@ -215,6 +221,7 @@ impl Lessons {
             Step::Jump => took_off,
             Step::Hop => hop,
             Step::Air => !was.air_jumped && is.air_jumped,
+            Step::Climb => was.mantle == 0 && is.mantle > 0,
             Step::Sprint => self.sprint > 30,
             Step::Slide => is.slide,
             _ => false,

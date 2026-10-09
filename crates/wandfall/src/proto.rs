@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 9;
+pub const PROTO: u8 = 10;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -243,6 +243,7 @@ impl Frame {
                     .u16(b.spent)
                     .u8(b.breath)
                     .u8(b.landed)
+                    .u8(b.mantle)
                     .u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
@@ -313,7 +314,7 @@ impl Frame {
             let g = r.u8()?;
             let jump = r.u8()?;
             let slide_cd = r.u8()?;
-            let (spent, breath, landed) = (r.u16()?, r.u8()?, r.u8()?);
+            let (spent, breath, landed, mantle) = (r.u16()?, r.u8()?, r.u8()?, r.u8()?);
             let mut o = Own {
                 body: Body {
                     p,
@@ -327,6 +328,7 @@ impl Frame {
                     held: g & 64 != 0,
                     air_jumped: g & 128 != 0,
                     landed,
+                    mantle,
                     slide_cd,
                     spent,
                     breath,
@@ -654,6 +656,7 @@ mod tests {
                     held: true,
                     landed: 2,
                     air_jumped: true,
+                    mantle: 5,
                 },
                 seq: 65535,
                 hp: 252,

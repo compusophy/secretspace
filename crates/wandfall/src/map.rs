@@ -30,6 +30,16 @@ pub enum Kind {
     Crystal,
 }
 
+impl Kind {
+    /// Whether wizards can stand on top of it (and climb onto it).
+    pub fn standable(self) -> bool {
+        matches!(
+            self,
+            Kind::Rock | Kind::Pillar | Kind::Stone | Kind::Altar | Kind::Merlon
+        )
+    }
+}
+
 /// One thing standing on the island. Its trunk, body or shaft blocks
 /// wizards and bolts: a cylinder `r` wide and `h` tall from `y`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -43,6 +53,19 @@ pub struct Prop {
     /// For the look only: turned, and how big.
     pub yaw: f32,
     pub scale: f32,
+}
+
+impl Prop {
+    /// Where feet stand on its top, if they can: a boulder's rounded top
+    /// stands a little over its trunk.
+    pub fn top(&self) -> Option<f32> {
+        let h = if self.kind == Kind::Rock {
+            self.h * ROCK_TOP
+        } else {
+            self.h
+        };
+        self.kind.standable().then_some(self.y + h)
+    }
 }
 
 /// Metres a cell of the props' grid.
@@ -121,8 +144,9 @@ impl Map {
         h
     }
 
-    /// What feet at `y` stand on at (x, z): the highest of the ground and
-    /// any deck no more than a step above them.
+    /// What feet at `y` stand on at (x, z): the highest of the ground, any
+    /// deck and the top of anything standing there that can be stood on,
+    /// no more than a step above them.
     pub fn floor(&self, x: f32, z: f32, y: f32) -> f32 {
         let mut f = self.height(x, z);
         for d in &self.decks {
@@ -130,7 +154,28 @@ impl Map {
                 f = f.max(h);
             }
         }
+        for q in self.near(x, z, 0.0) {
+            if let Some(t) = q.top().filter(|&t| t <= y + STEP) {
+                f = f.max(t);
+            }
+        }
         f
+    }
+
+    /// A ledge to climb onto from feet at `p`, pushing along (`wx`, `wz`):
+    /// the top of something that can be stood on, close ahead and within
+    /// reach above the feet; its top and middle.
+    pub fn ledge(&self, p: [f32; 3], (wx, wz): (f32, f32)) -> Option<(f32, [f32; 2])> {
+        self.near(p[0], p[2], RADIUS + MANTLE_NEAR)
+            .filter_map(|q| {
+                let t = q.top()?;
+                let (dx, dz) = (q.x - p[0], q.z - p[2]);
+                let d = (dx * dx + dz * dz).sqrt().max(1e-4);
+                let ahead = (dx * wx + dz * wz) / d;
+                (t > p[1] + MANTLE_LOW && t <= p[1] + MANTLE_REACH && ahead >= MANTLE_AHEAD)
+                    .then_some((t, [q.x, q.z]))
+            })
+            .next()
     }
 
     /// Whether a deck's surface lies between heights `lo` and `hi` at (x, z).
@@ -279,7 +324,9 @@ impl Map {
     pub fn push_out(&self, p: &mut [f32; 3], tall: f32) {
         let hits: Vec<Prop> = self.near(p[0], p[2], RADIUS).copied().collect();
         for q in hits {
-            if p[1] > q.y + q.h || p[1] + tall < q.y {
+            // Over its top (or standing on it), or under it: clear.
+            let top = q.top().unwrap_or(q.y + q.h).max(q.y + q.h);
+            if p[1] >= top - 0.02 || p[1] + tall < q.y {
                 continue;
             }
             let (dx, dz) = (p[0] - q.x, p[2] - q.z);

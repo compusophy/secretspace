@@ -309,7 +309,12 @@ of combat styles and all varieties to counter all varieties".
       landing (or just before) keeps its speed and adds 0.6 m/s, to 12.5,
       so timed hops outrun a sprint and late ones lose to the ground; and
       once in the air a second jump turns you the way you steer, for a
-      sixth of your stamina (PROTO 9).
+      sixth of your stamina (PROTO 9). Rocks, pillars, standing stones,
+      the altar and the balcony's merlons can be stood on, and climbed:
+      in the air, pushing toward a top within 1.3 m over your feet, you
+      pull up and over, steering held till you are over it, timed to
+      come down on its middle (a short pillar takes a jump, a tall one
+      an air jump too; PROTO 10).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half
@@ -319,9 +324,9 @@ of combat styles and all varieties to counter all varieties".
   that age), `?fx=name&age=ms` (any one effect shown by you, held at an
   age or again and again: `fx::NAMES`).
 - **Lessons on the range** (`wandfall-web/src/lessons.rs`), the first
-  time: ten steps under the top line, each ticked off as you do it
-  (move, jump, a timed hop, an air jump, sprint, slide, a wand hit, a
-  cast, a spell cube, the spellbook), keys or fingers in their words;
+  time: eleven steps under the top line, each ticked off as you do it
+  (move, jump, a timed hop, an air jump, a climb, sprint, slide, a wand
+  hit, a cast, a spell cube, the spellbook), keys or fingers in their words;
   Enter or a tap skips one; the range's menu starts them again.
 - **Spells that look like magic** (the owner: "still pretty low poly, not
   cool spells"), `wandfall-look/src/fx/`: fire is flowing energy and

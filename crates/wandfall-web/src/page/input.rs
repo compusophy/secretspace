@@ -236,6 +236,9 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
             }
         } else if was.ground && !is.ground && is.v[1] > 1.0 {
             p.sounds.hop();
+        } else if was.mantle == 0 && is.mantle > 0 {
+            // Pulling up onto a ledge.
+            p.sounds.hop();
         } else if !was.air_jumped && is.air_jumped {
             // The air jump: a hop, and a puff of magic under the feet.
             p.sounds.hop();

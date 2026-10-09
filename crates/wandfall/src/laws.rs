@@ -93,6 +93,19 @@ pub const HOP_MAX: f32 = 12.5;
 /// Once in the air, a second jump (magic): this fast up, the way you
 /// steer; it costs stamina, so not when winded.
 pub const AIR_JUMP: f32 = 7.0;
+/// Climbing a ledge (a rock, a pillar, a stone, the altar) in the air,
+/// pushing toward it: its top no more than this far over your feet (and
+/// more than the low mark), its edge this close beyond your body, ahead
+/// of you at least this much (a cosine). Up you go to clear it by this
+/// much, and over it at least this fast (m/s).
+pub const MANTLE_REACH: f32 = 1.3;
+pub const MANTLE_LOW: f32 = 0.3;
+pub const MANTLE_NEAR: f32 = 0.35;
+pub const MANTLE_AHEAD: f32 = 0.5;
+pub const MANTLE_OVER: f32 = 0.35;
+pub const MANTLE_PUSH: f32 = 3.5;
+/// A boulder's top over its trunk's (its look is rounder and taller).
+pub const ROCK_TOP: f32 = 1.15;
 pub const AIR_JUMP_STAMINA: u16 = STAMINA / 6;
 /// Crouching: this much of the speed, eyes this high, a body this tall.
 pub const CROUCH_SLOW: f32 = 0.5;
