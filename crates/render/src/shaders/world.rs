@@ -110,7 +110,16 @@ fn sea_normal(pos: vec3<f32>) -> vec3<f32> {
     let e = 0.1 + dist * 0.012;
     let h0 = wave(p, t);
     let s = g.water.w / (1.0 + dist * 0.02);
-    return normalize(vec3<f32>(-(wave(p + vec2<f32>(e, 0.0), t) - h0) / e * s, 1.0, -(wave(p + vec2<f32>(0.0, e), t) - h0) / e * s));
+    var n = vec3<f32>(-(wave(p + vec2<f32>(e, 0.0), t) - h0) / e * s, 1.0, -(wave(p + vec2<f32>(0.0, e), t) - h0) / e * s);
+    // In the rain, pocked with drops (near: far off they blur away).
+    let wet = g.wind.z / (1.0 + dist * 0.05);
+    if (wet > 0.01) {
+        let q = p * 3.5 + vec2<f32>(t * 0.7, -t * 0.5);
+        let r = vec2<f32>(noise2(q) - 0.5, noise2(q + vec2<f32>(17.3, 5.1)) - 0.5);
+        let f = 0.5 + 0.5 * sin(t * 9.0 + noise2(p * 1.7) * 30.0);
+        n = n + vec3<f32>(r.x, 0.0, r.y) * wet * 0.5 * f;
+    }
+    return normalize(n);
 }
 
 /// The sea: waves, the sky in it (and `mirror`: what of the scene it
@@ -283,6 +292,11 @@ fn world(i: WorldOut, front: bool) -> vec4<f32> {
         ao = 0.8;
     } else if (mat == METAL) {
         metal = 1.0;
+    }
+    // Wet: darker, and glossier (but the leaves).
+    if (g.wind.z > 0.0 && mat != FOLIAGE && glow < 0.01) {
+        base = base * (1.0 - 0.25 * g.wind.z);
+        rough = mix(rough, rough * 0.45, g.wind.z);
     }
     let c = shade(i.pos, n, base, rough, metal, glow * g.wind.w, ao, through, mat);
     return vec4<f32>(air(c, i.pos), i.tint.a);

@@ -274,6 +274,9 @@ pub struct Look {
     /// as made; less where the exposure is high (a night), so a spell
     /// keeps its colour at every hour instead of burning white.
     pub glow: f32,
+    /// How wet it all is (rain), 0 to 1: the ground darker and glossier,
+    /// the sea pocked with drops.
+    pub wet: f32,
 }
 
 /// A colour grade, applied to the finished picture (as it is shown):
@@ -326,6 +329,7 @@ impl Default for Look {
             wind: [0.8, 0.4],
             grade: Grade::default(),
             glow: 1.0,
+            wet: 0.0,
         }
     }
 }

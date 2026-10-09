@@ -245,7 +245,9 @@ Done, across phases, in `crates/render`:
   ray (off waves calmed by two thirds) out to 120 m in growing steps,
   refines where it first passes behind what stands there, and mixes that
   over the sky's reflection, fading at the screen's edge and far off.
-  What glows is drawn after the copy, so it is not mirrored yet. Not yet:
+  What glows is drawn after the copy, so it is not mirrored yet.
+  `Look::wet` (rain): the ground and stone darker and glossier, the sea
+  pocked with drops near the eye. Not yet:
   auto exposure, DoF, IBL.
 - Phase 5 (part): sparks with shapes (`Shape`: a glow, a licking flame,
   a puff of smoke laid over rather than added, a four-rayed glint), each

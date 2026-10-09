@@ -54,7 +54,7 @@ pub(crate) fn bytes(
     let s = laws::CASCADES;
     put_f32s(&mut b, &[s[0], s[1], s[2], laws::SHADOW_STRENGTH]);
     put_f32s(&mut b, &terrain);
-    put_f32s(&mut b, &[l.wind[0], l.wind[1], 0.0, l.glow]);
+    put_f32s(&mut b, &[l.wind[0], l.wind[1], l.wet, l.glow]);
     v4(&mut b, lin(l.water), l.waves);
     let q = quality;
     put_f32s(

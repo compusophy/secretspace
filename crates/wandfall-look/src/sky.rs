@@ -142,6 +142,7 @@ fn weathered(l: Look, w: Weather) -> Look {
                 saturation: l.grade.saturation * 0.82,
                 ..l.grade
             },
+            wet: 1.0,
             ..l
         },
     }
@@ -272,6 +273,7 @@ pub fn blend(a: &Look, b: &Look, t: f32) -> Look {
             contrast: f(a.grade.contrast, b.grade.contrast),
         },
         glow: f(a.glow, b.glow),
+        wet: f(a.wet, b.wet),
     }
 }
 
@@ -300,6 +302,7 @@ fn dusk() -> Look {
         wind: [0.9, 0.35],
         grade: GRADE,
         glow: 1.0,
+        wet: 0.0,
     }
 }
 
