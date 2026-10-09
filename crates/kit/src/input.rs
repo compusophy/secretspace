@@ -139,9 +139,11 @@ impl Hands {
                 return;
             };
             let code = e.code();
-            // Keys that would scroll or leave the page do neither while
-            // the game has the pointer.
-            if locked() && matches!(code.as_str(), "Space" | "Tab" | "Backquote") {
+            // While the game has the pointer the keys are the game's:
+            // nothing scrolls, bookmarks (Ctrl+D), saves, finds or prints.
+            // F5, F11 and F12 still work; the browser keeps Ctrl+W, Ctrl+T
+            // and Ctrl+N whatever a page does, so no game key needs Ctrl.
+            if locked() && !matches!(code.as_str(), "F5" | "F11" | "F12") {
                 e.prevent_default();
             }
             let mut i = me.borrow_mut();
