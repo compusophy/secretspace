@@ -154,12 +154,23 @@ pub fn falls(look: &Look, d: &mut Draw, list: &[(f64, V3, u16)], now: f64) {
     }
 }
 
-/// Dust thrown up where wizards landed, more the harder.
+/// Dust thrown up where wizards landed, more the harder; in the shallows,
+/// a splash.
 pub fn dust(look: &Look, d: &mut Draw, list: &[(f64, V3, f32)], now: f64) {
     let c = rgb(170, 160, 138);
     for &(when, at, hard) in list {
         let t = ((now - when) / 1000.0) as f32;
         let seed = when as i32 ^ (at[0] * 31.0) as i32;
+        if at[1] < wandfall::laws::SEA + 0.05 {
+            splash(
+                look,
+                d,
+                [at[0], wandfall::laws::SEA, at[2]],
+                (t, seed),
+                hard,
+            );
+            continue;
+        }
         let n = (4.0 + 8.0 * hard) as i32;
         puffs(
             d,
@@ -182,5 +193,50 @@ pub fn dust(look: &Look, d: &mut Draw, list: &[(f64, V3, f32)], now: f64) {
                 0.0,
             );
         }
+    }
+}
+
+/// Water thrown up where a wizard came down in the shallows: drops
+/// streaking up and falling, spray, a ring spreading on the water.
+fn splash(look: &Look, d: &mut Draw, at: V3, (t, seed): (f32, i32), hard: f32) {
+    let water = rgb(200, 225, 235);
+    spray(
+        d,
+        at,
+        t,
+        seed,
+        Spray {
+            fall: 12.0,
+            up: true,
+            streak: 0.04,
+            ..Spray::new(
+                (10.0 + 14.0 * hard) as i32,
+                3.5 + 3.0 * hard,
+                0.6,
+                (WHITE, water),
+                0.07,
+            )
+        },
+    );
+    puffs(
+        d,
+        at,
+        (t, seed),
+        (4, 0.6),
+        (water, 0.3 + 0.2 * hard),
+        (0.3, 2.0),
+        (0.6 + hard, 0.4),
+    );
+    let f = 1.0 - t / 0.8;
+    if f > 0.0 {
+        ring(
+            look,
+            d,
+            [at[0], at[1] - 0.2, at[2]],
+            0.3 + t * 2.5,
+            water,
+            0.5 * f,
+            0.0,
+        );
     }
 }

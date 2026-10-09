@@ -3,7 +3,7 @@
 //! the storm's wall, and your own wand.
 
 use render::geo::{self, hash, rgb, unit, Geo, V3};
-use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark};
+use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Shape, Spark};
 
 use crate::fx::{self, Draw};
 use crate::land::Land;
@@ -149,7 +149,7 @@ impl Look {
     }
 
     /// Light bursting where something struck, `age` ms ago, in the
-    /// colour of what struck.
+    /// colour of what struck: a glint, sparks streaking out and falling.
     pub fn burst(
         &self,
         lights: &mut Vec<Light>,
@@ -167,14 +167,33 @@ impl Look {
             r: 6.0,
             c: geo::scale(c, 2.0 * k),
         });
+        let hot = geo::mix(c, [1.0; 3], 0.5);
+        if age < 120.0 {
+            let f = 1.0 - age / 120.0;
+            sparks.push(Spark {
+                p: at,
+                size: 1.1 * f,
+                c: [hot[0], hot[1], hot[2], f],
+                shape: Shape::Star,
+                ..Default::default()
+            });
+        }
+        let t = age / 1000.0;
         for n in 0..14 {
             let a = unit(hash(seed as i32, n, 3)) * std::f32::consts::TAU;
             let up = unit(hash(seed as i32, n, 4));
-            let d = (1.0 - k) * 2.2;
+            let speed = 3.0 + 3.0 * unit(hash(seed as i32, n, 5));
+            let v = [a.cos() * speed, up * speed + 1.0 - 9.0 * t, a.sin() * speed];
+            let go = speed * t;
             sparks.push(Spark {
-                p: [at[0] + a.cos() * d, at[1] + up * d, at[2] + a.sin() * d],
-                size: 0.15,
-                c: [0.5 + c[0] * 0.5, 0.5 + c[1] * 0.5, 0.5 + c[2] * 0.5, k],
+                p: [
+                    at[0] + a.cos() * go,
+                    at[1] + (up * speed + 1.0) * t - 4.5 * t * t,
+                    at[2] + a.sin() * go,
+                ],
+                size: 0.1,
+                c: [hot[0], hot[1], hot[2], k],
+                v: geo::scale(v, 0.03),
                 ..Default::default()
             });
         }
