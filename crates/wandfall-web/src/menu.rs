@@ -9,6 +9,7 @@ use wandfall::proto::Own;
 
 use crate::bar::{icon, pips, rgba, KEYS};
 use crate::fx::colour;
+use crate::settings::{Settings, PICTURES};
 
 const INK: Rgba = Rgba::rgb(250, 246, 236);
 const DIM: Rgba = Rgba::rgb(190, 196, 214);
@@ -34,6 +35,11 @@ pub enum Act {
     Sparring,
     /// The range's lessons from the start.
     Lessons,
+    /// Settings: the view's turning speed and the sound's loudness a
+    /// step up or down; a picture.
+    Look(i8),
+    Volume(i8),
+    Picture(u8),
     /// A panel's own ground: a click there does nothing (off every panel,
     /// a click goes back to the game).
     Stay,
@@ -180,11 +186,21 @@ fn keys_help(width: i32, ui: i32) -> Vec<String> {
 }
 
 /// The pause menu.
-pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: bool) {
+pub fn pause(
+    c: &mut Canvas,
+    spots: &mut Spots,
+    ui: i32,
+    (practice, touch): (bool, bool),
+    set: &Settings,
+) {
     let (w, h) = (c.w, c.h);
     let bw = (200 * ui).min(w - 24 * ui) as f32;
-    let bh = 28.0 * ui as f32;
     let n = if practice { 4.0 } else { 2.0 };
+    // Buttons as big as fit: a short window gets smaller ones, and keeps
+    // its settings.
+    let u = ui as f32;
+    let room = (h - 8 * ui) as f32 - (68.0 + SETTINGS) * u;
+    let bh = (room / n - 8.0 * u).clamp(16.0 * u, 28.0 * u);
     // The keys, inside the panel (a touch screen has its buttons), a
     // line holding as many whole ones as fit.
     let mut help = if touch {
@@ -196,6 +212,7 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
         44.0 * ui as f32
             + n * (bh + 8.0 * ui as f32)
             + 24.0 * ui as f32
+            + SETTINGS * ui as f32
             + lines as f32 * 10.0 * ui as f32
     };
     // A short window keeps the buttons and lets the keys go.
@@ -262,8 +279,86 @@ pub fn pause(c: &mut Canvas, spots: &mut Spots, ui: i32, practice: bool, touch: 
         ui,
     );
     y += bh + 10.0 * ui as f32;
+    settings(c, spots, (x, y, bw), ui, set);
+    y += SETTINGS * ui as f32;
     for (n, line) in help.iter().enumerate() {
         c.text_centred(w / 2, y as i32 + n as i32 * 10 * ui, line, ui, DIM);
+    }
+}
+
+/// How tall the settings are (in ui units).
+const SETTINGS: f32 = 3.0 * 24.0 + 4.0;
+
+/// The settings, a row each: how fast the view turns, how loud, the
+/// picture.
+fn settings(
+    c: &mut Canvas,
+    spots: &mut Spots,
+    (x, y, bw): (f32, f32, f32),
+    ui: i32,
+    set: &Settings,
+) {
+    let u = ui as f32;
+    let h = 18.0 * u;
+    let label = |c: &mut Canvas, y: f32, t: &str| {
+        c.text_shadowed(x as i32, (y + h / 2.0) as i32 - 3 * ui, t, ui, DIM);
+    };
+    let step = |c: &mut Canvas, spots: &mut Spots, y: f32, value: &str, acts: (Act, Act)| {
+        let w = 22.0 * u;
+        button(
+            c,
+            spots,
+            Rect::new(x + bw - 92.0 * u, y, w, h),
+            "-",
+            false,
+            acts.0,
+            ui,
+        );
+        c.text_centred(
+            (x + bw - 46.0 * u) as i32,
+            (y + h / 2.0) as i32 - 3 * ui,
+            value,
+            ui,
+            INK,
+        );
+        button(
+            c,
+            spots,
+            Rect::new(x + bw - w, y, w, h),
+            "+",
+            false,
+            acts.1,
+            ui,
+        );
+    };
+    label(c, y, "look speed");
+    step(
+        c,
+        spots,
+        y,
+        &format!("{:.2}x", set.look),
+        (Act::Look(-1), Act::Look(1)),
+    );
+    let y = y + 24.0 * u;
+    label(c, y, "sound");
+    let loud = format!("{:.0}%", set.volume * 100.0);
+    step(c, spots, y, &loud, (Act::Volume(-1), Act::Volume(1)));
+    let y = y + 24.0 * u;
+    label(c, y, "picture");
+    let x0 = x + 56.0 * u;
+    let gap = 4.0 * u;
+    let bwk = (bw - 56.0 * u - 3.0 * gap) / 4.0;
+    for (k, name) in PICTURES.iter().enumerate() {
+        let b = Rect::new(x0 + k as f32 * (bwk + gap), y, bwk, h);
+        button(
+            c,
+            spots,
+            b,
+            name,
+            set.picture == k as u8,
+            Act::Picture(k as u8),
+            ui,
+        );
     }
 }
 

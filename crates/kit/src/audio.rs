@@ -40,6 +40,13 @@ impl Audio {
         }
     }
 
+    /// How loud everything is, 0 to 1.
+    pub fn set_volume(&self, v: f32) {
+        if let Some(m) = &self.master {
+            m.gain().set_value(v.clamp(0.0, 1.0));
+        }
+    }
+
     /// Sound `id` played round and round, silent till `tune`d: its number.
     pub fn hum(&mut self, id: usize) -> usize {
         let h = (|| {

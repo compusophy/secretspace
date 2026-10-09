@@ -27,6 +27,7 @@ use crate::look::Look;
 use crate::menu::{self, Act, Spots};
 use crate::rig;
 use crate::scene;
+use crate::settings::Settings;
 use crate::sky::{Hour, Sky};
 use crate::sound::Sounds;
 use crate::state::State;
@@ -132,6 +133,8 @@ struct Page {
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
     orbit: Option<u16>,
     orbit_at: Option<[f32; 3]>,
+    /// What the player set (kept between visits).
+    set: Settings,
     /// Out: who you watch, and a step to the next (or the last) asked.
     watch: Option<u16>,
     cycle: i32,
@@ -194,6 +197,15 @@ fn island(p: &mut Page, seed: u64) {
     p.island = Some(Island { map, look, mini });
 }
 
+/// The picture redrawn at `q`: a new renderer, the island built again.
+fn repaint(p: &mut Page, q: render::Quality) {
+    p.r = Renderer::new(&p.g.device, &p.g.queue, p.g.format(), q);
+    p.island = None;
+    if let Some(seed) = p.st.seed.take() {
+        island(p, seed);
+    }
+}
+
 /// Start over in a new place: nothing known, nobody you.
 fn fresh(p: &mut Page) {
     let seed = p.st.seed;
@@ -254,7 +266,8 @@ pub fn start() {
             }
         };
         let search = kit::window().location().search().unwrap_or_default();
-        let q = render::Quality::pick(&search, g.caps.software, kit::touch());
+        let set = Settings::load();
+        let q = set.quality(&search, g.caps.software, kit::touch());
         let r = Renderer::new(&g.device, &g.queue, g.format(), q);
         let session = kit::Session::load();
         let hands = Hands::attach(g.canvas());
@@ -308,6 +321,7 @@ pub fn start() {
                 anims: HashMap::new(),
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,
+                set,
                 watch: None,
                 cycle: 0,
                 ear: ([0.0; 3], 0.0),
@@ -315,6 +329,7 @@ pub fn start() {
         });
         PAGE.with(|p| {
             if let Some(p) = p.borrow_mut().as_mut() {
+                p.sounds.audio.set_volume(p.set.volume);
                 island(p, PRACTICE_SEED);
                 // `?practice` goes straight to the range.
                 if query("practice") {

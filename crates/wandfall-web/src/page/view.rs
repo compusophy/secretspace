@@ -270,7 +270,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                     menu::book(&mut p.g.hud, &mut p.spots, ui, o, p.book_slot, rules);
                 }
             } else if (p.paused || (!p.touch && !kit::input::locked())) && p.orbit.is_none() {
-                menu::pause(&mut p.g.hud, &mut p.spots, ui, practice, p.touch);
+                menu::pause(&mut p.g.hud, &mut p.spots, ui, (practice, p.touch), &p.set);
             }
         }
         (None, _) => {

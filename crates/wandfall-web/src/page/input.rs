@@ -36,7 +36,7 @@ pub(super) fn hands(p: &mut Page) {
                     dy.clamp(-MOUSE_MOST, MOUSE_MOST),
                 );
                 // Slower when zoomed, so the aim holds.
-                let k = MOUSE * zoom(p);
+                let k = MOUSE * zoom(p) * p.set.look;
                 p.yaw += dx as f32 * k;
                 p.pitch = (p.pitch - dy as f32 * k).clamp(-1.5, 1.5);
             }
@@ -72,7 +72,7 @@ pub(super) fn hands(p: &mut Page) {
             }
             Hand::Finger { id, kind, x, y, .. } if p.touch => {
                 let (dy, dp) = p.pad.finger(id, kind, x, y, p.g.css);
-                let k = zoom(p);
+                let k = zoom(p) * p.set.look;
                 p.yaw += dy * k;
                 p.pitch = (p.pitch + dp * k).clamp(-1.5, 1.5);
             }
@@ -278,7 +278,7 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
 /// Too slow for this tier (over 2.5 s of play, frames over 30 ms on
 /// average): one tier down, the island built again on it.
 pub(super) fn pace(p: &mut Page, dt: f64) {
-    if p.fixed || !p.alive || dt <= 0.0 {
+    if p.fixed || !p.alive || dt <= 0.0 || !p.set.auto() {
         return;
     }
     p.pace.0 += 1;
@@ -291,11 +291,7 @@ pub(super) fn pace(p: &mut Page, dt: f64) {
     let Some(q) = p.r.quality().lower().filter(|_| slow) else {
         return;
     };
-    p.r = Renderer::new(&p.g.device, &p.g.queue, p.g.format(), q);
-    p.island = None;
-    if let Some(seed) = p.st.seed.take() {
-        island(p, seed);
-    }
+    repaint(p, q);
 }
 
 /// The view turns slower aiming (zoomed in), so the aim holds.

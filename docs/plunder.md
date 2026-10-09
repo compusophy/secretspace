@@ -341,6 +341,10 @@ of combat styles and all varieties to counter all varieties".
   the storm's roar as its wall comes near, and all round inside it;
   crickets at night and birds at dawn and through the afternoon, hushed
   high up and in the storm.
+- **Settings** (`wandfall-web/src/settings.rs`, in the pause menu, kept
+  between visits): look speed (mouse and fingers), the sound's loudness,
+  and the picture (auto steps down when frames run slow; low, mid or high
+  hold a tier). A short window shrinks the menu's buttons to keep them.
 - **Footsteps** (`wandfall-web/src/steps.rs`): every wizard's feet as
   they come down, in time with the stride it is drawn with (`Anim`'s
   footfall), on grass, sand, stone or in the shallows; louder at a

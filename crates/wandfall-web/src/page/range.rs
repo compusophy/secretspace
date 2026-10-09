@@ -6,7 +6,9 @@ use wandfall::practice;
 use wandfall::proto::{Up, PROTO};
 use wandfall::room::Wandfall;
 
-use super::{grab, leave, online, query, query_value, send, Mode, Page, ME, PRACTICE_SEED};
+use super::{
+    grab, leave, online, query, query_value, repaint, send, Mode, Page, ME, PRACTICE_SEED,
+};
 use crate::menu::Act;
 
 pub(super) fn practise(p: &mut Page) {
@@ -77,6 +79,25 @@ pub(super) fn act(p: &mut Page, a: Act) {
         Act::Online => online(p),
         Act::Practice => practise(p),
         Act::Leave => leave(p),
+        Act::Look(d) => {
+            p.set.turn(d);
+            p.set.save();
+        }
+        Act::Volume(d) => {
+            p.set.loud(d);
+            p.set.save();
+            p.sounds.audio.set_volume(p.set.volume);
+            p.sounds.audio.wake();
+            p.sounds.cube([0.0; 3], ([0.0; 3], 0.0));
+        }
+        Act::Picture(k) => {
+            if p.set.picture != k {
+                p.set.picture = k;
+                p.set.save();
+                let q = p.set.quality("", p.g.caps.software, kit::touch());
+                repaint(p, q);
+            }
+        }
         Act::Resume => {
             p.paused = false;
             if !p.touch {
