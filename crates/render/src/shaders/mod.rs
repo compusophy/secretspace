@@ -15,7 +15,11 @@ pub const GLOBALS: u64 = 4 * 64 + 18 * 16;
 
 /// The scene's module: the shared part, then its shaders, the engine's
 /// numbers put in; for a depth that is many-sampled (`msaa`) or not.
-pub fn scene(msaa: bool) -> String {
+/// The scene's shaders: `msaa` (the depth multisampled or not), the
+/// sea's reflections marching `ssr` steps (out to 120 m).
+pub fn scene(msaa: bool, ssr: u32) -> String {
+    let steps = ssr.max(2);
+    let grow = (120.0f32 / 0.6).powf(1.0 / (steps - 1) as f32);
     let depth = if msaa {
         "texture_depth_multisampled_2d"
     } else {
@@ -27,6 +31,8 @@ pub fn scene(msaa: bool) -> String {
         .replace("SPARK_MAX_PX", &format!("{:.1}", crate::laws::SPARK_MAX_PX))
         .replace("PUFF_MAX", &format!("{:.3}", crate::laws::PUFF_MAX))
         .replace("SPARK_NEAR", &format!("{:.3}", crate::laws::SPARK_NEAR))
+        .replace("SSR_STEPS", &format!("{steps}"))
+        .replace("SSR_GROW", &format!("{grow:.5}"))
 }
 
 pub fn shadow() -> String {

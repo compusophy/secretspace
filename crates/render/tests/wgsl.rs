@@ -22,7 +22,7 @@ fn the_scene_shaders_are_valid() {
     for msaa in [false, true] {
         valid(
             "scene",
-            &render::shaders::scene(msaa),
+            &render::shaders::scene(msaa, 16),
             &[
                 "world_vs",
                 "world_fs",

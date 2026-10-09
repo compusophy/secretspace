@@ -100,23 +100,30 @@ fn wave(q: vec2<f32>, t: f32) -> f32 {
         + 0.22 * noise2(b * q * 1.5 + vec2<f32>(t * 0.2, t * 0.17));
 }
 
-/// The sea: waves, the sky in it, the deep and the shallows, the sun's
-/// glint, foam at the shore.
-fn sea(pos: vec3<f32>, alpha: f32) -> vec4<f32> {
+/// The sea's surface at `pos`: waves, which far off are wider than a
+/// pixel, so blurred (a wider step) and flattened, and the sun's glint
+/// let spread, so the sea does not sparkle and crawl as you move.
+fn sea_normal(pos: vec3<f32>) -> vec3<f32> {
     let t = g.eye.w;
     let p = pos.xz;
-    // Far off, the waves are wider than a pixel: blur them (a wider
-    // step) and flatten them, and let the sun's glint spread, so the
-    // sea does not sparkle and crawl as you move.
     let dist = length(g.eye.xyz - pos);
     let e = 0.1 + dist * 0.012;
     let h0 = wave(p, t);
     let s = g.water.w / (1.0 + dist * 0.02);
-    let n = normalize(vec3<f32>(-(wave(p + vec2<f32>(e, 0.0), t) - h0) / e * s, 1.0, -(wave(p + vec2<f32>(0.0, e), t) - h0) / e * s));
+    return normalize(vec3<f32>(-(wave(p + vec2<f32>(e, 0.0), t) - h0) / e * s, 1.0, -(wave(p + vec2<f32>(0.0, e), t) - h0) / e * s));
+}
+
+/// The sea: waves, the sky in it (and `mirror`: what of the scene it
+/// reflects, how surely), the deep and the shallows, the sun's glint,
+/// foam at the shore.
+fn sea_shade(pos: vec3<f32>, alpha: f32, n: vec3<f32>, mirror: vec4<f32>) -> vec4<f32> {
+    let t = g.eye.w;
+    let p = pos.xz;
+    let dist = length(g.eye.xyz - pos);
     let v = normalize(g.eye.xyz - pos);
     let nv = max(dot(n, v), 0.0);
     let fres = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
-    let refl = sky(reflect(-v, n));
+    let refl = mix(sky(reflect(-v, n)), mirror.rgb, mirror.a);
     let depth = max(pos.y - ground(p), 0.0);
     let light = g.sky.rgb * 0.9 + g.sun.rgb * max(g.sun_dir.y, 0.0) * 0.3;
     let body = mix(vec3<f32>(0.03, 0.22, 0.20), g.water.rgb, smoothstep(0.0, 6.0, depth)) * light;
@@ -125,8 +132,68 @@ fn sea(pos: vec3<f32>, alpha: f32) -> vec4<f32> {
     var c = mix(body, refl, fres) + glint;
     let foam = (1.0 - smoothstep(0.0, 0.8, depth)) * smoothstep(0.4, 0.75, noise2(p * 1.2 + vec2<f32>(t * 0.25, -t * 0.2)));
     c = mix(c, vec3<f32>(0.9, 0.93, 0.95) * light * 1.4, foam * 0.75);
-    let a = clamp(mix(0.6, 1.0, fres) * smoothstep(0.0, 0.3, depth) + foam * 0.6, 0.0, 1.0);
+    // Where it mirrors the land, it shows less of its own body.
+    let a = clamp(mix(0.6, 1.0, max(fres, mirror.a * 0.5)) * smoothstep(0.0, 0.3, depth) + foam * 0.6, 0.0, 1.0);
     return vec4<f32>(air(c, pos), a * alpha);
+}
+
+fn sea(pos: vec3<f32>, alpha: f32) -> vec4<f32> {
+    return sea_shade(pos, alpha, sea_normal(pos), vec4<f32>(0.0));
+}
+
+/// The picture so far, before the sea and what glows (the pass that
+/// draws them reads it): what the sea can mirror.
+@group(1) @binding(1) var scene_color: texture_2d<f32>;
+@group(1) @binding(2) var scene_samp: sampler;
+
+/// Where on the screen `p` falls (pixels), and its distance along the
+/// view (as the depth stores it: NEAR_PLANE / depth).
+fn on_screen(p: vec3<f32>) -> vec3<f32> {
+    let c = g.vp * vec4<f32>(p, 1.0);
+    let uv = c.xy / c.w * vec2<f32>(0.5, -0.5) + 0.5;
+    return vec3<f32>(uv, c.w);
+}
+
+/// What the sea at `pos` mirrors along `r` of what is on the screen: the
+/// colour where the ray meets it, and how surely (0: nothing found, the
+/// sky it is). The ray marches out in growing steps to 120 m, and is
+/// refined where it first passes behind what stands there.
+fn mirror(pos: vec3<f32>, r: vec3<f32>) -> vec4<f32> {
+    if (r.y <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let size = g.view.xy;
+    var prev = 0.0;
+    var t = 0.6;
+    for (var k = 0; k < SSR_STEPS; k++) {
+        let s = on_screen(pos + r * t);
+        if (s.z <= NEAR_PLANE || any(s.xy < vec2<f32>(0.0)) || any(s.xy > vec2<f32>(1.0))) {
+            break;
+        }
+        let d = textureLoad(scene_depth, vec2<i32>(s.xy * size), 0);
+        let behind = NEAR_PLANE / max(d, 1e-7);
+        if (d > 0.0 && s.z > behind && s.z - behind < 1.5 + 0.06 * s.z) {
+            var lo = prev;
+            var hi = t;
+            for (var j = 0; j < 4; j++) {
+                let mid = 0.5 * (lo + hi);
+                let m = on_screen(pos + r * mid);
+                let dm = textureLoad(scene_depth, vec2<i32>(clamp(m.xy, vec2<f32>(0.0), vec2<f32>(0.999)) * size), 0);
+                if (dm > 0.0 && m.z > NEAR_PLANE / dm) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            let h = on_screen(pos + r * hi);
+            let edge = smoothstep(0.0, 0.1, min(min(h.x, 1.0 - h.x), min(h.y, 1.0 - h.y)));
+            let far = 1.0 - smoothstep(0.6, 1.0, f32(k) / f32(SSR_STEPS));
+            return vec4<f32>(textureSampleLevel(scene_color, scene_samp, h.xy, 0.0).rgb, edge * far);
+        }
+        prev = t;
+        t = t * SSR_GROW;
+    }
+    return vec4<f32>(0.0);
 }
 
 /// Energy: noise flowing up and over it, thick here and torn there. Fire
@@ -157,6 +224,24 @@ fn energy(i: WorldOut, n: vec3<f32>) -> vec4<f32> {
 
 @fragment
 fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return world(i, front);
+}
+
+/// What is see-through, in the pass after the solid one: the sea mirrors
+/// what stands about it (`mirror`); the rest as ever.
+@fragment
+fn faint_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    if (i32(i.extra.z + 0.5) == WATER) {
+        let n = sea_normal(i.pos);
+        let v = normalize(g.eye.xyz - i.pos);
+        // Off waves calmed a little, so the reflection does not shimmer.
+        let r = reflect(-v, normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.65)));
+        return sea_shade(i.pos, i.tint.a, n, mirror(i.pos, r));
+    }
+    return world(i, front);
+}
+
+fn world(i: WorldOut, front: bool) -> vec4<f32> {
     var n = normalize(i.nrm);
     if (!front) {
         n = -n;

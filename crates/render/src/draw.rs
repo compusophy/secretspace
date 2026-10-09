@@ -7,7 +7,8 @@
 
 use crate::buffers::{make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, Run};
 use crate::grid::Grid;
-use crate::post::{Post, DEPTH, HDR};
+use crate::pipes::{buffer, pipeline, Kind, Shared};
+use crate::post::{Post, HDR};
 use crate::terrain::Terrain;
 use crate::{geo, laws, m4, shaders, shadow, Frame, Item, Material, Mesh, Pass, Quality, M4};
 use gpu::wgpu;
@@ -48,6 +49,11 @@ pub struct Renderer {
     /// read (made again with the screen's targets: their size).
     soft_sparks: wgpu::RenderPipeline,
     soft_layout: wgpu::BindGroupLayout,
+    /// The see-through, the sea mirroring the picture so far; a sampler
+    /// for that picture, and a stand-in when there is none.
+    faint_ssr: wgpu::RenderPipeline,
+    scene_samp: wgpu::Sampler,
+    nothing: wgpu::TextureView,
     soft_group: Option<(wgpu::BindGroup, (u32, u32))>,
     grass: wgpu::RenderPipeline,
     globals: [wgpu::Buffer; 2],
@@ -82,63 +88,6 @@ pub struct Renderer {
     pub stats: Stats,
 }
 
-/// What every scene pipeline shares.
-struct Shared<'a> {
-    device: &'a wgpu::Device,
-    layout: &'a wgpu::PipelineLayout,
-    module: &'a wgpu::ShaderModule,
-    samples: u32,
-}
-
-struct Kind<'a> {
-    entry: (&'a str, &'a str),
-    buffers: &'a [Option<wgpu::VertexBufferLayout<'a>>],
-    blend: Option<wgpu::BlendState>,
-    depth: (bool, wgpu::CompareFunction),
-    cull: Option<wgpu::Face>,
-}
-
-fn pipeline(s: &Shared, k: Kind) -> wgpu::RenderPipeline {
-    s.device
-        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(k.entry.0),
-            layout: Some(s.layout),
-            vertex: wgpu::VertexState {
-                module: s.module,
-                entry_point: Some(k.entry.0),
-                compilation_options: Default::default(),
-                buffers: k.buffers,
-            },
-            primitive: wgpu::PrimitiveState {
-                cull_mode: k.cull,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH,
-                depth_write_enabled: Some(k.depth.0),
-                depth_compare: Some(k.depth.1),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: s.samples,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: s.module,
-                entry_point: Some(k.entry.1),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: HDR,
-                    blend: k.blend,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        })
-}
-
 impl Renderer {
     /// A renderer finishing into targets of `format`, doing as much as
     /// `quality` says.
@@ -148,54 +97,7 @@ impl Renderer {
         format: wgpu::TextureFormat,
         quality: Quality,
     ) -> Renderer {
-        let frag = wgpu::ShaderStages::FRAGMENT;
-        let both = wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT;
-        let buffer = |binding, ty, visibility| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility,
-            ty: wgpu::BindingType::Buffer {
-                ty,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        };
-        let storage = wgpu::BufferBindingType::Storage { read_only: true };
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("engine"),
-            entries: &[
-                buffer(0, wgpu::BufferBindingType::Uniform, both),
-                buffer(1, storage, frag),
-                buffer(2, storage, frag),
-                buffer(3, storage, frag),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: frag,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 5,
-                    visibility: frag,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: both,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let layout = crate::pipes::scene_layout(device);
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("engine"),
             bind_group_layouts: &[Some(&layout)],
@@ -203,7 +105,7 @@ impl Renderer {
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("scene"),
-            source: wgpu::ShaderSource::Wgsl(shaders::scene(quality.msaa > 1).into()),
+            source: wgpu::ShaderSource::Wgsl(shaders::scene(quality.msaa > 1, quality.ssr).into()),
         });
         let vertex = wgpu::VertexBufferLayout {
             array_stride: (geo::STRIDE * 4) as u64,
@@ -275,19 +177,7 @@ impl Renderer {
         );
         // Sparks that fade into what stands behind them read the depth (a
         // second group), in the pass that only reads it.
-        let soft_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("soft"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: frag,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Depth,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: quality.msaa > 1,
-                },
-                count: None,
-            }],
-        });
+        let soft_layout = crate::pipes::soft_layout(device, quality.msaa > 1);
         let soft_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("soft"),
             bind_group_layouts: &[Some(&layout), Some(&soft_layout)],
@@ -304,6 +194,16 @@ impl Renderer {
                 blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 depth: (false, GreaterEqual),
                 cull: None,
+            },
+        );
+        let faint_ssr = pipeline(
+            &Shared {
+                layout: &soft_pl,
+                ..shared
+            },
+            Kind {
+                entry: ("world_vs", "faint_fs"),
+                ..world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None)
             },
         );
         let grass = pipeline(
@@ -433,6 +333,14 @@ impl Renderer {
             sparks,
             soft_sparks,
             soft_layout,
+            faint_ssr,
+            scene_samp: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("scene"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            }),
+            nothing: crate::post::texture(device, "nothing", (1, 1), HDR, 1, true),
             soft_group: None,
             grass,
             globals: [
@@ -865,16 +773,36 @@ impl Renderer {
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("soft"),
                 layout: &self.soft_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&t.depth),
-                }],
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&t.depth),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            t.resolve.as_ref().unwrap_or(&self.nothing),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.scene_samp),
+                    },
+                ],
             });
             self.soft_group = Some((group, size));
         }
         let soft = self.soft_group.as_ref().filter(|_| split).map(|g| &g.0);
+        // The sea mirrors the picture so far (resolved into a copy first).
+        let ssr = split && self.quality.ssr > 0 && t.resolve.is_some();
         let lit = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
-            pass.set_pipeline(&self.faint);
+            match soft.filter(|_| ssr) {
+                Some(group) => {
+                    pass.set_pipeline(&self.faint_ssr);
+                    pass.set_bind_group(1, group, &[]);
+                }
+                None => pass.set_pipeline(&self.faint),
+            }
             runs_of(
                 pass,
                 meshes,
@@ -937,6 +865,10 @@ impl Renderer {
         }
         if split {
             self.post.occlude(encoder, &queue, &f.cam, &f.look);
+            if ssr {
+                // Nothing drawn: the picture so far, resolved for the sea.
+                drop(t.pass(encoder, "scene", None, (false, false), true));
+            }
             let mut pass = t.pass(encoder, "lit", None, (false, false), false);
             pass.set_bind_group(0, &groups[0], &[]);
             lit(&mut pass, &mut stats);

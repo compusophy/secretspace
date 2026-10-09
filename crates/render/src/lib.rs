@@ -20,6 +20,7 @@ mod buffers;
 mod cull;
 mod draw;
 mod globals;
+mod pipes;
 mod post;
 mod shafts;
 
@@ -343,6 +344,9 @@ pub struct Quality {
     pub bloom_levels: u32,
     pub ao: u32,
     pub shafts: bool,
+    /// Steps the sea's reflections march across the screen (0: the sky
+    /// alone).
+    pub ssr: u32,
 }
 
 impl Quality {
@@ -361,6 +365,7 @@ impl Quality {
         Quality {
             ao: if query.contains("ao=0") { 0 } else { q.ao },
             shafts: q.shafts && !query.contains("shafts=0"),
+            ssr: if query.contains("ssr=0") { 0 } else { q.ssr },
             ..q
         }
     }
@@ -372,6 +377,7 @@ impl Quality {
             Quality {
                 ao: self.ao,
                 shafts: self.shafts,
+                ssr: self.ssr,
                 ..*t
             } == self
         })?;
@@ -379,6 +385,7 @@ impl Quality {
         Some(Quality {
             ao: if self.ao == 0 { 0 } else { next.ao },
             shafts: self.shafts && next.shafts,
+            ssr: if self.ssr == 0 { 0 } else { next.ssr },
             ..next
         })
     }
@@ -392,6 +399,7 @@ impl Quality {
         bloom_levels: 6,
         ao: 6,
         shafts: true,
+        ssr: 16,
     };
     pub const MEDIUM: Quality = Quality {
         msaa: 4,
@@ -402,6 +410,7 @@ impl Quality {
         bloom_levels: 5,
         ao: 4,
         shafts: true,
+        ssr: 10,
     };
     pub const LOW: Quality = Quality {
         msaa: 1,
@@ -412,6 +421,7 @@ impl Quality {
         bloom_levels: 4,
         ao: 0,
         shafts: false,
+        ssr: 0,
     };
 }
 

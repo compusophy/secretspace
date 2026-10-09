@@ -238,7 +238,15 @@ Done, across phases, in `crates/render`:
   Charlie sheen, its colour lighter) and skin (light wrapped further in
   red) materials. `Look::glow` scales all that glows (emission, sparks,
   point lights), so a look exposed for a dark night keeps a spell its
-  colour instead of burning it white. Not yet: auto exposure, DoF, IBL.
+  colour instead of burning it white. Screen-space reflections on the
+  sea (`shaders::world` `mirror`, `Quality::ssr` steps: 16 high, 10
+  medium, none low; `?ssr=0`): the picture so far is resolved into a
+  copy before the see-through pass, and the sea marches its reflected
+  ray (off waves calmed by two thirds) out to 120 m in growing steps,
+  refines where it first passes behind what stands there, and mixes that
+  over the sky's reflection, fading at the screen's edge and far off.
+  What glows is drawn after the copy, so it is not mirrored yet. Not yet:
+  auto exposure, DoF, IBL.
 - Phase 5 (part): sparks with shapes (`Shape`: a glow, a licking flame,
   a puff of smoke laid over rather than added, a four-rayed glint), each
   stretched along its motion into a streak (`Spark::v`), flames and
