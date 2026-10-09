@@ -704,13 +704,14 @@ fn fresh(p: &mut Player) {
 
 /// In the lobby, a spell of every slot to practise with (unhurt).
 pub(crate) fn warmup(p: &mut Player, rng: &mut Rng) {
-    let mut two = |from: [u8; 4]| {
-        let a = (rng.next_u64() % 4) as usize;
-        let b = (a + 1 + (rng.next_u64() % 3) as usize) % 4;
+    let mut two = |from: &[u8]| {
+        let n = from.len();
+        let a = (rng.next_u64() % n as u64) as usize;
+        let b = (a + 1 + (rng.next_u64() % (n as u64 - 1)) as usize) % n;
         [from[a], from[b]]
     };
-    let [a, b] = two(spell::OFFENSE);
-    let [c, d] = two(spell::UTILITY);
+    let [a, b] = two(&spell::OFFENSE);
+    let [c, d] = two(&spell::UTILITY);
     p.slots = [a, b, c, d].map(|spell| Some(Slot { spell, rank: 1 }));
     p.book = [0; SPELLS.len()];
     for s in [a, b, c, d] {

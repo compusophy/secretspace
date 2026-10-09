@@ -11,10 +11,10 @@ use super::{bolt, falls, on_wizard, shows, Draw};
 use crate::look::Look;
 
 /// The effects there are, by name.
-pub const NAMES: [&str; 21] = [
+pub const NAMES: [&str; 23] = [
     "wand", "fireball", "burst", "lance", "frost", "shatter", "mark", "strike", "blink", "arrive",
     "ward", "break", "mend", "gust", "level", "shield", "chill", "mending", "fall", "sparks",
-    "storm",
+    "storm", "tether", "catch",
 ];
 
 /// Effect `name` at `age` ms (`now` ms, `t` s), cast from `at` (feet)
@@ -144,6 +144,22 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
         "fall" => {
             falls(look, d, &[(now - age, at, 1)], now);
             None
+        }
+        // A rope to a point up ahead (`age` since it was thrown), and the
+        // catch there.
+        "tether" | "catch" => {
+            let to = geo::add(ahead(9.0), [0.0, 4.0, 0.0]);
+            let e = cast(spell::TETHER, 1, to);
+            if name == "tether" {
+                let s = Seen {
+                    id: 1,
+                    p: at,
+                    fx: fx::TETHER,
+                    ..Seen::default()
+                };
+                super::ropes(look, d, &[s], &[(now - age, e)], now);
+            }
+            Some(e)
         }
         _ => None,
     };

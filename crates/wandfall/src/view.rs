@@ -62,6 +62,7 @@ pub fn frame(w: &World, you: u16) -> Frame {
                 fx: if p.shield > 0 { fx::SHIELD } else { 0 }
                     | if p.body.chill > 0 { fx::CHILLED } else { 0 }
                     | if p.mend > 0 { fx::MENDING } else { 0 }
+                    | if p.body.tether > 0 { fx::TETHER } else { 0 }
                     | if p.last.keys & keys::AIM != 0 {
                         fx::AIM
                     } else {

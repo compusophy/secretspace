@@ -43,6 +43,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             set(&mut me.flags, flag::CROUCH, body.crouch);
             set(&mut me.flags, flag::SPRINT, body.sprint);
             set(&mut me.flags, flag::SLIDE, body.slide);
+            set(&mut me.fx, proto::fx::TETHER, body.tether > 0);
         }
     }
     let (cam, watching, orbit) = camera(p, &others, feet, now, dt, aspect);

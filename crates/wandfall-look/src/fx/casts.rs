@@ -57,6 +57,7 @@ pub fn shows(
                         flash(look, d, at, fwd, (s, secs), mine);
                     }
                     (spell::FROST, 1) => shatter(look, d, at, secs, seed),
+                    (spell::TETHER, 1) => super::rope::catch(look, d, at, secs, seed),
                     (spell::WARD, 0) => {
                         let f = 1.0 - secs / 0.4;
                         if f > 0.0 {

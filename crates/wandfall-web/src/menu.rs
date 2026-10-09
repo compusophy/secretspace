@@ -114,14 +114,18 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
         c.text_centred(w / 2, ty, &line, ui, DIM);
         ty += 11 * ui;
     }
-    // The eight spells: what you hurt with, what you live by.
+    // The spells: what you hurt with, what you live by.
     ty += 6 * ui;
     let gap = s / 4;
-    for (label, row) in [("to hurt", spell::OFFENSE), ("to live", spell::UTILITY)] {
+    for (label, row) in [
+        ("to hurt", &spell::OFFENSE[..]),
+        ("to live", &spell::UTILITY[..]),
+    ] {
         if ty + s > h - 14 * ui {
             break;
         }
-        let row_w = 4 * s + 3 * gap;
+        let n = row.len() as i32;
+        let row_w = n * s + (n - 1) * gap;
         let x0 = (w - row_w) / 2;
         c.text_shadowed(
             x0 - pixels::text_width(label, ui) - 8 * ui,
@@ -130,7 +134,7 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
             ui,
             DIM,
         );
-        for (k, sp) in row.into_iter().enumerate() {
+        for (k, &sp) in row.iter().enumerate() {
             let b = Rect::new(
                 (x0 + k as i32 * (s + gap)) as f32,
                 ty as f32,

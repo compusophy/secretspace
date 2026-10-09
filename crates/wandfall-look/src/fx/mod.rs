@@ -16,10 +16,13 @@
 //!   shatters when it breaks.
 //! - Mend (green): a circle of runes under the feet, motes winding up.
 //! - Gust (pale): wind wheeling out in streaks, dust thrown up, a dome.
+//! - Tether (lime): a rope of light thrown out slack, taut as it hauls,
+//!   motes running up it; sparks where it bit.
 //!
 //! `bolts`: spells in flight; `casts`: what each cast and landing shows;
 //! `blasts`: the big ones (a fireball's burst, lightning, blink, gust);
-//! `marks`: on wizards, the fallen, dust; `meshes`: the shapes;
+//! `marks`: on wizards, the fallen, dust; `rope`: the Tether's;
+//! `meshes`: the shapes;
 //! `gallery`: any one of them on its own, to look at.
 
 mod blasts;
@@ -28,11 +31,13 @@ mod casts;
 mod gallery;
 mod marks;
 pub mod meshes;
+mod rope;
 
 pub use bolts::bolt;
 pub use casts::shows;
 pub use gallery::{gallery, NAMES};
 pub use marks::{dust, falls, on_wizard};
+pub use rope::ropes;
 
 use render::geo::{self, hash, mix, rgb, unit, V3};
 use render::{m4, Item, Light, Material, Mesh, Pass, Shape, Spark};
@@ -62,6 +67,7 @@ pub fn colour(s: u8) -> V3 {
         spell::WARD => rgb(80, 140, 255),
         spell::MEND => rgb(120, 235, 110),
         spell::GUST => rgb(215, 235, 245),
+        spell::TETHER => rgb(200, 255, 80),
         _ => GOLD,
     }
 }

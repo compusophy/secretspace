@@ -137,6 +137,15 @@ of combat styles and all varieties to counter all varieties".
       | Ward | a 40 shield for 4 s; bursts when broken | a Lance, a Fireball | patience |
       | Mend | 40 health in 2 s | the long fight, the storm | a burst; Lightning on the still |
       | Gust | throws back all within 7 m, blows their bolts away | Frost, a rush, a ledge | anything from afar |
+      | Tether | a rope of light, 40 m, that hauls you where it catches (the air holds it at 24 m); jump lets go with the speed kept | a cliff, a tower, a runner, the storm | Frost (it slips), the Lance |
+
+      The Tether came later (the owner: "high movement oriented gameplay"):
+      the ninth spell, the first to move you over time rather than at once.
+      Its pull lives in the body (`wandfall/src/tether.rs`, part of
+      `motion::step`), so the page predicts it to the bit once the cast
+      comes back; arriving hops you up onto what it caught, a jump lets go
+      early as a slingshot. Its rope is lime (`fx/rope.rs`): thrown out
+      slack, taut as it hauls, motes running up it.
 - [x] **The wand is the heartbeat, spells the moments:** 8 a bolt every
       0.43 s; everyone drops with one spell to hurt with. Bot matches deal
       about half their damage with spells, spread over all four

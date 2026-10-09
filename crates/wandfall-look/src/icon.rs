@@ -173,6 +173,27 @@ pub fn glyph(c: &mut Canvas, sp: u8, b: Rect, col: Rgba, back: Rgba) {
                 stroke(c, &line, w, col);
             }
         }
+        spell::TETHER => {
+            // A rope wavering up to a hook that bites.
+            let w = s * 0.08;
+            let line: Vec<(f32, f32)> = (0..=14)
+                .map(|k| {
+                    let u = k as f32 / 14.0;
+                    let wave = (u * std::f32::consts::PI * 3.0).sin() * 0.06 * (1.0 - u);
+                    at(0.14 + 0.5 * u + wave, 0.86 - 0.5 * u + wave)
+                })
+                .collect();
+            stroke(c, &line, w, col);
+            let tip = (0.76, 0.24);
+            stroke(c, &pts(&[(0.62, 0.38), tip]), s * 0.1, col);
+            for barb in [
+                [(0.94, 0.22), (0.9, 0.36)],
+                [(0.74, 0.06), (0.62, 0.12)],
+                [(0.92, 0.07), (0.94, 0.1)],
+            ] {
+                stroke(c, &pts(&[tip, barb[0], barb[1]]), w, col);
+            }
+        }
         // The wand (what a knockout was dealt with): a spark.
         _ => {
             let (x, y) = at(0.5, 0.5);

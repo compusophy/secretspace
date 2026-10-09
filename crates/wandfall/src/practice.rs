@@ -59,9 +59,15 @@ pub fn setup(w: &mut World) {
     }
     loot::scatter(w);
     // A few cubes just ahead of where you start, to learn by.
-    let first = [spell::FROST, spell::WARD, spell::LIGHTNING, spell::BLINK];
+    let first = [
+        spell::FROST,
+        spell::WARD,
+        spell::LIGHTNING,
+        spell::BLINK,
+        spell::TETHER,
+    ];
     for (k, &sp) in first.iter().enumerate() {
-        let a = (k as f32 - 1.5) * 0.35;
+        let a = (k as f32 - 2.0) * 0.35;
         let d = 4.5 + k as f32 * 1.2;
         let at = clear(w, [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d]);
         loot::drop_scroll(w, sp, 1, [at[0], 0.0, at[1]], 0.0);

@@ -2,7 +2,8 @@
 //! above your pace bleeds away, it does not vanish), slide (crouch at
 //! speed; gravity carries it down a hill), walk slower up a slope and
 //! faster down it, jump, glide down in the drop, wade in the shallows,
-//! step up small rises, and never through trees, rocks or pillars.
+//! step up small rises, and never through trees, rocks or pillars; a
+//! Tether hauls you (`tether`).
 //! Arithmetic only, so the page predicts its own wizard to the bit.
 
 use crate::laws::*;
@@ -70,6 +71,9 @@ pub struct Body {
     pub air_jumped: bool,
     /// Ticks left of a climb onto a ledge (steering held till it is over).
     pub mantle: u8,
+    /// Ticks left pulled by a Tether, toward where it caught.
+    pub tether: u8,
+    pub anchor: [f32; 3],
 }
 
 impl Body {
@@ -174,6 +178,8 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     }
     if b.mantle > 0 {
         // Climbing a ledge: carried over it, not steered.
+    } else if b.tether > 0 {
+        crate::tether::pull(b);
     } else if b.slide && b.ground {
         // Gravity down the slope; friction; a little steering, no faster.
         let k = GRAVITY * DT / (1.0 + gx * gx + gz * gz);
@@ -256,8 +262,12 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     // A jump is a press: holding it does not hop again. Pressed a moment
     // early it waits for the ground; a moment after running off an edge
     // it still goes.
-    let press = has(keys::JUMP) && !b.held;
+    let mut press = has(keys::JUMP) && !b.held;
     b.held = has(keys::JUMP);
+    if press && b.tether > 0 {
+        crate::tether::let_go(b);
+        press = false;
+    }
     b.buffer = if press {
         JUMP_BUFFER
     } else {
@@ -319,6 +329,7 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     }
     // A launch rune underfoot: up into the sky, onto your broom.
     if b.ground && !b.glide && map.pad_under(b.p).is_some() {
+        b.tether = 0;
         b.v[1] = PAD_UP;
         b.glide = true;
         b.ground = false;
@@ -331,7 +342,7 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     // steering held till then.
     if b.mantle > 0 {
         b.mantle -= 1;
-    } else if !b.ground && !b.glide && len > 1e-6 {
+    } else if !b.ground && !b.glide && b.tether == 0 && len > 1e-6 {
         if let Some((top, mid)) = map.ledge(b.p, (wx, wz)) {
             let need = (2.0 * GRAVITY * (top + MANTLE_OVER - b.p[1])).sqrt();
             if b.v[1] < need {
@@ -352,7 +363,9 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     } else {
         GRAVITY
     };
-    b.v[1] -= pull * DT;
+    // A Tether bears most of your weight.
+    let bear = if b.tether > 0 { TETHER_GRAVITY } else { 1.0 };
+    b.v[1] -= pull * bear * DT;
     if b.glide && b.v[1] < -GLIDE_FALL {
         b.v[1] = -GLIDE_FALL;
     }

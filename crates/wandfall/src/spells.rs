@@ -1,5 +1,5 @@
 //! Spells: what each does when cast, when its bolt lands, and over time.
-//! Eight, one verb each; damage grows with the caster's level, every
+//! Nine, one verb each; damage grows with the caster's level, every
 //! effect with the spell's rank.
 //!
 //! - Fireball: a ball of fire bursting where it lands (the splash finds
@@ -11,6 +11,8 @@
 //! - Ward: a brief shield that eats the next big hit.
 //! - Mend: heal, quickly.
 //! - Gust: throws back everyone near you, and blows their bolts away.
+//! - Tether: a rope of light that catches where you look and hauls you
+//!   there (`tether`, in your body's motion, so the page predicts it).
 
 use crate::laws::*;
 use crate::loot::{cooldown, level_scale, power};
@@ -135,6 +137,28 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
             p.mend_until = tick + MEND_TICKS;
         }
         spell::GUST => gust(w, k, pw as f32, ev),
+        spell::TETHER => {
+            // It catches the first thing on the line, or the air itself
+            // short of its reach.
+            let reach = pw as f32;
+            let (mut to, _) = sight(w, by, eye, d, reach);
+            let far =
+                ((to[0] - eye[0]).powi(2) + (to[1] - eye[1]).powi(2) + (to[2] - eye[2]).powi(2))
+                    .sqrt();
+            if far > reach - 0.01 {
+                to = ahead(eye, d, reach * TETHER_AIR);
+            }
+            let b = &mut w.players[k].body;
+            b.anchor = to;
+            b.tether = TETHER_TICKS;
+            b.mantle = 0;
+            ev.push(Event::Cast {
+                by,
+                spell: spell::TETHER,
+                stage: 1,
+                at: to,
+            });
+        }
         _ => {}
     }
 }
@@ -468,5 +492,27 @@ mod tests {
         assert!(w.players[0].cds[3] > 0, "and now it cools down");
         cast(&mut w, 0, 3, &mut ev);
         assert_eq!(w.players[0].body.p, after, "not twice");
+    }
+
+    #[test]
+    fn a_tether_catches_where_you_look() {
+        let (mut w, _, _) = duel(30.0);
+        let mut ev = Vec::new();
+        give(&mut w, 0, 2, spell::TETHER);
+        // Looking down at the ground ahead: it catches there.
+        w.players[0].pitch = -6000;
+        cast(&mut w, 0, 2, &mut ev);
+        let b = w.players[0].body;
+        assert_eq!(b.tether, TETHER_TICKS);
+        let ahead = b.anchor[0] - b.p[0];
+        assert!(ahead > 1.0 && ahead < 40.0, "{b:?}");
+        assert!(ev.iter().any(|e| matches!(
+            e,
+            Event::Cast {
+                spell: spell::TETHER,
+                stage: 1,
+                ..
+            }
+        )));
     }
 }

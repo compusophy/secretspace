@@ -302,6 +302,10 @@ fn spells(me: &Player, mark: Option<f32>, flee: bool, tick: u32, seed: u64) -> u
             (spell::BLINK, _) => {
                 flee || (mark.is_some() && (me.body.chill > 0 || (struck && hurt < 30)))
             }
+            // Away from the storm, or after a mark that keeps its
+            // distance.
+            (spell::TETHER, Some(d)) => d > range(me) * 1.6,
+            (spell::TETHER, None) => flee,
             _ => false,
         };
         if go {

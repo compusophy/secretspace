@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 12;
+pub const PROTO: u8 = 13;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -138,6 +138,8 @@ pub mod fx {
     pub const CHILLED: u8 = 2;
     pub const MENDING: u8 = 4;
     pub const AIM: u8 = 8;
+    /// Hauled by a Tether (its rope runs to where the cast said).
+    pub const TETHER: u8 = 16;
 }
 
 pub mod flag {
@@ -247,7 +249,9 @@ impl Frame {
                     .u8(b.breath)
                     .u8(b.landed)
                     .u8(b.mantle)
-                    .u16(o.body.chill)
+                    .u8(b.tether);
+                f32s(&mut w, b.anchor);
+                w.u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
                     .u8(o.kills)
@@ -319,6 +323,7 @@ impl Frame {
             let jump = r.u8()?;
             let slide_cd = r.u8()?;
             let (spent, breath, landed, mantle) = (r.u16()?, r.u8()?, r.u8()?, r.u8()?);
+            let (tether, anchor) = (r.u8()?, read_f32s(&mut r)?);
             let mut o = Own {
                 body: Body {
                     p,
@@ -333,6 +338,8 @@ impl Frame {
                     air_jumped: g & 128 != 0,
                     landed,
                     mantle,
+                    tether,
+                    anchor,
                     slide_cd,
                     spent,
                     breath,
@@ -662,6 +669,8 @@ mod tests {
                     landed: 2,
                     air_jumped: true,
                     mantle: 5,
+                    tether: 9,
+                    anchor: [3.25, -1.0e-3, 77.7],
                 },
                 seq: 65535,
                 hp: 252,
@@ -672,7 +681,7 @@ mod tests {
                 shield: 40,
                 slots: [Some((0, 3)), None, Some((7, 1)), None],
                 cds: [0, 300, 12, 0],
-                book: [3, 0, 1, 2, 0, 0, 0, 1],
+                book: [3, 0, 1, 2, 0, 0, 0, 1, 2],
             }),
             players: vec![Seen {
                 id: 4,

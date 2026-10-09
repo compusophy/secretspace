@@ -150,6 +150,7 @@ pub fn draw(
         None => &st.shows,
     };
     fx::shows(look, d, shows, now, (eyes.id, eyes.tip), at_of);
+    fx::ropes(look, d, others, shows, now);
     // The knocked out fall, and burst into sparks.
     let falls: Vec<_> = st
         .falls

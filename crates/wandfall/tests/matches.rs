@@ -17,7 +17,7 @@ fn a_match_runs_to_a_winner_and_starts_again() {
     let (mut began, mut winner, mut shot, mut storm, mut lobby) = (false, None, 0, 0, false);
     let (mut casts, mut levels, mut top, mut opened) = (0, 0, 1, 0);
     let (mut lying, mut fought): (Vec<u16>, bool) = (Vec::new(), false);
-    let (mut hops, mut launches) = (0, 0);
+    let (mut hops, mut launches, mut tethers) = (0, 0, 0);
     for _ in 0..TICK_HZ * 60 * 6 {
         let before: Vec<(u16, wandfall::motion::Body)> =
             w.players.iter().map(|p| (p.id, p.body)).collect();
@@ -45,6 +45,11 @@ fn a_match_runs_to_a_winner_and_starts_again() {
                 Event::Win { who } => winner = Some(who),
                 Event::Lobby => lobby = true,
                 Event::Cast { stage: 0, .. } => casts += 1,
+                Event::Cast {
+                    spell: spell::TETHER,
+                    stage: 1,
+                    ..
+                } => tethers += 1,
                 Event::Level { level, .. } => {
                     levels += 1;
                     top = top.max(level);
@@ -88,7 +93,7 @@ fn a_match_runs_to_a_winner_and_starts_again() {
     );
     assert!(hops >= 20, "bots hop their way about: {hops}");
     println!(
-        "knocked out {shot}, storm {storm}, cubes {opened}, casts {casts}, levels {levels} (top {top}), hops {hops}, launches {launches}"
+        "knocked out {shot}, storm {storm}, cubes {opened}, casts {casts}, levels {levels} (top {top}), hops {hops}, launches {launches}, tethers {tethers}"
     );
     let _ = winner;
 }

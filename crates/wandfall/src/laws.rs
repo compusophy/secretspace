@@ -248,9 +248,9 @@ pub struct Spell {
     pub beaten: &'static str,
 }
 
-/// Eight spells, one verb each. Every style has its answer: range beats
+/// Nine spells, one verb each. Every style has its answer: range beats
 /// the mender, close beats the sniper, Gust and Blink beat close, the sky
-/// beats the still, moving beats the sky.
+/// beats the still, moving beats the sky; the Tether climbs and chases.
 pub mod spell {
     pub const FIREBALL: u8 = 0;
     pub const LANCE: u8 = 1;
@@ -260,11 +260,12 @@ pub mod spell {
     pub const WARD: u8 = 5;
     pub const MEND: u8 = 6;
     pub const GUST: u8 = 7;
+    pub const TETHER: u8 = 8;
     pub const OFFENSE: [u8; 4] = [FIREBALL, LANCE, FROST, LIGHTNING];
-    pub const UTILITY: [u8; 4] = [BLINK, WARD, MEND, GUST];
+    pub const UTILITY: [u8; 5] = [BLINK, WARD, MEND, GUST, TETHER];
 }
 
-pub const SPELLS: [Spell; 8] = [
+pub const SPELLS: [Spell; 9] = [
     Spell {
         name: "Fireball",
         kind: Kind::Offense,
@@ -337,6 +338,15 @@ pub const SPELLS: [Spell; 8] = [
         beats: "Frost, a rush, a ledge, the storm",
         beaten: "anything from afar",
     },
+    Spell {
+        name: "Tether",
+        kind: Kind::Utility,
+        cooldown: 210,
+        power: 40,
+        what: "a rope of light that pulls you where it catches",
+        beats: "a cliff, a tower, a runner, the storm",
+        beaten: "Frost (it slips), the Lance (a line in the air)",
+    },
 ];
 
 // The spells' shapes.
@@ -360,6 +370,18 @@ pub const MEND_TICKS: u32 = 60;
 pub const GUST_RADIUS: f32 = 7.0;
 pub const GUST_LIFT: f32 = 7.0;
 pub const GUST_DAMAGE: i32 = 5;
+/// The Tether: how long it can pull (ticks), how fast (m/s) and how
+/// quickly the pull takes hold (a share a second); how near counts as
+/// there (m), the hop up off it (m/s), and how much gravity still pulls
+/// while it holds you.
+pub const TETHER_TICKS: u8 = 60;
+pub const TETHER_SPEED: f32 = 24.0;
+pub const TETHER_GRIP: f32 = 7.0;
+pub const TETHER_ARRIVE: f32 = 1.6;
+pub const TETHER_POP: f32 = 7.0;
+pub const TETHER_GRAVITY: f32 = 0.2;
+/// Caught on nothing, the air holds it this share of its reach.
+pub const TETHER_AIR: f32 = 0.6;
 
 // The practice range: dummies about where you start (metres away,
 // degrees round, and how they behave: 1 stands, 2 strafes, 3 spars when

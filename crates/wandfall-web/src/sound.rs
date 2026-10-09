@@ -11,7 +11,7 @@
 use engine::synth::{Env, Synth, Wave, RATE};
 use kit::audio::Audio;
 use render::V3;
-use wandfall::laws::spell;
+use wandfall::laws::{spell, SPELLS};
 use wandfall::proto::{Ev, Frame, Loot};
 use wandfall::world::WAND;
 
@@ -23,8 +23,8 @@ const STILL: (f32, f32) = (0.0, 0.0);
 pub struct Sounds {
     pub audio: Audio,
     wand: usize,
-    cast: [usize; 8],
-    land: [usize; 8],
+    cast: [usize; SPELLS.len()],
+    land: [usize; SPELLS.len()],
     mark: usize,
     shatter: usize,
     hit: usize,
@@ -248,6 +248,32 @@ fn cast(sp: u8) -> Vec<f32> {
             );
             s.done(0.6)
         }
+        spell::TETHER => {
+            // Thrown: a whip of air, and the rope's twang as it pays out.
+            let mut s = Synth::new(0.45);
+            s.noise(
+                (0.0, 0.14),
+                Env::new(0.7, 0.004, 0.04),
+                (1200.0, 2600.0),
+                (4000.0, 9000.0),
+                0.0,
+            )
+            .tone(
+                Sine,
+                (1100.0, 3000.0),
+                (0.0, 0.1),
+                Env::new(0.35, 0.002, 0.03),
+                STILL,
+            )
+            .tone(
+                Saw,
+                (190.0, 120.0),
+                (0.05, 0.38),
+                Env::new(0.35, 0.01, 0.12),
+                (28.0, 0.05),
+            );
+            s.done(0.8)
+        }
         _ => wand(),
     }
 }
@@ -336,6 +362,32 @@ fn land(sp: u8) -> Vec<f32> {
                 STILL,
             );
             s.done(0.35)
+        }
+        spell::TETHER => {
+            // It bites: a knock and a ring.
+            let mut s = Synth::new(0.25);
+            s.tone(
+                Triangle,
+                (620.0, 300.0),
+                (0.0, 0.06),
+                Env::new(0.6, 0.001, 0.02),
+                STILL,
+            )
+            .tone(
+                Sine,
+                (2200.0, 2100.0),
+                (0.0, 0.2),
+                Env::new(0.2, 0.002, 0.06),
+                STILL,
+            )
+            .noise(
+                (0.0, 0.04),
+                Env::new(0.5, 0.001, 0.01),
+                (1500.0, 1500.0),
+                (6000.0, 6000.0),
+                0.0,
+            );
+            s.done(0.5)
         }
         _ => {
             let mut s = Synth::new(0.1);
@@ -603,9 +655,10 @@ impl Sounds {
             spell::WARD,
             spell::MEND,
             spell::GUST,
+            spell::TETHER,
         ];
-        let mut cast_ = [0; 8];
-        let mut land_ = [0; 8];
+        let mut cast_ = [0; SPELLS.len()];
+        let mut land_ = [0; SPELLS.len()];
         for sp in order {
             cast_[sp as usize] = add(cast(sp));
             land_[sp as usize] = add(land(sp));
