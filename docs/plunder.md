@@ -168,11 +168,16 @@ of combat styles and all varieties to counter all varieties".
       the icon of what dealt the knockout; a card when you are out or win
       (your place, who took you and with what, knockouts, level).
 - [x] **The hub card** (from Stage C): the room itself, live, never a
-      mock-up (on the owner's word). The hub watches it (a watcher, not
-      counted) and draws it from above: the island and its places, the
-      storm's circles, every wizard, bolts and beams in their spells'
-      colours, falls; "LIVE 7 of 16 left" in a fight, "next match in 6s"
-      in the lobby, "Gecko won" after. Matches always run: bots fight while
+      mock-up (on the owner's word: "why not show real gameplay"). The hub
+      watches it (a watcher, not counted) and plays it in 3D: the engine
+      draws the match off screen (`gpu::Offscreen`, WebGPU) over a
+      fighter's shoulder (`wandfall-look`'s `Spectator`, staying with one
+      until it falls or the fight moves), the picture read back into the
+      card. The page and the card draw the match with the same code
+      (`scene`). Without WebGPU (and while it loads) the card draws the
+      island from above: places, storm, wizards, bolts, beams, falls.
+      Either way: "LIVE 7 of 16 left" in a fight, "next match in 6s" in
+      the lobby, "Gecko won" after. Matches always run: bots fight while
       no one is there, and someone arriving to a match of bots alone gets
       a new one at once (`bots_fight_while_no_one_is_here_and_make_way_for_someone`).
 - [x] **Aim and feel:** the crosshair reddens on a wizard in the Lance's

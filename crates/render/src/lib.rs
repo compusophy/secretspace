@@ -20,6 +20,7 @@ mod post;
 
 pub use draw::{Renderer, Stats};
 pub use geo::{rgb, V3};
+pub use gpu::wgpu;
 pub use kit::gl::{m4, M4};
 pub use terrain::Terrain;
 

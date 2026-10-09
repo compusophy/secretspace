@@ -402,14 +402,18 @@ name = "secretspace-hub"
 version = "0.1.0"
 dependencies = [
  "secretspace-engine",
+ "secretspace-gpu",
  "secretspace-kit",
  "secretspace-luciphon",
  "secretspace-luciphon-look",
  "secretspace-pixels",
+ "secretspace-render",
  "secretspace-wandfall",
+ "secretspace-wandfall-look",
  "secretspace-wyrm",
  "secretspace-wyrm-look",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -498,6 +502,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "secretspace-wandfall-look"
+version = "0.1.0"
+dependencies = [
+ "secretspace-pixels",
+ "secretspace-render",
+ "secretspace-wandfall",
+]
+
+[[package]]
 name = "secretspace-wandfall-web"
 version = "0.1.0"
 dependencies = [
@@ -507,6 +520,7 @@ dependencies = [
  "secretspace-pixels",
  "secretspace-render",
  "secretspace-wandfall",
+ "secretspace-wandfall-look",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]

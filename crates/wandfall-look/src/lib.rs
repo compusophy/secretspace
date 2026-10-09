@@ -1,0 +1,16 @@
+//! How Wandfall looks, drawn by the engine (`render`): the island
+//! (`land`, and its places' magic in `aura`), every wizard jointed and
+//! moving (`rig`), spells, loot and the storm (`fx`, `look`), each spell's
+//! icon (`icon`), what a page has been told of the match (`state`), and the
+//! match drawn from it (`scene`). Shared by Wandfall's page and the hub's
+//! card, which spectates the match live (`spectate`).
+
+pub mod aura;
+pub mod fx;
+pub mod icon;
+pub mod land;
+pub mod look;
+pub mod rig;
+pub mod scene;
+pub mod spectate;
+pub mod state;

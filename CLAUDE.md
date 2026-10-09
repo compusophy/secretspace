@@ -74,7 +74,9 @@ crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
 crates/luciphon*  game #2, legacy: core, -look (2D), -web (WebGL2 3D)
 crates/wandfall   game #3's core: laws trig map places motion storm world bots
                   predict proto view room (spec: docs/plunder.md)
-crates/wandfall-web  its page: state look land aura rig fx hud bar sound page
+crates/wandfall-look  its look (page + hub): look land aura rig fx state
+                  icon scene spectate
+crates/wandfall-web  its page: page bar hud menu sound touch
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -84,17 +86,17 @@ scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
 
 Server routes: `/ws/<room>` a game (`/ws` and `/ws/arena` are wyrm, for
 old pages; `?watch=1` only looks), `/ws/hub` the live Stats once a second,
-`/health` (`ok <build> ...`), `/stats` (JSON), and with `--static dist` the pages (`/arena`
-redirects to `/wyrm/`, as `web/vercel.json` does on Vercel). A page's first connection carries
+`/health` (`ok <build> ...`), `/stats` (JSON); with `--static dist` the pages (`/arena`
+redirects to `/wyrm/`, as `web/vercel.json` does). A page's first connection carries
 `?v=1` and counts a visit; visits persist in `$DATA_DIR/visits` (the image
 sets `/data`; a volume there keeps them across deploys), as are `souls`
 and `rooms/<id>/snap-*.bin`. A deploy is a Stillness: SIGTERM, each room
 `still()`s and saves, pages keep their picture and resume on reconnect.
 CI ships the server only when its build hash differs from live /health.
 
-Pixels: `kit::Screen` makes one buffer pixel `scale` CSS pixels (about 960
-across at most) and the canvas shows them sharp; `ui()` is the text scale
-that reads the same size on any screen (2 on a phone, 1 on a desktop).
+Pixels: `kit::Screen` makes a buffer pixel `scale` CSS pixels (~960 across
+at most), shown sharp; `ui()` is the text scale that reads the same on any
+screen (2 phone, 1 desktop).
 
 ## A new game, from the template
 
@@ -140,7 +142,7 @@ deviceScaleFactor: 3` at 390x844 for a phone.
   stale grid indexes snakes that are gone.
 - The page steers by the pointer's angle from the screen's centre, where
   the camera keeps your head.
-- A ring or `outside_circle` as big as the arena still only shades the
-  pixels on screen, but skip it when the edge is out of view.
+- A ring or `outside_circle` as big as the arena shades only on-screen
+  pixels; skip it when its edge is out of view.
 - Text sized for a desktop overflows a 390-px phone: wrap it (`wrap`) or
   fit it (`fit_scale`), and check the phone screenshot.

@@ -22,6 +22,7 @@ use crate::hud;
 use crate::look::{self, Look};
 use crate::menu::{self, Act, Spots};
 use crate::rig;
+use crate::scene;
 use crate::sound::Sounds;
 use crate::state::State;
 use crate::touch::Touch;
@@ -635,57 +636,6 @@ fn frame(p: &mut Page, now: f64) {
     let mut d = Draw::default();
     let mut in_storm = false;
     if let Some(i) = &p.island {
-        fx::loot(&i.look, &mut d, &p.st.loot, t, cam.eye);
-        i.look.places(&mut d, t);
-        for s in &others {
-            if s.flags & flag::ALIVE == 0 {
-                continue;
-            }
-            if !(p.alive && s.id == p.st.you) || orbit.is_some() {
-                // Casting (or firing) raises its arm; a hit flinches it.
-                let tip = fx::tip(&p.st.shows, s.id, now);
-                let fired = p.st.fired.get(&s.id).map_or(1e9, |&f| now - f);
-                let hit =
-                    p.st.bursts
-                        .iter()
-                        .filter(|b| b.1 == s.id)
-                        .map(|b| now - b.0)
-                        .fold(1e9, f64::min);
-                let pose = rig::Pose {
-                    flash: (1.0 - hit / 200.0).max(0.0) as f32,
-                    arm: (tip.1 * 2.0)
-                        .max((1.0 - fired as f32 / 450.0) * 1.5)
-                        .min(1.0),
-                    aim: s.pitch as f32 / 65536.0 * std::f32::consts::TAU,
-                    tip,
-                    glide: s.flags & flag::GLIDE != 0,
-                    t,
-                };
-                let yaw = trig::radians(s.yaw);
-                let a = p.anims.entry(s.id).or_default();
-                let stance = (s.flags & flag::GROUND != 0, s.flags & flag::CROUCH != 0);
-                if let Some(hard) = a.step(s.p, yaw, stance, dt as f32 / 1000.0) {
-                    p.st.dust.push((now, s.p, hard));
-                }
-                i.look.rig.wizard(&mut d, s.id, s.p, yaw, a, &pose);
-            }
-            fx::on_wizard(&i.look, &mut d, s, t, p.alive && s.id == p.st.you);
-        }
-        for b in p.st.bolts(now) {
-            fx::bolt(&i.look, &mut d, &b, b.by == p.st.you, t);
-        }
-        for &(at, who, what) in &p.st.bursts {
-            if let Some(s) = others.iter().find(|s| s.id == who) {
-                let pos = [s.p[0], s.p[1] + 1.2, s.p[2]];
-                i.look.burst(
-                    &mut d.lights,
-                    &mut d.sparks,
-                    pos,
-                    ((now - at) as f32, at as u32),
-                    fx::colour(what),
-                );
-            }
-        }
         // Dropping, you ride a broom.
         if p.alive && p.pred.body.glide && orbit.is_none() {
             i.look.rig.first_broom(&mut d, &cam, t);
@@ -703,53 +653,28 @@ fn frame(p: &mut Page, now: f64) {
                 (c, look::hue(p.st.you)),
             )
         });
-        let me = (p.st.you, p.pred.body.p, p.alive);
-        let at_of = |id: u16| {
-            if me.2 && id == me.0 {
-                return Some(me.1);
-            }
-            others.iter().find(|s| s.id == id).map(|s| s.p)
+        let eyes = scene::Eyes {
+            id: p.st.you,
+            at: p.pred.body.p,
+            alive: p.alive,
+            first: p.alive && orbit.is_none(),
+            tip,
         };
-        // `?hold=ms` holds every effect at that age (to look at them).
-        let hold = p.hold;
-        let held: Vec<_>;
-        let shows = match hold {
-            Some(ms) => {
-                held =
-                    p.st.shows
-                        .iter()
-                        .map(|&(w, e)| (w.max(now - ms), e))
-                        .collect();
-                &held
-            }
-            None => &p.st.shows,
+        let show = scene::Show {
+            hold: p.hold,
+            storm: !matches!(p.mode, Mode::Practice(_)),
         };
-        fx::shows(&i.look, &mut d, shows, now, (p.st.you, tip), at_of);
-        // The knocked out fall, and burst into sparks.
-        let falls: Vec<_> =
-            p.st.falls
-                .iter()
-                .map(|&(w, at, who, _)| (hold.map_or(w, |ms| w.max(now - ms)), at, who))
-                .collect();
-        for &(when, at, who, yaw) in &p.st.falls {
-            if !(p.alive && who == p.st.you) {
-                let when = hold.map_or(when, |ms| when.max(now - ms));
-                let age = ((now - when) / 1000.0) as f32;
-                i.look.rig.fallen(&mut d, who, at, trig::radians(yaw), age);
-            }
-        }
-        fx::falls(&i.look, &mut d, &falls, now);
-        fx::dust(&i.look, &mut d, &p.st.dust, now);
-        p.anims.retain(|id, _| others.iter().any(|s| s.id == *id));
-        if let Some(f) = &p.st.frame {
-            if f.phase == 1 && !matches!(p.mode, Mode::Practice(_)) {
-                i.look.storm(&mut d, f.storm.0, f.storm.1, cam.eye, t);
-                let e = cam.eye;
-                in_storm = p.alive
-                    && (e[0] - f.storm.0[0]).powi(2) + (e[2] - f.storm.0[1]).powi(2)
-                        > f.storm.1 * f.storm.1;
-            }
-        }
+        in_storm = scene::draw(
+            &i.look,
+            &mut d,
+            &mut p.st,
+            &mut p.anims,
+            &others,
+            &eyes,
+            &cam,
+            (now, dt),
+            show,
+        );
     }
     p.ear = (cam.eye, cam.yaw);
     // What the crosshair is on; where Lightning would strike, aiming.

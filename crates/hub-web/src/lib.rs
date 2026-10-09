@@ -426,6 +426,15 @@ pub fn start() -> Result<(), JsValue> {
             press: None,
         })
     });
+    // Wandfall's card plays its match in 3D where the browser offers
+    // WebGPU (off screen, read back into the card); else its map.
+    if gpu::offered() {
+        wasm_bindgen_futures::spawn_local(async {
+            if let Ok(off) = gpu::Offscreen::new().await {
+                with(|h| h.wand.give(off));
+            }
+        });
+    }
     kit::frames(|now| {
         with(|h| draw(h, now));
     });

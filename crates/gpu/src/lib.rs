@@ -7,6 +7,9 @@
 //! shaders and the tables build (the tests check every WGSL string).
 
 pub mod layer;
+mod offscreen;
+
+pub use offscreen::Offscreen;
 
 pub use wgpu;
 
@@ -14,6 +17,12 @@ pub use wgpu;
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::{offered, Frame, Gpu};
+
+/// Off the web, no browser offers WebGPU.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn offered() -> bool {
+    false
+}
 
 /// What the device can do, as the engine needs to know it.
 #[derive(Clone, Debug)]

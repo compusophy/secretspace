@@ -1,16 +1,28 @@
 //! Wandfall's card: the room itself, live. The hub watches it (as a
-//! watcher: never one of the people there) and draws it from above as the
-//! game's map does: the island and its places, the storm's circles, every
-//! wizard in its colour, bolts and beams in the colours of their spells, a
-//! burst where one falls; and how it stands: how many of how many are left
-//! in the fight, the lobby's countdown, or who won. Matches always run
-//! (bots fight while no one is there), so there is always one to show.
+//! watcher: never one of the people there) and shows the match as it is
+//! played: drawn by the engine in 3D over a fighter's shoulder (off
+//! screen, on WebGPU, and read back into the card), or, where there is no
+//! WebGPU, from above as the game's map draws it. Either way, how it
+//! stands: how many of how many are left in the fight, the lobby's
+//! countdown, or who won. Matches always run (bots fight while no one is
+//! there), so there is always one to show.
 
 use pixels::{Canvas, Rect, Rgba};
 use wandfall::laws::{MAP_HALF, SEA};
 use wandfall::map::Map;
 use wandfall::places::Place;
 use wandfall::proto::{self, flag, Ev, Frame};
+use wandfall_look::spectate::Spectator;
+
+/// The match in 3D: the engine drawing off screen, the spectator it
+/// draws, and the last picture read back.
+struct Three {
+    off: gpu::Offscreen,
+    r: render::Renderer,
+    spec: Spectator,
+    pic: Canvas,
+    has: bool,
+}
 
 /// The spells' colours (as the game draws them).
 const SPELLS: [(u8, u8, u8); 8] = [
@@ -56,6 +68,9 @@ pub struct WandWatch {
     names: Vec<(u16, bool, String)>,
     winner: u16,
     buf: Canvas,
+    three: Option<Three>,
+    /// The room's last roster and loot, for a spectator that starts late.
+    said: Vec<Vec<u8>>,
 }
 
 impl Default for WandWatch {
@@ -78,7 +93,27 @@ impl WandWatch {
             names: Vec::new(),
             winner: 0,
             buf: Canvas::new(1, 1),
+            three: None,
+            said: Vec::new(),
         }
+    }
+
+    /// A device to draw the match in 3D with (WebGPU, off screen).
+    pub fn give(&mut self, off: gpu::Offscreen) {
+        let q = render::Quality::pick("q=medium", off.caps.software, false);
+        let r = render::Renderer::new(&off.device, &off.queue, gpu::Offscreen::FORMAT, q);
+        let mut spec = Spectator::new();
+        spec.st.seed = self.seed;
+        for b in &self.said {
+            spec.message(b, kit::now());
+        }
+        self.three = Some(Three {
+            off,
+            r,
+            spec,
+            pic: Canvas::new(1, 1),
+            has: false,
+        });
     }
 
     fn poll(&mut self, now: f64) {
@@ -87,6 +122,15 @@ impl WandWatch {
             .get_or_insert_with(|| kit::Link::open("wandfall", Vec::new(), true));
         for ev in link.poll(now) {
             let kit::Net::Message(b) = ev else { continue };
+            if let Some(t) = self.three.as_mut() {
+                t.spec.message(&b, now);
+            }
+            if proto::read_roster(&b).is_some() || proto::Loot::decode(&b).is_some() {
+                let roster = proto::read_roster(&b).is_some();
+                self.said
+                    .retain(|o| proto::read_roster(o).is_some() != roster);
+                self.said.push(b.clone());
+            }
             if let Some((_, _, seed, _)) = proto::read_welcome(&b) {
                 if self.seed != Some(seed) {
                     self.seed = Some(seed);
@@ -170,6 +214,12 @@ impl WandWatch {
     pub fn draw(&mut self, c: &mut Canvas, b: Rect, u: i32, now: f64) {
         self.poll(now);
         let uf = u as f32;
+        if self.three(b, now) {
+            let tag = self.standing(now);
+            self.tag(&tag.0, tag.1, u, now);
+            c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
+            return;
+        }
         self.buf.resize(b.w as i32, b.h as i32);
         self.buf.clear(Rgba::rgb(22, 50, 84));
         let side = (b.h.min(b.w) * 1.15) as i32;
@@ -185,7 +235,6 @@ impl WandWatch {
             )
         };
         let k = side as f32 / (2.0 * MAP_HALF);
-        let fresh = now - self.frame_at < 3000.0;
         let Some(f) = self.frame.as_ref() else {
             self.tag("connecting to the island", false, u, now);
             c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
@@ -238,10 +287,49 @@ impl WandWatch {
                 Rgba(255, 214, 128, 255).fade(a),
             );
         }
-        // How it stands: how many of how many are left, the lobby's
-        // countdown, or who won.
-        let (tag, live) = match f.phase {
-            _ if !fresh => ("reconnecting".to_string(), false),
+        let (tag, live) = self.standing(now);
+        self.tag(&tag, live, u, now);
+        c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
+    }
+
+    /// The match drawn in 3D into the card's buffer, if there is a device
+    /// and a match, and a picture has come back.
+    fn three(&mut self, b: Rect, now: f64) -> bool {
+        let Some(t) = self.three.as_mut() else {
+            return false;
+        };
+        if !t.spec.live(now) {
+            return false;
+        }
+        let size = (b.w.max(1.0) as u32, b.h.max(1.0) as u32);
+        if let Some((view, mut enc)) = t.off.begin(size) {
+            t.spec.draw(&mut t.r, &mut enc, &view, size, now);
+            t.off.end(enc);
+        }
+        if t.off.read(&mut t.pic) {
+            // Opaque, whatever the picture's alpha says.
+            for a in t.pic.data.iter_mut().skip(3).step_by(4) {
+                *a = 255;
+            }
+            t.has = true;
+        }
+        if !t.has {
+            return false;
+        }
+        self.buf.resize(b.w as i32, b.h as i32);
+        self.buf.clear(Rgba::rgb(14, 12, 28));
+        self.buf.blit(&t.pic, 0, 0, 0.0);
+        true
+    }
+
+    /// How it stands: how many of how many are left, the lobby's
+    /// countdown, or who won; and whether it is live.
+    fn standing(&self, now: f64) -> (String, bool) {
+        let Some(f) = self.frame.as_ref() else {
+            return ("connecting to the island".to_string(), false);
+        };
+        match f.phase {
+            _ if now - self.frame_at > 3000.0 => ("reconnecting".to_string(), false),
             1 => (format!("LIVE  {} of {} left", f.alive, f.entrants), true),
             0 => (format!("next match in {}s", f.secs), false),
             _ => {
@@ -255,9 +343,7 @@ impl WandWatch {
                     false,
                 )
             }
-        };
-        self.tag(&tag, live, u, now);
-        c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
+        }
     }
 
     /// A tag at the card's corner; with a beating red dot when live.

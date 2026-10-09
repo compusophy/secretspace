@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wandfall = { package = "secretspace-wandfall", path = "../wandfall" }
+wandfall-look = { package = "secretspace-wandfall-look", path = "../wandfall-look" }
 engine = { package = "secretspace-engine", path = "../engine" }
 gpu = { package = "secretspace-gpu", path = "../gpu" }
 render = { package = "secretspace-render", path = "../render" }

@@ -1,0 +1,16 @@
+[package]
+name = "secretspace-wandfall-look"
+description = "How Wandfall looks, drawn by the engine: the island, every wizard jointed and moving, spells, loot and the storm; shared by its page and the hub's card, which spectates the match live."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "wandfall_look"
+
+[dependencies]
+wandfall = { package = "secretspace-wandfall", path = "../wandfall" }
+render = { package = "secretspace-render", path = "../render" }
+pixels = { package = "secretspace-pixels", path = "../pixels" }

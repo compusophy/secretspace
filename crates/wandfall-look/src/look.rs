@@ -50,7 +50,7 @@ fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
 fn cube(r: &mut Renderer, sp: u8) -> Mesh {
     const N: i32 = 20;
     let mut c = pixels::Canvas::new(N, N);
-    crate::bar::icon(&mut c, sp, pixels::Rect::new(0.0, 0.0, N as f32, N as f32));
+    crate::icon::icon(&mut c, sp, pixels::Rect::new(0.0, 0.0, N as f32, N as f32));
     let core = rgb(16, 14, 26);
     let px = |i: i32, j: i32| {
         let o = ((j * N + i) * 4) as usize;

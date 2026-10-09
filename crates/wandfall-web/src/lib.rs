@@ -9,17 +9,14 @@
 //! turns about a wizard; 0 is you), `?q=low|medium|high`, `?hold=ms`
 //! (every effect held at that age, to look at it).
 
-pub mod aura;
 pub mod bar;
-pub mod fx;
 pub mod hud;
-pub mod land;
-pub mod look;
 pub mod menu;
-pub mod rig;
 pub mod sound;
-pub mod state;
 pub mod touch;
+
+// How it looks, shared with the hub's card.
+pub use wandfall_look::{aura, fx, icon, land, look, rig, scene, state};
 
 #[cfg(target_arch = "wasm32")]
 mod page;
