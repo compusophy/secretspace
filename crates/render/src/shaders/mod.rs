@@ -1,8 +1,9 @@
 //! The engine's WGSL, as Rust strings (rule 1): the scene's shaders (the
 //! shared part, then the world, sky, sparks and grass), the sun's shadow
-//! map, and the post-processing. Each module is validated by naga in a
+//! map, the ambient occlusion, and the post-processing. Each module is validated by naga in a
 //! test, so a shader error is a failed test, not a black page.
 
+pub mod ao;
 pub mod common;
 pub mod post;
 pub mod world;

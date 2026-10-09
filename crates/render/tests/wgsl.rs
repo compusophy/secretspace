@@ -37,6 +37,13 @@ fn the_shadow_and_post_shaders_are_valid() {
         &render::shaders::post(),
         &["post_vs", "down_fs", "up_fs", "finish_fs"],
     );
+    for msaa in [false, true] {
+        valid(
+            "ao",
+            &render::shaders::ao::ao(msaa),
+            &["ao_vs", "ao_fs", "blur_fs", "apply_fs"],
+        );
+    }
 }
 
 #[test]

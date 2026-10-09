@@ -1,12 +1,12 @@
 //! After the scene: its targets (an HDR picture, multisampled and
-//! resolved, and its depth), bloom (halve it, again and again, then back
+//! resolved, and its depth), ambient occlusion (`ao`), bloom (halve it, again and again, then back
 //! up, each step a little wider, added together), and the finish into the
 //! screen (exposure, tone mapping, a vignette, sRGB).
 
 use gpu::wgpu;
 
-use crate::shaders;
-use crate::Look;
+use crate::ao::Ao;
+use crate::{shaders, Camera, Look};
 
 pub const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -17,6 +17,62 @@ pub struct Targets {
     pub color: wgpu::TextureView,
     pub resolve: Option<wgpu::TextureView>,
     pub depth: wgpu::TextureView,
+}
+
+impl Targets {
+    /// A pass drawing the scene: its colour cleared or kept, its depth
+    /// cleared (to infinity) or kept, and kept after it or not, the
+    /// picture resolved at its end or not.
+    pub fn pass<'a>(
+        &self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        label: &str,
+        clear: Option<[f32; 3]>,
+        depth: (bool, bool),
+        resolve: bool,
+    ) -> wgpu::RenderPass<'a> {
+        let load = match clear {
+            Some(c) => wgpu::LoadOp::Clear(wgpu::Color {
+                r: c[0] as f64,
+                g: c[1] as f64,
+                b: c[2] as f64,
+                a: 1.0,
+            }),
+            None => wgpu::LoadOp::Load,
+        };
+        let (clear_depth, keep_depth) = depth;
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(label),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.color,
+                depth_slice: None,
+                resolve_target: if resolve { self.resolve.as_ref() } else { None },
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: if clear_depth {
+                        wgpu::LoadOp::Clear(0.0)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
+                    store: if keep_depth {
+                        wgpu::StoreOp::Store
+                    } else {
+                        wgpu::StoreOp::Discard
+                    },
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        })
+    }
 }
 
 struct Pass {
@@ -40,9 +96,10 @@ pub struct Post {
     passes: Vec<Pass>,
     finish_group: Option<wgpu::BindGroup>,
     finish_buf: wgpu::Buffer,
+    ao: Option<Ao>,
 }
 
-fn texture(
+pub(crate) fn texture(
     device: &wgpu::Device,
     label: &str,
     size: (u32, u32),
@@ -85,8 +142,15 @@ fn uniform(device: &wgpu::Device, queue: &wgpu::Queue, v: [f32; 8]) -> wgpu::Buf
 }
 
 impl Post {
-    /// Post-processing into targets of `out` format.
-    pub fn new(device: &wgpu::Device, out: wgpu::TextureFormat, msaa: u32, levels: u32) -> Post {
+    /// Post-processing into targets of `out` format, with occlusion
+    /// looking `ao` ways out from a pixel (none at 0).
+    pub fn new(
+        device: &wgpu::Device,
+        out: wgpu::TextureFormat,
+        msaa: u32,
+        levels: u32,
+        ao: u32,
+    ) -> Post {
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -195,6 +259,19 @@ impl Post {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
+            ao: (ao > 0).then(|| Ao::new(device, msaa, ao)),
+        }
+    }
+
+    /// Whether the picture is occluded (`occlude`) before what glows.
+    pub fn occludes(&self) -> bool {
+        self.ao.is_some()
+    }
+
+    /// Ambient occlusion over the picture drawn so far.
+    pub fn occlude(&self, encoder: &mut wgpu::CommandEncoder, queue: &wgpu::Queue, cam: &Camera) {
+        if let (Some(ao), Some(t)) = (&self.ao, &self.targets) {
+            ao.run(encoder, queue, &t.color, cam);
         }
     }
 
@@ -205,7 +282,10 @@ impl Post {
         }
         self.size = size;
         let hdr = texture(device, "hdr", size, HDR, 1, true);
-        let depth = texture(device, "depth", size, DEPTH, self.msaa, false);
+        let depth = texture(device, "depth", size, DEPTH, self.msaa, self.ao.is_some());
+        if let Some(ao) = &mut self.ao {
+            ao.fit(device, &depth, size);
+        }
         let targets = if self.msaa > 1 {
             Targets {
                 color: texture(device, "hdr (msaa)", size, HDR, self.msaa, false),

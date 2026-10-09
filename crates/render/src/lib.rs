@@ -15,6 +15,7 @@ pub mod shaders;
 pub mod shadow;
 pub mod terrain;
 
+mod ao;
 mod buffers;
 mod draw;
 mod post;
@@ -259,7 +260,8 @@ impl Default for Look {
 }
 
 /// How much the renderer does: anti-aliasing samples, the sun's shadow
-/// (cascades and their size), grass (spacing and reach), bloom's depth.
+/// (cascades and their size), grass (spacing and reach), bloom's depth,
+/// how many ways ambient occlusion looks out from a pixel (0 none).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quality {
     pub msaa: u32,
@@ -268,31 +270,39 @@ pub struct Quality {
     pub grass_spacing: f32,
     pub grass_reach: f32,
     pub bloom_levels: u32,
+    pub ao: u32,
 }
 
 impl Quality {
     /// The tier a page asked for (`?q=low|medium|high`), else one for
-    /// this device: software adapters Low, touch screens Medium, else High.
+    /// this device: software adapters Low, touch screens Medium, else High;
+    /// `ao=0` turns occlusion off.
     pub fn pick(query: &str, software: bool, touch: bool) -> Quality {
-        match query {
+        let q = match query {
             q if q.contains("q=low") => Quality::LOW,
             q if q.contains("q=medium") => Quality::MEDIUM,
             q if q.contains("q=high") => Quality::HIGH,
             _ if software => Quality::LOW,
             _ if touch => Quality::MEDIUM,
             _ => Quality::HIGH,
+        };
+        Quality {
+            ao: if query.contains("ao=0") { 0 } else { q.ao },
+            ..q
         }
     }
 
-    /// One tier down (None at the bottom).
+    /// One tier down (None at the bottom); occlusion turned off stays off.
     pub fn lower(self) -> Option<Quality> {
-        if self == Quality::HIGH {
-            Some(Quality::MEDIUM)
-        } else if self == Quality::MEDIUM {
-            Some(Quality::LOW)
-        } else {
-            None
-        }
+        let tiers = [Quality::HIGH, Quality::MEDIUM, Quality::LOW];
+        let at = tiers
+            .iter()
+            .position(|t| Quality { ao: self.ao, ..*t } == self)?;
+        let next = *tiers.get(at + 1)?;
+        Some(Quality {
+            ao: if self.ao == 0 { 0 } else { next.ao },
+            ..next
+        })
     }
 
     pub const HIGH: Quality = Quality {
@@ -302,6 +312,7 @@ impl Quality {
         grass_spacing: 0.24,
         grass_reach: 42.0,
         bloom_levels: 6,
+        ao: 6,
     };
     pub const MEDIUM: Quality = Quality {
         msaa: 4,
@@ -310,6 +321,7 @@ impl Quality {
         grass_spacing: 0.34,
         grass_reach: 28.0,
         bloom_levels: 5,
+        ao: 4,
     };
     pub const LOW: Quality = Quality {
         msaa: 1,
@@ -318,6 +330,7 @@ impl Quality {
         grass_spacing: 0.0,
         grass_reach: 0.0,
         bloom_levels: 4,
+        ao: 0,
     };
 }
 

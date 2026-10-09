@@ -16,3 +16,12 @@ pub const CASCADES: [f32; 3] = [14.0, 48.0, 150.0];
 pub const SHADOW_STRENGTH: f32 = 1.0;
 /// The picture's own format before tone mapping.
 pub const HDR: &str = "rgba16float";
+/// Ambient occlusion: how far about a point it looks (metres), how much
+/// a surface must rise over another to shade it (a slope), how strongly
+/// and how darkly (a power) it shades, and how far off it fades out
+/// (metres).
+pub const AO_REACH: f32 = 1.0;
+pub const AO_SLACK: f32 = 0.15;
+pub const AO_STRENGTH: f32 = 2.6;
+pub const AO_POWER: f32 = 2.0;
+pub const AO_FADE: f32 = 70.0;

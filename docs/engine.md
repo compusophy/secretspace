@@ -235,8 +235,14 @@ Done, across phases, in `crates/render`:
   slope, sand and wet sand by the sea). Not yet: auto exposure, DoF, IBL.
 - Phase 3: the sun's cascaded shadows (3 x 2048 on High, PCF 3x3, snapped
   to texels). Not yet: static caster caching, point shadows, froxels.
-- Phase 4 (part): the sea (waves, fresnel sky, shallows from the terrain's
-  heights, glints, foam). Phase 5 (part): the sky (gradient, sun glow,
+- Phase 4 (part): ambient occlusion (`ao.rs`, `shaders/ao.rs`), HBAO
+  from the depth at half res: the facing rebuilt from the depth, 6 ways
+  out (4 on Medium, none on Low) a pixel, 4 steps each, turned by
+  interleaved gradient noise; a 4x4 blur kept to its depth; then a
+  depth-aware upsample multiplied into the picture once what is solid is
+  drawn, before what is see-through, glows and the viewmodel. `?ao=0`
+  turns it off; its numbers are in `laws.rs` (`AO_*`). The sea (waves,
+  fresnel sky, shallows from the terrain's heights, glints, foam). Phase 5 (part): the sky (gradient, sun glow,
   disc, drifting clouds) and height fog that takes the sky's colour.
 - Phase 6 (part): GPU grass (100k+ blades about the eye, wind, rooted on
   the heights texture, none on sand, rock or steep ground).
@@ -329,8 +335,8 @@ Every phase:
 - [ ] Motion vectors (camera, plus per instance from previous transforms).
 - [ ] TAA (jitter, neighbourhood clamp, disocclusion rejection), then TAAU
       (render scale per tier). This is what makes phones possible.
-- [ ] GTAO at half res with a bilateral upsample. SSR (hierarchical depth),
-      falling back to IBL.
+- [x] AO at half res with a bilateral upsample (HBAO, not yet GTAO).
+- [ ] SSR (hierarchical depth), falling back to IBL.
 - [ ] Water:
   - normal-mapped ripples;
   - SSR reflection and refraction;

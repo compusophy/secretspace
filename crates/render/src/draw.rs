@@ -1,8 +1,9 @@
 //! The renderer: pipelines, buffers, and the passes of a frame. The sun's
 //! shadow (a pass a cascade), then the scene in HDR, multisampled: the
 //! sky, what is solid (statics, then what moves), grass, what is
-//! see-through (the sea among it), what glows, and sparks; then, over a
-//! cleared depth, the viewmodel; then bloom and the finish (`post`).
+//! see-through (the sea among it), what glows, and sparks, once what is
+//! solid is occluded (`ao`); then, over a cleared depth, the viewmodel;
+//! then bloom and the finish (`post`).
 
 use crate::buffers::{make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, Run};
 use crate::grid::Grid;
@@ -428,7 +429,13 @@ impl Renderer {
             heights: tiny_texture(device, queue),
             terrain: [0.0; 4],
             water: Mesh(0),
-            post: Post::new(device, format, quality.msaa, quality.bloom_levels),
+            post: Post::new(
+                device,
+                format,
+                quality.msaa,
+                quality.bloom_levels,
+                quality.ao,
+            ),
             stats: Stats::default(),
         };
         let mut sea = geo::Geo::default();
@@ -850,37 +857,35 @@ impl Renderer {
             stats.draws += s.draws;
         }
 
-        // The scene.
-        let h = f.look.horizon;
+        // The scene: what is solid, then (once it is occluded, if it is)
+        // what is see-through or glows.
+        let split = self.post.occludes();
+        let lit = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
+            pass.set_pipeline(&self.faint);
+            runs_of(
+                pass,
+                meshes,
+                &self.moving.buf,
+                &runs[Pass::Faint as usize],
+                stats,
+            );
+            pass.set_pipeline(&self.glow);
+            runs_of(
+                pass,
+                meshes,
+                &self.moving.buf,
+                &runs[Pass::Glow as usize],
+                stats,
+            );
+            if !f.sparks.is_empty() {
+                pass.set_pipeline(&self.sparks);
+                pass.set_vertex_buffer(0, self.spark_buf.buf.slice(..));
+                pass.draw(0..6, 0..f.sparks.len() as u32);
+                stats.draws += 1;
+            }
+        };
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("world"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &t.color,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: h[0] as f64,
-                            g: h[1] as f64,
-                            b: h[2] as f64,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &t.depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let mut pass = t.pass(encoder, "world", Some(f.look.horizon), (true, true), false);
             pass.set_bind_group(0, &groups[0], &[]);
             pass.set_pipeline(&self.sky);
             pass.draw(0..3, 0..1);
@@ -907,54 +912,19 @@ impl Renderer {
                 stats.draws += 1;
                 stats.grass = side * side;
             }
-            pass.set_pipeline(&self.faint);
-            runs_of(
-                &mut pass,
-                meshes,
-                &self.moving.buf,
-                &runs[Pass::Faint as usize],
-                &mut stats,
-            );
-            pass.set_pipeline(&self.glow);
-            runs_of(
-                &mut pass,
-                meshes,
-                &self.moving.buf,
-                &runs[Pass::Glow as usize],
-                &mut stats,
-            );
-            if !f.sparks.is_empty() {
-                pass.set_pipeline(&self.sparks);
-                pass.set_vertex_buffer(0, self.spark_buf.buf.slice(..));
-                pass.draw(0..6, 0..f.sparks.len() as u32);
-                stats.draws += 1;
+            if !split {
+                lit(&mut pass, &mut stats);
             }
+        }
+        if split {
+            self.post.occlude(encoder, &queue, &f.cam);
+            let mut pass = t.pass(encoder, "lit", None, (false, false), false);
+            pass.set_bind_group(0, &groups[0], &[]);
+            lit(&mut pass, &mut stats);
         }
         // The viewmodel, over a cleared depth; the picture resolves here.
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("view"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &t.color,
-                    depth_slice: None,
-                    resolve_target: t.resolve.as_ref(),
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &t.depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        store: wgpu::StoreOp::Discard,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let mut pass = t.pass(encoder, "view", None, (true, false), true);
             pass.set_bind_group(0, &groups[1], &[]);
             pass.set_pipeline(&self.opaque);
             runs_of(
