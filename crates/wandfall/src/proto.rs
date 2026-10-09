@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 16;
+pub const PROTO: u8 = 17;
 
 pub mod tag {
     pub const JOIN: u8 = 1;

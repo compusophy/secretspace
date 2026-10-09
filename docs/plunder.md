@@ -221,7 +221,7 @@ of combat styles and all varieties to counter all varieties".
       altar, an orb and runes turning over it), a **demon rift** (a
       scorched bowl, lava cracks, obsidian, a gate burning with runes,
       embers), a **crystal grove** (glowing clusters, giant mushrooms,
-      glimmer). Each shapes the ground, blocks as trees do, and keeps two
+      glimmer), and later a **basalt causeway**. Each shapes the ground, blocks as trees do, and keeps two
       caches. Between them: violet and teal wizard-wood, mushrooms, ruins;
       islets float over it all. Bots step around what stands ahead.
 - [x] **The Spire is climbed** (on the owner's word): a stone stair winds
@@ -332,6 +332,14 @@ of combat styles and all varieties to counter all varieties".
       along it; three before you land, the air jump kept (pushing into
       it with the air jump to spend, the press is the air jump, to
       climb; PROTO 14).
+      The **basalt causeway** (`places::causeway`, `wandfall-look/src/
+      basalt.rs`), a fifth place on the ring, for all of that: six-sided
+      columns packed 2.2 m apart, rising in rows about a hop each to a
+      crown 12 m up among organ pipes, its far side a cliff; one in eleven
+      sunk 2.4 m (a pit to hop or kick out of), sea stacks about it far
+      enough apart to wall-jump between. A cache waits on the crown under
+      a turning rune, one at its foot; spray blows over it. Bots back off
+      what they cannot walk up, and kick out of pits (PROTO 17).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half

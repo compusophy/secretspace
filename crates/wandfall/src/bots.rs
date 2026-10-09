@@ -27,8 +27,10 @@ pub struct Mind {
     /// Where it walks when no one is about, and since when.
     pub goal: [f32; 2],
     pub goal_at: u32,
-    /// Where it stood a second ago (to know when it is stuck).
+    /// Where it stood a second ago (to know when it is stuck), and when
+    /// it last was (0: never).
     pub was: [f32; 3],
+    pub stuck: u32,
     /// A practice dummy: 0 not one, 1 stands, 2 strafes, 3 spars when
     /// sparring is on (and strafes when not).
     pub dummy: u8,
@@ -238,12 +240,23 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
             keys |= keys::JUMP;
         }
     }
-    // Stuck against something: jump, and walk elsewhere.
+    // Just stuck, and falling down a wall (out of a pit): kick off it.
+    let b = &me.body;
+    if m.stuck > 0 && tick < m.stuck + 2 * TICK_HZ && crate::wall::can(b) && b.v[1] < 0.0 && !b.held
+    {
+        keys |= keys::JUMP;
+    }
+    // Stuck against something: jump, and back away a while (a cliff
+    // will not be climbed by walking at it) before going elsewhere.
     if tick.is_multiple_of(TICK_HZ) {
         let moved = (me.body.p[0] - m.was[0]).powi(2) + (me.body.p[2] - m.was[2]).powi(2);
         if moved < 0.5 && keys & (keys::FWD | keys::BACK) != 0 && me.body.ground {
             keys |= keys::JUMP;
-            m.goal_at = tick;
+            let (s, c) = trig::sin_cos(yaw.wrapping_add(32768));
+            let p = me.body.p;
+            m.goal = [p[0] + c * BOT_BACK_OFF, p[2] + s * BOT_BACK_OFF];
+            m.goal_at = tick + 3 * TICK_HZ;
+            m.stuck = tick;
         }
         m.was = me.body.p;
     }

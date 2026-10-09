@@ -1,8 +1,8 @@
 //! The island's places, from its seed: the Spire at the centre (a
 //! wizard's tower on a raised plaza) and, on a ring about it, a stone
-//! circle, a demon rift and a crystal grove. Each shapes the ground under
-//! it and sets its own stones, spikes and crystals, which block as trees
-//! do, and marks where its cubes wait.
+//! circle, a demon rift, a crystal grove and a basalt causeway. Each
+//! shapes the ground under it and sets its own stones, spikes, crystals
+//! and columns, which block as trees do, and marks where its cubes wait.
 
 use engine::rng::Rng;
 
@@ -16,6 +16,9 @@ pub enum Place {
     Circle,
     Rift,
     Grove,
+    /// Six-sided basalt columns packed close, rising in rows to a crown
+    /// (climbed by hops, wall jumps and the Tether), sea stacks about it.
+    Causeway,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -101,6 +104,7 @@ impl Poi {
             Place::Circle => self.r * 1.5,
             Place::Rift => self.r * 1.6,
             Place::Grove => self.r * 1.4,
+            Place::Causeway => self.r * 1.45,
         }
     }
 
@@ -130,6 +134,11 @@ impl Poi {
                 self.level + 1.2 * (1.0 - smooth(d / self.r)),
                 smooth((d - self.r * 0.5) / (self.r * 0.9)),
             ),
+            // A level shelf the columns stand on.
+            Place::Causeway => (
+                self.level + 0.4,
+                smooth((d - self.r * 0.75) / (self.r * 0.7)),
+            ),
         };
         want * (1.0 - f) + h * f
     }
@@ -150,13 +159,11 @@ pub fn find(seed: u64, hills: impl Fn(f32, f32) -> f32) -> Vec<Poi> {
         level: PLATEAU_TOP,
     }];
     let first = (rng.next_u64() >> 48) as u16;
-    for (k, place) in [Place::Circle, Place::Rift, Place::Grove]
-        .into_iter()
-        .enumerate()
-    {
+    let ring = [Place::Circle, Place::Rift, Place::Grove, Place::Causeway];
+    for (k, place) in ring.into_iter().enumerate() {
         let jitter = ((rng.next_u64() >> 52) as u16).wrapping_sub(2048);
         let turn = first
-            .wrapping_add((k as u32 * 65536 / 3) as u16)
+            .wrapping_add((k as u32 * 65536 / ring.len() as u32) as u16)
             .wrapping_add(jitter);
         let (s, c) = trig::sin_cos(turn);
         let ring = POI_RING + (unit(&mut rng) - 0.5) * 16.0;
@@ -329,6 +336,160 @@ pub fn set(m: &mut Map) {
                     m.caches.push([at.0, at.1]);
                 }
             }
+            Place::Causeway => causeway(m, &p, &mut rng),
+        }
+    }
+}
+
+/// The causeway: columns on a six-sided lattice turned its own way, in
+/// rows rising across it (each about a hop above the last) to the crown
+/// and its organ pipes, lower toward its sides, a few sunk; sea stacks
+/// about it far enough apart to pass between and kick from one to the
+/// next. A cache on the crown, one at its foot.
+fn causeway(m: &mut Map, p: &Poi, rng: &mut Rng) {
+    let turn = (rng.next_u64() >> 48) as u16;
+    let (s, c) = trig::sin_cos(turn);
+    let yaw = trig::radians(turn);
+    let (apart, field) = (COLUMN_APART, COLUMN_FIELD);
+    // Overlapping, so the field is solid underfoot: a hexagon's corner
+    // is this far from its middle.
+    let r = apart * 0.58;
+    let n = (field / apart) as i32 + 2;
+    let mut cols: Vec<(f32, f32, f32, f32)> = Vec::new();
+    for j in -n..=n {
+        for i in -n..=n {
+            let (lx, lz) = (
+                apart * (i as f32 + j as f32 * 0.5),
+                apart * 0.866_025_4 * j as f32,
+            );
+            if lx * lx + lz * lz > field * field {
+                continue;
+            }
+            // Across (0 to 1, toward the crown), and out to a side.
+            let t = (lz / field + 1.0) / 2.0;
+            let side = (lx / field).abs();
+            let pit = unit(rng) < COLUMN_PITS && t > 0.3 && t < 0.8;
+            let jitter = unit(rng) - 0.5;
+            let h = 0.6
+                + COLUMN_RISE * t * t * (1.0 - 0.45 * smooth((side - 0.5) / 0.5))
+                + jitter * 0.9
+                - if pit { COLUMN_SINK } else { 0.0 };
+            cols.push((lx, lz, h.max(0.4), lz - side * field * 1.5));
+        }
+    }
+    let crown = cols.iter().map(|q| q.3).fold(f32::MIN, f32::max);
+    let at = |lx: f32, lz: f32| (p.x + lx * c - lz * s, p.z + lx * s + lz * c);
+    let mut top = (p.x, p.z);
+    for &(lx, lz, h, rank) in &cols {
+        let (x, z) = at(lx, lz);
+        let h = if rank == crown {
+            top = (x, z);
+            COLUMN_CROWN
+        } else if lz > field * 0.55 && lx.abs() < apart * 1.2 {
+            // The organ pipes beside the crown.
+            COLUMN_CROWN * (0.62 + 0.12 * unit(rng))
+        } else {
+            h
+        };
+        let y = m.height(x, z) - 0.3;
+        m.put(Prop {
+            kind: Kind::Column,
+            x,
+            z,
+            y,
+            r,
+            h: h + 0.3,
+            yaw,
+            scale: 1.0,
+        });
+    }
+    // The sea stacks about it.
+    let (mut k, mut tries) = (0, 0);
+    while k < COLUMN_STACKS && tries < 300 {
+        tries += 1;
+        let a = (rng.next_u64() >> 48) as u16;
+        let (x, z) = about(p, a, field + 2.5 + 4.5 * unit(rng));
+        let sr = 0.8 + 0.4 * unit(rng);
+        if !m.land(x, z) || m.near(x, z, sr + 1.8).next().is_some() {
+            continue;
+        }
+        let h = 3.5 + 5.5 * unit(rng);
+        let y = m.height(x, z) - 0.3;
+        m.put(Prop {
+            kind: Kind::Column,
+            x,
+            z,
+            y,
+            r: sr,
+            h: h + 0.3,
+            yaw: trig::radians(a),
+            scale: 1.0,
+        });
+        k += 1;
+    }
+    m.caches.push([top.0, top.1]);
+    let foot = at(0.0, -(field + 2.0));
+    m.caches.push([foot.0, foot.1]);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::motion::{keys, step, Body, Input};
+
+    #[test]
+    fn the_causeway_is_solid_underfoot_and_climbs_to_its_crown() {
+        for seed in 0..16 {
+            let m = Map::new(seed);
+            let p = *m.pois.iter().find(|q| q.place == Place::Causeway).unwrap();
+            let cols = m.props.iter().filter(|q| q.kind == Kind::Column).count();
+            assert!(cols > 50, "seed {seed}: {cols} columns");
+            let ground = m.height(p.x, p.z);
+            // Underfoot, a column everywhere.
+            let (mut bare, mut all) = (0, 0);
+            for i in -20..=20 {
+                for j in -20..=20 {
+                    let (x, z) = (p.x + i as f32 * 0.4, p.z + j as f32 * 0.4);
+                    if p.dist(x, z) < COLUMN_FIELD * 0.85 {
+                        all += 1;
+                        bare += (m.floor(x, z, f32::MAX) < m.height(x, z) + 0.2) as i32;
+                    }
+                }
+            }
+            assert!(bare * 50 < all, "seed {seed}: {bare} of {all} bare");
+            let top = m.caches[m.caches.len() - 2];
+            let crown = m.floor(top[0], top[1], f32::MAX);
+            assert!(
+                crown > ground + COLUMN_CROWN - 1.0,
+                "seed {seed}: the crown {crown} over {ground}"
+            );
+            // From the foot, hopping toward the crown (a press each landing).
+            let foot = m.caches[m.caches.len() - 1];
+            let mut b = Body {
+                p: [foot[0], m.height(foot[0], foot[1]), foot[1]],
+                ground: true,
+                ..Body::default()
+            };
+            let mut high = b.p[1];
+            for t in 0..TICK_HZ * 12 {
+                let yaw = trig::heading(trig::atan2(top[1] - b.p[2], top[0] - b.p[0]));
+                let jump = if b.ground && t % 2 == 0 {
+                    keys::JUMP
+                } else {
+                    0
+                };
+                let i = Input {
+                    yaw,
+                    keys: keys::FWD | jump,
+                    ..Input::default()
+                };
+                step(&mut b, &i, &m);
+                high = high.max(b.p[1]);
+            }
+            assert!(
+                high > ground + COLUMN_RISE * 0.5,
+                "seed {seed}: up to {high}, from {ground}"
+            );
         }
     }
 }

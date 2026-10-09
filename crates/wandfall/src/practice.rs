@@ -254,11 +254,16 @@ mod tests {
         // Face the nearest dummy, level.
         let k = w.players.iter().position(|p| p.id == me).unwrap();
         let eye = w.players[k].eye();
+        // The nearest in plain sight.
         let (d, at) = w
             .players
             .iter()
             .filter(|p| p.bot)
             .map(|p| (p.id, p.body.p))
+            .filter(|(_, at)| {
+                let to = [at[0], at[1] + 1.0, at[2]];
+                w.map.strikes(eye, to).is_none()
+            })
             .min_by(|a, b| {
                 let da = (a.1[0] - eye[0]).powi(2) + (a.1[2] - eye[2]).powi(2);
                 let db = (b.1[0] - eye[0]).powi(2) + (b.1[2] - eye[2]).powi(2);

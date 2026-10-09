@@ -3,7 +3,8 @@
 //! beacon turning over the Spire and its rune rings, the lamps' violet
 //! flames, the circle's orb in its shell of light, the rift's gate
 //! burning and swirling, embers streaking up off its lava into smoke, the
-//! grove's glimmer and glints.
+//! grove's glimmer and glints, the rune turning over the causeway's crown
+//! and the spray blowing across its columns.
 
 use std::f32::consts::TAU;
 
@@ -15,6 +16,8 @@ use crate::land::{CYAN, EMBER, GOLDEN, VIOLET};
 
 /// A launch rune's colour: a warm sky-gold.
 const PAD: V3 = rgb(255, 200, 110);
+/// The causeway's: sea-green.
+const SPRAY: V3 = rgb(150, 255, 214);
 use crate::look::Look;
 use wandfall::laws::RIFT_DEPTH;
 use wandfall::places::Place;
@@ -314,6 +317,43 @@ impl Look {
                             size: if star { 0.35 * tw * tw } else { 0.06 },
                             c: [c[0], c[1], c[2], 0.8 * tw],
                             shape: if star { Shape::Star } else { Shape::Glow },
+                            ..Default::default()
+                        });
+                    }
+                }
+                Place::Causeway => {
+                    // A rune ring turning over the crown, the cubes' mark.
+                    let c = l.crown;
+                    let at = [c[0], c[1] + 1.6 + (t * 1.3).sin() * 0.1, c[2]];
+                    glow(d, l.runes, m4::place(at, t * 0.5, [1.1; 3]), SPRAY, 0.8);
+                    glow(
+                        d,
+                        l.runes,
+                        m4::place([c[0], c[1] + 0.08, c[2]], -t * 0.2, [1.4; 3]),
+                        SPRAY,
+                        0.3,
+                    );
+                    d.lights.push(Light {
+                        p: at,
+                        r: 10.0,
+                        c: geo::scale(SPRAY, 1.6),
+                    });
+                    // Spray blowing over the columns, low and drifting.
+                    for k in 0..28 {
+                        let u = |i| unit(hash(k, i, 43));
+                        let life = 4.0 + 3.0 * u(0);
+                        let age = (t / life + u(1)).fract();
+                        let a = u(2) * TAU;
+                        let r = p.r * 0.8 * u(3).sqrt();
+                        let x = p.x + a.cos() * r + (age - 0.5) * 6.0;
+                        let z = p.z + a.sin() * r + (age - 0.5) * 2.0;
+                        let y = base[1] + 1.0 + 7.0 * u(4) + age * 1.5;
+                        let fade = (age * (1.0 - age) * 4.0).min(1.0);
+                        d.sparks.push(Spark {
+                            p: [x, y, z],
+                            size: 0.05 + 0.04 * u(5),
+                            c: [SPRAY[0], SPRAY[1], SPRAY[2], 0.55 * fade],
+                            shape: Shape::Glow,
                             ..Default::default()
                         });
                     }

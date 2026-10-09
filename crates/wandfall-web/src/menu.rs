@@ -78,7 +78,7 @@ fn button(c: &mut Canvas, spots: &mut Spots, b: Rect, text: &str, lit: bool, act
 
 /// The title: the game's name, and how to play it.
 /// What is new, at the title's corner.
-const NEWS: &str = "new: the Tether, wall jumps, weather and the hall of wizards";
+const NEWS: &str = "new: the basalt causeway, the Tether, wall jumps, weather";
 
 pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
     let (w, h) = (c.w, c.h);

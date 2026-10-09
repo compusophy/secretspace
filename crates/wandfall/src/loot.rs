@@ -115,7 +115,8 @@ pub fn scatter(w: &mut World) {
     let mut cached: Vec<[f32; 2]> = Vec::new();
     while cached.len() < CACHES && tries < CACHES * 30 {
         tries += 1;
-        let [x, z] = if let Some(&at) = caches.get(tries - 1) {
+        let given = caches.get(tries - 1).copied();
+        let [x, z] = if let Some(at) = given {
             at
         } else if !ruins.is_empty() && cached.len().is_multiple_of(3) {
             let r = ruins[(w.rng.next_u64() % ruins.len() as u64) as usize];
@@ -124,7 +125,9 @@ pub fn scatter(w: &mut World) {
         } else {
             w.map.spot(&mut w.rng)
         };
-        if !w.map.land(x, z) || w.map.near(x, z, 1.0).next().is_some() {
+        // A place's own cache may stand on something (the causeway's
+        // crown); others lie clear on the ground.
+        if !w.map.land(x, z) || (given.is_none() && w.map.near(x, z, 1.0).next().is_some()) {
             continue;
         }
         if cached
@@ -134,7 +137,10 @@ pub fn scatter(w: &mut World) {
             continue;
         }
         cached.push([x, z]);
-        let y = w.map.height(x, z);
+        let y = match given {
+            Some(_) => w.map.floor(x, z, f32::MAX),
+            None => w.map.height(x, z),
+        };
         for _ in 0..CUBES_A_CACHE {
             let (spell, rank) = any_cube(w);
             drop_scroll(w, spell, rank, [x, y, z], 1.2);

@@ -46,7 +46,8 @@ pub fn island(map: &Map) -> Canvas {
     for q in &map.pads {
         c.circle(px(q[0]), px(q[2]), 1.6, Rgba::rgb(255, 200, 110));
     }
-    // The places: the Spire's plaza and tower, the circle, the rift, the grove.
+    // The places: the Spire's plaza and tower, the circle, the rift, the
+    // grove, the causeway.
     for p in &map.pois {
         let (x, y) = (px(p.x), px(p.z));
         match p.place {
@@ -60,6 +61,10 @@ pub fn island(map: &Map) -> Canvas {
                 c.circle(x, y, 1.6, Rgba::rgb(255, 110, 40));
             }
             Place::Grove => c.circle(x, y, 2.6, Rgba::rgb(170, 120, 255)),
+            Place::Causeway => {
+                c.circle(x, y, 3.2, Rgba::rgb(64, 64, 72));
+                c.circle(x, y, 1.2, Rgba::rgb(150, 255, 214));
+            }
         }
     }
     c

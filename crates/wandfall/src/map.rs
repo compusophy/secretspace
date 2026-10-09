@@ -28,6 +28,8 @@ pub enum Kind {
     Portal,
     Spike,
     Crystal,
+    /// The causeway's basalt and the sea stacks about it.
+    Column,
 }
 
 impl Kind {
@@ -35,7 +37,7 @@ impl Kind {
     pub fn standable(self) -> bool {
         matches!(
             self,
-            Kind::Rock | Kind::Pillar | Kind::Stone | Kind::Altar | Kind::Merlon
+            Kind::Rock | Kind::Pillar | Kind::Stone | Kind::Altar | Kind::Merlon | Kind::Column
         )
     }
 }
@@ -501,7 +503,7 @@ mod tests {
         use crate::places::Place;
         for seed in 0..24 {
             let m = Map::new(seed);
-            assert_eq!(m.pois.len(), 4);
+            assert_eq!(m.pois.len(), 5);
             // The Spire: a level plaza, its tower at the centre.
             assert_eq!(m.height(0.0, 0.0), PLATEAU_TOP);
             assert_eq!(m.height(PLATEAU - 1.0, 0.0), PLATEAU_TOP);
@@ -516,7 +518,13 @@ mod tests {
                     assert!(m.height(q.x + 4.0, q.z) > SEA + 1.0, "not flooded");
                 }
             }
-            let kinds = [Kind::Tower, Kind::Stone, Kind::Spike, Kind::Crystal];
+            let kinds = [
+                Kind::Tower,
+                Kind::Stone,
+                Kind::Spike,
+                Kind::Crystal,
+                Kind::Column,
+            ];
             for k in kinds {
                 assert!(m.props.iter().any(|p| p.kind == k), "seed {seed}: {k:?}");
             }

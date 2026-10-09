@@ -2,7 +2,8 @@
 //! grass held back from the plaza and the rift), everything standing on
 //! it as statics (trees, rocks, mushrooms, ruins; the Spire's tower and
 //! lamps, the circle's stones, the rift's obsidian and gate, the grove's
-//! crystals; islets floating over it all), and what moves at the places
+//! crystals, the causeway's basalt; islets floating over it all), and
+//! what moves at the places
 //! each frame: the beacon over the tower, rune rings, the gate's swirl,
 //! embers, glimmer and their light.
 
@@ -45,6 +46,8 @@ pub struct Land {
     pub(crate) runes: Mesh,
     /// The launch runes (their middles, on the ground).
     pub(crate) pads: Vec<V3>,
+    /// The top of the causeway's crown.
+    pub(crate) crown: V3,
 }
 
 fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
@@ -305,6 +308,15 @@ fn paint(map: &Map, x: f32, z: f32) -> (V3, f32) {
                 }
             }
             Place::Grove => (rgb(120, 96, 170), 0.5 * (1.0 - ease((d - p.r * 0.7) / 5.0))),
+            // Black gravel and broken basalt.
+            Place::Causeway => {
+                let c = mix(
+                    rgb(52, 52, 56),
+                    rgb(88, 86, 82),
+                    unit(hash((x * 1.7) as i32, (z * 1.7) as i32, 4)),
+                );
+                (c, 0.9 * (1.0 - ease((d - p.r * 0.7) / (p.r * 0.45))))
+            }
         };
     }
     ([1.0; 3], 0.0)
@@ -320,6 +332,7 @@ fn lush(map: &Map, x: f32, z: f32) -> f32 {
             Place::Rift => (0.0, p.r * 1.15),
             Place::Circle => (0.55, p.r * 0.8),
             Place::Grove => (0.2, p.r * 0.9),
+            Place::Causeway => (0.3, p.r * 0.85),
         };
         let f = ease((d - edge) / 3.0);
         k = k.min(keep + (1.0 - keep) * f);
@@ -674,6 +687,8 @@ impl Land {
         let mut lamps = Vec::new();
         let mut gems = Vec::new();
         let mut gate_at = ([0.0; 3], 0.0);
+        let basalt = crate::basalt::Basalt::new(r);
+        let mut crown = [0.0, f32::MIN, 0.0];
         for (k, p) in map.props.iter().enumerate() {
             let at = [p.x, p.y, p.z];
             let h = hash(k as i32, 3, 5);
@@ -772,6 +787,12 @@ impl Land {
                     statics.push(Item::new(crystals[k % 2], m).tint(c, 1.0).rough(0.25));
                     gems.push(([p.x, p.y + p.h * 0.6, p.z], c));
                 }
+                Kind::Column => {
+                    basalt.put(&mut statics, p, k);
+                    if p.y + p.h > crown[1] {
+                        crown = [p.x, p.y + p.h, p.z];
+                    }
+                }
             }
         }
         for k in 0..7 {
@@ -823,6 +844,7 @@ impl Land {
         held.extend(shrooms);
         held.extend(crystals);
         held.extend([gem, runes]);
+        held.extend(basalt.meshes());
         Land {
             held,
             pois: map.pois.clone(),
@@ -832,6 +854,7 @@ impl Land {
             gem,
             runes,
             pads: map.pads.clone(),
+            crown,
         }
     }
 }

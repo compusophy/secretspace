@@ -197,7 +197,8 @@ impl WandWatch {
                     c.pixel(i, j, col);
                 }
             }
-            // The places: the Spire, the circle, the rift, the grove.
+            // The places: the Spire, the circle, the rift, the grove, the
+            // causeway.
             let k = s as f32 / 96.0;
             let px = |v: f32| (v + MAP_HALF) / (2.0 * MAP_HALF) * s as f32;
             for p in &map.pois {
@@ -213,6 +214,10 @@ impl WandWatch {
                         c.circle(x, y, 1.6 * k, Rgba::rgb(255, 110, 40));
                     }
                     Place::Grove => c.circle(x, y, 2.6 * k, Rgba::rgb(170, 120, 255)),
+                    Place::Causeway => {
+                        c.circle(x, y, 3.2 * k, Rgba::rgb(64, 64, 72));
+                        c.circle(x, y, 1.2 * k, Rgba::rgb(150, 255, 214));
+                    }
                 }
             }
             self.island = Some(c);

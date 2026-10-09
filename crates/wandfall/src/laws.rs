@@ -34,11 +34,23 @@ pub const BALCONY: f32 = 23.0;
 pub const BALCONY_SPAN: f32 = 0.8;
 /// Where the stair starts about the tower (radians from +x, toward +z).
 pub const STAIR_FROM: f32 = 0.35;
-/// The places about it (a stone circle, a demon rift, a crystal grove):
-/// this far out, this wide; how deep the rift's bowl is.
+/// The places about it (a stone circle, a demon rift, a crystal grove,
+/// a basalt causeway): this far out, this wide; how deep the rift's bowl
+/// is.
 pub const POI_RING: f32 = 76.0;
 pub const POI_RADIUS: f32 = 16.0;
 pub const RIFT_DEPTH: f32 = 3.5;
+/// The causeway: six-sided columns this far apart, packed this far out
+/// from its middle, rising across it by this much (m) to a crown this
+/// tall; one in so many sunk this far (a pit to hop or wall-jump out
+/// of); and sea stacks standing about it, so many.
+pub const COLUMN_APART: f32 = 2.2;
+pub const COLUMN_FIELD: f32 = 9.0;
+pub const COLUMN_RISE: f32 = 7.5;
+pub const COLUMN_CROWN: f32 = 12.0;
+pub const COLUMN_PITS: f32 = 0.09;
+pub const COLUMN_SINK: f32 = 2.4;
+pub const COLUMN_STACKS: usize = 8;
 
 // Moving.
 pub const RUN: f32 = 7.0;
@@ -194,6 +206,8 @@ pub const BOT_RANGE: f32 = 16.0;
 /// they take a launch rune this near (m) on the way.
 pub const BOT_HOP_FAR: f32 = 25.0;
 pub const BOT_PAD: f32 = 30.0;
+/// Stuck, a bot backs off this far (m) before going elsewhere.
+pub const BOT_BACK_OFF: f32 = 8.0;
 /// How far a bot goes out of its way for a cube.
 pub const LOOT_SIGHT: f32 = 70.0;
 pub const BOT_NAMES: &[&str] = &[
