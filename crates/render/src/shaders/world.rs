@@ -255,7 +255,14 @@ struct SparkOut {
     @location(1) col: vec4<f32>,
     // x its shape, y half its streak's length (in radii), z its seed.
     @location(2) shape: vec3<f32>,
+    // x how far it is from the eye, y how deep it fades into what is
+    // behind it (metres).
+    @location(3) far: vec2<f32>,
 };
+
+/// The scene's depth, for sparks to fade into what stands behind them
+/// (soft); only the pass that reads it, not the one that writes it.
+@group(1) @binding(0) var scene_depth: DEPTH_TYPE;
 
 const GLOW_SPARK: i32 = 0;
 const FLAME: i32 = 1;
@@ -300,11 +307,29 @@ fn spark_vs(@builtin(vertex_index) i: u32, @location(0) ps: vec4<f32>, @location
     // Fading out right by the eye.
     o.col = vec4<f32>(col.rgb, col.a * smoothstep(SPARK_NEAR * 0.5, SPARK_NEAR, head.w));
     o.shape = vec3<f32>(floor(vk.w), half / r, fract(vk.w));
+    o.far = vec2<f32>(mid.w, max(ps.w * 0.5, 0.15));
     return o;
 }
 
 @fragment
 fn spark_fs(i: SparkOut) -> @location(0) vec4<f32> {
+    return spark(i);
+}
+
+/// A spark fading as it nears what stands behind it, so a puff meeting
+/// the ground does not cut a hard line into it.
+@fragment
+fn spark_soft_fs(i: SparkOut) -> @location(0) vec4<f32> {
+    let d = textureLoad(scene_depth, vec2<i32>(i.clip.xy), 0);
+    var k = 1.0;
+    if (d > 0.0) {
+        let behind = NEAR_PLANE / d;
+        k = clamp((behind - i.far.x) / i.far.y, 0.0, 1.0);
+    }
+    return spark(i) * k;
+}
+
+fn spark(i: SparkOut) -> vec4<f32> {
     let long = i.shape.y;
     let d = length(vec2<f32>(max(abs(i.uv.x) - long, 0.0), i.uv.y));
     let shape = i32(i.shape.x + 0.5);

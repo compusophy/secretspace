@@ -23,8 +23,9 @@ pub struct Targets {
 
 impl Targets {
     /// A pass drawing the scene: its colour cleared or kept, its depth
-    /// cleared (to infinity) or kept, and kept after it or not, the
-    /// picture resolved at its end or not.
+    /// cleared (to infinity) or kept, and kept after it or not (neither:
+    /// only read, so its shaders may read it too), the picture resolved at
+    /// its end or not.
     pub fn pass<'a>(
         &self,
         encoder: &'a mut wgpu::CommandEncoder,
@@ -56,7 +57,7 @@ impl Targets {
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth,
-                depth_ops: Some(wgpu::Operations {
+                depth_ops: (clear_depth || keep_depth).then_some(wgpu::Operations {
                     load: if clear_depth {
                         wgpu::LoadOp::Clear(0.0)
                     } else {

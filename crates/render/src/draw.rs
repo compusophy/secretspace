@@ -9,7 +9,7 @@ use crate::buffers::{make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, Run};
 use crate::grid::Grid;
 use crate::post::{Post, DEPTH, HDR};
 use crate::terrain::Terrain;
-use crate::{geo, laws, m4, shaders, shadow, Frame, Item, Look, Material, Mesh, Pass, Quality, M4};
+use crate::{geo, laws, m4, shaders, shadow, Frame, Item, Material, Mesh, Pass, Quality, M4};
 use gpu::wgpu;
 
 /// Floats an instance: a model matrix, a tint, (glow, rough, material,
@@ -42,6 +42,11 @@ pub struct Renderer {
     glow: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
     sparks: wgpu::RenderPipeline,
+    /// Sparks fading into what stands behind them, and the depth they
+    /// read (made again with the screen's targets: their size).
+    soft_sparks: wgpu::RenderPipeline,
+    soft_layout: wgpu::BindGroupLayout,
+    soft_group: Option<(wgpu::BindGroup, (u32, u32))>,
     grass: wgpu::RenderPipeline,
     globals: [wgpu::Buffer; 2],
     lights: Grow,
@@ -194,7 +199,7 @@ impl Renderer {
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("scene"),
-            source: wgpu::ShaderSource::Wgsl(shaders::scene().into()),
+            source: wgpu::ShaderSource::Wgsl(shaders::scene(quality.msaa > 1).into()),
         });
         let vertex = wgpu::VertexBufferLayout {
             array_stride: (geo::STRIDE * 4) as u64,
@@ -257,8 +262,41 @@ impl Renderer {
             &shared,
             Kind {
                 entry: ("spark_vs", "spark_fs"),
-                buffers: &[Some(spark)],
+                buffers: &[Some(spark.clone())],
                 // Premultiplied: light (alpha 0) adds, smoke lays over.
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                depth: (false, GreaterEqual),
+                cull: None,
+            },
+        );
+        // Sparks that fade into what stands behind them read the depth (a
+        // second group), in the pass that only reads it.
+        let soft_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("soft"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: frag,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: quality.msaa > 1,
+                },
+                count: None,
+            }],
+        });
+        let soft_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("soft"),
+            bind_group_layouts: &[Some(&layout), Some(&soft_layout)],
+            immediate_size: 0,
+        });
+        let soft_sparks = pipeline(
+            &Shared {
+                layout: &soft_pl,
+                ..shared
+            },
+            Kind {
+                entry: ("spark_vs", "spark_soft_fs"),
+                buffers: &[Some(spark.clone())],
                 blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 depth: (false, GreaterEqual),
                 cull: None,
@@ -389,6 +427,9 @@ impl Renderer {
             glow,
             sky,
             sparks,
+            soft_sparks,
+            soft_layout,
+            soft_group: None,
             grass,
             globals: [
                 make(device, "globals", shaders::GLOBALS, uniform),
@@ -577,57 +618,8 @@ impl Renderer {
     }
 
     fn globals(&self, f: &Frame, fov: f32, size: (u32, u32), cascades: &[M4]) -> Vec<u8> {
-        let (vp, right, up): (M4, _, _) = f.cam.matrices(fov);
-        let fwd = f.cam.forward();
-        let t = (fov / 2.0).tan();
-        let l: &Look = &f.look;
-        let lin = |c: [f32; 3]| c.map(|v| v.max(0.0).powf(2.2));
-        let mut b = Vec::with_capacity(shaders::GLOBALS as usize);
-        put_f32s(&mut b, &vp);
-        for c in 0..3 {
-            put_f32s(&mut b, cascades.get(c).unwrap_or(&m4::ID));
-        }
-        let v4 = |b: &mut Vec<u8>, v: [f32; 3], w: f32| put_f32s(b, &[v[0], v[1], v[2], w]);
-        v4(&mut b, f.cam.eye, f.time);
-        v4(&mut b, fwd, t * f.cam.aspect);
-        v4(&mut b, right, t);
-        v4(&mut b, up, size.1 as f32 / 2.0 / t);
-        v4(&mut b, geo::norm(l.sun_dir), (l.sun_size / 2.0).cos());
-        v4(&mut b, l.sun, l.stars);
-        v4(&mut b, l.sky, l.fog);
-        v4(&mut b, l.low, l.exposure);
-        v4(&mut b, l.zenith, l.clouds);
-        v4(&mut b, l.horizon, l.fog_falloff);
-        v4(&mut b, l.deep, l.sea.unwrap_or(-1000.0));
-        let g = &self.grid;
-        put_f32s(&mut b, &[g.origin[0], g.origin[1], g.cell, g.n as f32]);
-        let n = cascades.len() as f32;
-        put_f32s(
-            &mut b,
-            &[
-                size.0 as f32,
-                size.1 as f32,
-                1.0 / self.quality.shadow_size as f32,
-                n,
-            ],
-        );
-        let s = laws::CASCADES;
-        put_f32s(&mut b, &[s[0], s[1], s[2], laws::SHADOW_STRENGTH]);
-        put_f32s(&mut b, &self.terrain);
-        put_f32s(&mut b, &[l.wind[0], l.wind[1], 0.0, 0.0]);
-        v4(&mut b, lin(l.water), l.waves);
-        let side = self.grass_side();
-        let q = self.quality;
-        put_f32s(
-            &mut b,
-            &[
-                q.grass_spacing,
-                side as f32,
-                q.grass_reach,
-                if side > 0 { 1.0 } else { 0.0 },
-            ],
-        );
-        b
+        let shared = (&self.grid, self.quality, self.terrain, self.grass_side());
+        crate::globals::bytes(f, fov, size, cascades, shared)
     }
 
     /// Draw a frame into `target` (`size` pixels).
@@ -856,6 +848,18 @@ impl Renderer {
         // The scene: what is solid, then (once it is occluded, if it is)
         // what is see-through or glows.
         let split = self.post.occludes();
+        if split && self.soft_group.as_ref().is_none_or(|g| g.1 != size) {
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("soft"),
+                layout: &self.soft_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&t.depth),
+                }],
+            });
+            self.soft_group = Some((group, size));
+        }
+        let soft = self.soft_group.as_ref().filter(|_| split).map(|g| &g.0);
         let lit = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
             pass.set_pipeline(&self.faint);
             runs_of(
@@ -874,7 +878,13 @@ impl Renderer {
                 stats,
             );
             if !f.sparks.is_empty() {
-                pass.set_pipeline(&self.sparks);
+                match soft {
+                    Some(group) => {
+                        pass.set_pipeline(&self.soft_sparks);
+                        pass.set_bind_group(1, group, &[]);
+                    }
+                    None => pass.set_pipeline(&self.sparks),
+                }
                 pass.set_vertex_buffer(0, self.spark_buf.buf.slice(..));
                 pass.draw(0..6, 0..f.sparks.len() as u32);
                 stats.draws += 1;

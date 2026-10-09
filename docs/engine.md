@@ -242,8 +242,11 @@ Done, across phases, in `crates/render`:
   stretched along its motion into a streak (`Spark::v`), flames and
   puffs let grow to a share of the screen, every spark fading right by
   the eye; an `Energy` material (noise flowing over the surface: fire,
-  ragged at its edges, or plasma, bright at its rim). Not yet: GPU
-  simulation, soft particles, ribbons. Shafts of sunlight (`shafts.rs`):
+  ragged at its edges, or plasma, bright at its rim). Soft sparks: in
+  the pass after what is solid (depth only read), each fades as it
+  nears what stands behind it, over half its size, so a puff meeting
+  the ground does not cut a line (Medium and High). Not yet: GPU
+  simulation, ribbons. Shafts of sunlight (`shafts.rs`):
   from the depth at a quarter of the screen, each pixel marches toward
   the sun on screen over the open sky near it, dimming as it goes; the
   finish adds them in the sun's colour before tone mapping (High and

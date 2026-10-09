@@ -19,14 +19,23 @@ fn valid(name: &str, src: &str, entries: &[&str]) {
 
 #[test]
 fn the_scene_shaders_are_valid() {
-    valid(
-        "scene",
-        &render::shaders::scene(),
-        &[
-            "world_vs", "world_fs", "sky_vs", "sky_fs", "spark_vs", "spark_fs", "grass_vs",
-            "grass_fs",
-        ],
-    );
+    for msaa in [false, true] {
+        valid(
+            "scene",
+            &render::shaders::scene(msaa),
+            &[
+                "world_vs",
+                "world_fs",
+                "sky_vs",
+                "sky_fs",
+                "spark_vs",
+                "spark_fs",
+                "spark_soft_fs",
+                "grass_vs",
+                "grass_fs",
+            ],
+        );
+    }
 }
 
 #[test]

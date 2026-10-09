@@ -18,6 +18,7 @@ pub mod terrain;
 mod ao;
 mod buffers;
 mod draw;
+mod globals;
 mod post;
 mod shafts;
 
