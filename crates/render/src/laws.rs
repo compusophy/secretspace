@@ -7,8 +7,12 @@ pub const GRID_CELLS: u32 = 64;
 pub const MAX_PER_CELL: u32 = 48;
 /// The nearest the camera sees (metres); there is no far plane.
 pub const NEAR: f32 = 0.05;
-/// A spark's size on screen, in pixels, at most.
-pub const SPARK_MAX_PX: f32 = 48.0;
+/// A spark of light's size on screen, in pixels, at most; a flame's or a
+/// puff's, as a share of the screen's height; and how near the eye a
+/// spark fades out (metres), so none blinds it.
+pub const SPARK_MAX_PX: f32 = 64.0;
+pub const PUFF_MAX: f32 = 0.45;
+pub const SPARK_NEAR: f32 = 0.6;
 
 /// Where each of the sun's shadow cascades ends (metres ahead of the eye).
 pub const CASCADES: [f32; 3] = [14.0, 48.0, 150.0];

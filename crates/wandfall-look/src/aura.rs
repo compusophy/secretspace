@@ -187,6 +187,7 @@ impl Look {
                                 EMBER[2],
                                 (1.0 - f) * 0.9,
                             ],
+                            ..Default::default()
                         });
                     }
                 }
@@ -205,6 +206,7 @@ impl Look {
                             p: [p.x + a.cos() * r, y, p.z + a.sin() * r],
                             size: 0.06,
                             c: [c[0], c[1], c[2], 0.8 * tw],
+                            ..Default::default()
                         });
                     }
                 }

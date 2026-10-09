@@ -316,7 +316,20 @@ of combat styles and all varieties to counter all varieties".
   of all damage, the spells the big moments.
 - Hooks for looking (`crates/wandfall-web/src/lib.rs`): `?spells=`,
   `?nocd`, `?spar`, `?look=yaw,pitch`, `?hold=ms` (every effect held at
-  that age).
+  that age), `?fx=name&age=ms` (any one effect shown by you, held at an
+  age or again and again: `fx::NAMES`).
+- **Spells that look like magic** (the owner: "still pretty low poly, not
+  cool spells"), `wandfall-look/src/fx/`: fire is flowing energy and
+  licking flames (a fireball a roiling ball trailing flame into smoke;
+  its burst a flash, billowing flame burning down to red, a shockwave,
+  streaking debris, embers and a pall of smoke); a circle of runes
+  (`meshes::sigil`) where spells are cast, under a ward, under mending,
+  where lightning will strike, under cubes; Lance a flowing beam wound
+  with motes, flaring where it strikes; frost cut crystals in mist and
+  glints; lightning forked; blink a whirl of streaks round a shaft of
+  light; a ward's bubble flowing plasma that shatters into crystals;
+  gust wheeling streaks and dust. Rings and circles on the ground float
+  over the grass.
 
 ### Stage C: queues and teams
 - A queue screen; matches start at N people or after a wait; duos.

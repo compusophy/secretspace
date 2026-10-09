@@ -1,7 +1,8 @@
 //! The scene's shaders: the world (one shader, its material chosen by
 //! the instance: plain, terrain, foliage, water, metal, rim, cloth,
-//! skin), the sky with its clouds and sun, sparks, and grass grown on
-//! the terrain about the eye.
+//! skin, energy), the sky with its clouds and sun, sparks (glows,
+//! streaks, flames, smoke, glints), and grass grown on the terrain about
+//! the eye.
 
 pub const WORLD: &str = r#"
 struct WorldIn {
@@ -33,6 +34,7 @@ const METAL: i32 = 4;
 const RIM: i32 = 5;
 const CLOTH: i32 = 6;
 const SKIN: i32 = 7;
+const ENERGY: i32 = 8;
 
 @vertex
 fn world_vs(v: WorldIn) -> WorldOut {
@@ -127,6 +129,32 @@ fn sea(pos: vec3<f32>, alpha: f32) -> vec4<f32> {
     return vec4<f32>(air(c, pos), a * alpha);
 }
 
+/// Energy: noise flowing up and over it, thick here and torn there. Fire
+/// (`rough` 0) is thickest face on, white-hot where thickest, red and
+/// ragged at its edges; plasma (`rough` 1) glows at its rim like a
+/// bubble.
+fn energy(i: WorldOut, n: vec3<f32>) -> vec4<f32> {
+    let v = normalize(g.eye.xyz - i.pos);
+    let facing = abs(dot(n, v));
+    let edge = 1.0 - facing;
+    let rim = clamp(i.extra.y, 0.0, 1.0);
+    let t = g.eye.w;
+    let q = i.pos * select(2.2, i.extra.w, i.extra.w > 0.0);
+    let n1 = fbm3(q + vec3<f32>(t * 0.3, -t * 1.9, t * 0.2));
+    let n2 = noise3(q * 2.6 + vec3<f32>(t * 0.9, -t * 2.6, -t * 0.6));
+    let fire = clamp(n1 * 1.3 + n2 * 0.55 - 0.45 + mix(facing * 0.45 - 0.1, edge * 0.3, rim), 0.0, 1.0);
+    let body = smoothstep(0.18, 0.7, fire);
+    let col = linear(i.col.rgb) * linear(i.tint.rgb);
+    let peak = max(col.r, max(col.g, col.b));
+    // Cooler and redder where thin, white-hot where thick.
+    let cool = col * vec3<f32>(1.0, 0.55, 0.4);
+    let hot = mix(mix(cool, col, smoothstep(0.2, 0.55, fire)), vec3<f32>(1.0, 0.95, 0.85) * peak, smoothstep(0.6, 1.0, fire) * 0.8);
+    let lit = 0.1 + body * 2.2 + rim * edge * edge * 1.6;
+    let c = hot * lit * (1.0 + (i.col.a + i.extra.x) * 2.0);
+    let a = clamp(body * mix(sqrt(facing), 0.3, rim) + rim * edge * edge * 0.6, 0.0, 1.0);
+    return vec4<f32>(air(c, i.pos), i.tint.a * a);
+}
+
 @fragment
 fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     var n = normalize(i.nrm);
@@ -143,6 +171,9 @@ fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
         let edge = pow(1.0 - abs(dot(n, v)), 2.5);
         let c = linear(i.col.rgb) * linear(i.tint.rgb) * (0.1 + edge * 2.5) * (1.0 + (i.col.a + i.extra.x) * 3.0);
         return vec4<f32>(c, i.tint.a);
+    }
+    if (mat == ENERGY) {
+        return energy(i, n);
     }
     var base = linear(i.col.rgb) * linear(i.tint.rgb);
     var rough = i.extra.y;
@@ -219,33 +250,98 @@ fn sky_fs(i: SkyOut) -> @location(0) vec4<f32> {
 
 struct SparkOut {
     @builtin(position) clip: vec4<f32>,
+    // Where in it, in its radii: x along its streak, y across.
     @location(0) uv: vec2<f32>,
     @location(1) col: vec4<f32>,
+    // x its shape, y half its streak's length (in radii), z its seed.
+    @location(2) shape: vec3<f32>,
 };
 
+const GLOW_SPARK: i32 = 0;
+const FLAME: i32 = 1;
+const SMOKE: i32 = 2;
+const STAR: i32 = 3;
+
 @vertex
-fn spark_vs(@builtin(vertex_index) i: u32, @location(0) ps: vec4<f32>, @location(1) col: vec4<f32>) -> SparkOut {
+fn spark_vs(@builtin(vertex_index) i: u32, @location(0) ps: vec4<f32>, @location(1) col: vec4<f32>, @location(2) vk: vec4<f32>) -> SparkOut {
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
         vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0));
     let c = corners[i];
-    var clip = g.vp * vec4<f32>(ps.xyz, 1.0);
-    let s = clamp(ps.w * g.up.w / max(clip.w, 0.05), 1.0, SPARK_MAX_PX);
-    clip.x = clip.x + c.x * s / g.view.x * clip.w;
-    clip.y = clip.y + c.y * s / g.view.y * clip.w;
+    let head = g.vp * vec4<f32>(ps.xyz, 1.0);
+    // Its radius on screen, in pixels: a point of light kept small, a
+    // flame or a puff let grow to a share of the screen.
+    let kind = i32(floor(vk.w) + 0.5);
+    let most = select(SPARK_MAX_PX, PUFF_MAX * g.view.y, kind == FLAME || kind == SMOKE);
+    let r = clamp(ps.w * g.up.w / max(head.w, 0.05), 1.0, most) * 0.5;
+    // A streak runs on screen from where it was (its tail) to its head.
+    var mid = head;
+    var dir = vec2<f32>(1.0, 0.0);
+    var half = 0.0;
+    if (dot(vk.xyz, vk.xyz) > 1e-8) {
+        let tail = g.vp * vec4<f32>(ps.xyz - vk.xyz, 1.0);
+        if (tail.w > 0.05 && head.w > 0.05) {
+            let d = (head.xy / head.w - tail.xy / tail.w) * g.view.xy * 0.5;
+            let len = length(d);
+            if (len > 0.5) {
+                dir = d / len;
+                half = len * 0.5;
+                mid = (head + tail) * 0.5;
+            }
+        }
+    }
+    let off = dir * c.x * (half + r) + vec2<f32>(-dir.y, dir.x) * c.y * r;
+    var clip = mid;
+    clip.x = clip.x + off.x * 2.0 / g.view.x * clip.w;
+    clip.y = clip.y + off.y * 2.0 / g.view.y * clip.w;
     var o: SparkOut;
     o.clip = clip;
-    o.uv = c;
-    o.col = col;
+    o.uv = vec2<f32>(c.x * (half + r) / r, c.y);
+    // Fading out right by the eye.
+    o.col = vec4<f32>(col.rgb, col.a * smoothstep(SPARK_NEAR * 0.5, SPARK_NEAR, head.w));
+    o.shape = vec3<f32>(floor(vk.w), half / r, fract(vk.w));
     return o;
 }
 
 @fragment
 fn spark_fs(i: SparkOut) -> @location(0) vec4<f32> {
-    let d = length(i.uv);
-    let a = (1.0 - smoothstep(0.3, 1.0, d)) * i.col.a;
+    let long = i.shape.y;
+    let d = length(vec2<f32>(max(abs(i.uv.x) - long, 0.0), i.uv.y));
+    let shape = i32(i.shape.x + 0.5);
+    let seed = i.shape.z * 97.0;
+    let t = g.eye.w;
+    let col = linear(i.col.rgb);
+    // A streak is brightest at its head, fading to its tail.
+    var along = 1.0;
+    if (long > 0.0) {
+        along = 0.25 + 0.75 * smoothstep(-long - 1.0, long + 1.0, i.uv.x);
+    }
+    if (shape == FLAME) {
+        let n = noise3(vec3<f32>(i.uv * 1.6 + seed, t * 2.6 + seed)) * 0.65
+            + noise3(vec3<f32>(i.uv * 3.7 - seed, t * 4.1)) * 0.35;
+        let body = 1.0 - smoothstep(0.2, 1.0, d + (n - 0.5) * 0.75);
+        let core = 1.0 - smoothstep(0.0, 0.6, d + (n - 0.5) * 0.5);
+        let hot = mix(col, vec3<f32>(1.0, 0.9, 0.7), core * 0.55);
+        return vec4<f32>(hot * body * (1.1 + core * 1.9) * i.col.a * along, 0.0);
+    }
+    if (shape == SMOKE) {
+        let n = noise3(vec3<f32>(i.uv * 1.4 + seed, t * 0.5 + seed)) * 0.7
+            + noise3(vec3<f32>(i.uv * 3.1 - seed, t * 0.9)) * 0.3;
+        let a = (1.0 - smoothstep(0.1, 1.0, d + (n - 0.5) * 0.9)) * i.col.a;
+        let light = g.sky.rgb + g.sun.rgb * max(g.sun_dir.y, 0.0) * 0.35;
+        return vec4<f32>(col * light * a, a);
+    }
+    if (shape == STAR) {
+        let q = abs(i.uv);
+        let fade = 1.0 - smoothstep(0.0, 1.0, max(q.x, q.y));
+        let rays = max(1.0 - smoothstep(0.0, 0.07, q.y), 1.0 - smoothstep(0.0, 0.07, q.x)) * fade;
+        let core = 1.0 - smoothstep(0.0, 0.32, d);
+        let k = rays * 1.4 + core * core * 4.0;
+        return vec4<f32>(mix(col, vec3<f32>(1.0), core * 0.6) * k * i.col.a, 0.0);
+    }
+    let a = (1.0 - smoothstep(0.3, 1.0, d)) * i.col.a * along;
     let core = 1.0 - smoothstep(0.0, 0.45, d);
-    return vec4<f32>(linear(i.col.rgb) * a * (2.5 + core * 4.0), 0.0);
+    return vec4<f32>(col * a * (2.5 + core * 4.0), 0.0);
 }
 
 struct GrassOut {

@@ -15,8 +15,8 @@ use gpu::wgpu;
 /// Floats an instance: a model matrix, a tint, (glow, rough, material,
 /// detail).
 const INST: usize = 24;
-/// Floats a spark: position and size, colour.
-const SPARK: usize = 8;
+/// Floats a spark: position and size, colour, its streak and shape.
+const SPARK: usize = 12;
 /// How far the eye goes before the statics are laid again (near and far
 /// meshes chosen anew).
 const STILL_RELAY: f32 = 6.0;
@@ -212,7 +212,7 @@ impl Renderer {
         let spark = wgpu::VertexBufferLayout {
             array_stride: (SPARK * 4) as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
         };
         use wgpu::CompareFunction::{Always, GreaterEqual};
         let world = [Some(vertex.clone()), Some(instance)];
@@ -258,14 +258,8 @@ impl Renderer {
             Kind {
                 entry: ("spark_vs", "spark_fs"),
                 buffers: &[Some(spark)],
-                blend: Some(wgpu::BlendState {
-                    color: wgpu::BlendComponent {
-                        src_factor: wgpu::BlendFactor::One,
-                        dst_factor: wgpu::BlendFactor::One,
-                        operation: wgpu::BlendOperation::Add,
-                    },
-                    alpha: wgpu::BlendComponent::OVER,
-                }),
+                // Premultiplied: light (alpha 0) adds, smoke lays over.
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 depth: (false, GreaterEqual),
                 cull: None,
             },
@@ -814,6 +808,8 @@ impl Renderer {
         for s in f.sparks {
             put_f32s(&mut b, &[s.p[0], s.p[1], s.p[2], s.size]);
             put_f32s(&mut b, &s.c);
+            let shape = s.shape as u32 as f32 + s.seed.clamp(0.0, 0.999);
+            put_f32s(&mut b, &[s.v[0], s.v[1], s.v[2], shape]);
         }
         self.spark_buf.put(&device, &queue, &b);
         self.bytes = b;

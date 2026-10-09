@@ -73,6 +73,11 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             show,
         );
     }
+    if let (Some((name, age)), Some(i)) = (&p.gallery, &p.island) {
+        let age = age.unwrap_or(now % 2500.0);
+        let right = [-cam.yaw.sin(), 0.0, cam.yaw.cos()];
+        fx::gallery(&i.look, &mut d, name, (age, now), feet, right);
+    }
     p.ear = (cam.eye, cam.yaw);
     // What the crosshair is on: you aim there from your own eyes (the
     // camera's place over your shoulder taken out); where Lightning would

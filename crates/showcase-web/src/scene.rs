@@ -273,6 +273,7 @@ impl Scene {
                 p: [x, y, z],
                 size: 0.18,
                 c: [c[0], c[1], c[2], pulse],
+                ..Default::default()
             });
         }
         // The wand in view, and its cast.
@@ -335,6 +336,7 @@ impl Scene {
                     p,
                     size: 0.35 * fade + 0.05,
                     c: [1.0, 0.85, 0.55, fade],
+                    ..Default::default()
                 });
             }
         }

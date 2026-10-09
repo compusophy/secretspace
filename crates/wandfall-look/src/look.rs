@@ -5,7 +5,7 @@
 use render::geo::{self, hash, rgb, unit, Geo, V3};
 use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark};
 
-use crate::fx::Draw;
+use crate::fx::{self, Draw};
 use crate::land::Land;
 use crate::rig::Rig;
 use wandfall::laws::{SEA, SPELLS};
@@ -21,10 +21,11 @@ pub struct Look {
     pub ball: Mesh,
     pub orb: Mesh,
     pub wall: Mesh,
-    /// A flat ring a metre across (marks, shockwaves); an ice shard a
-    /// metre each way along x; a beam a metre up y.
+    /// A soft flat ring a metre across (shockwaves); an arcane circle;
+    /// an ice crystal a metre along x; a beam a metre up y (`fx::meshes`).
     pub ring: Mesh,
-    pub shard: Mesh,
+    pub sigil: Mesh,
+    pub crystal: Mesh,
     pub beam: Mesh,
     /// A spell cube a unit across for each spell, its icon on every face.
     pub cubes: Vec<Mesh>,
@@ -118,26 +119,10 @@ impl Look {
             orb: smooth(r, |g| {
                 g.sphere([0.0; 3], [1.0; 3], (2, 9, 0.0), rgb(255, 246, 225), 1.0)
             }),
-            ring: one(r, |g| {
-                let n = 48;
-                for k in 0..n {
-                    let at = |k: i32, r: f32| {
-                        let a = k as f32 / n as f32 * std::f32::consts::TAU;
-                        [a.cos() * r, 0.0, a.sin() * r]
-                    };
-                    let (a, b, c, d) = (at(k, 0.8), at(k + 1, 0.8), at(k, 1.0), at(k + 1, 1.0));
-                    g.tri(a, b, c, [1.0; 3], 1.0);
-                    g.tri(b, d, c, [1.0; 3], 1.0);
-                }
-            }),
-            shard: one(r, |g| {
-                let base = [-0.2, 0.0, 0.0];
-                g.spike(base, [1.0, 0.0, 0.0], 1.0, 4, [1.0; 3], 1.0);
-                g.spike(base, [-1.0, 0.0, 0.0], 1.0, 4, [1.0; 3], 1.0);
-            }),
-            beam: smooth(r, |g| {
-                g.lathe([0.0; 3], &[(1.0, 0.0), (1.0, 1.0)], 10, [1.0; 3], 1.0)
-            }),
+            ring: r.mesh(&fx::meshes::soft_ring()),
+            sigil: r.mesh(&fx::meshes::sigil()),
+            crystal: r.mesh(&fx::meshes::crystal()),
+            beam: r.mesh(&fx::meshes::beam()),
             wall: one(r, |g| {
                 g.column([0.0; 3], 64, (1.0, 1.0), 1.0, 0.0, STORM, 0.5, false);
             }),
@@ -148,7 +133,13 @@ impl Look {
     /// Let every mesh go (another island takes this one's place).
     pub fn free(self, r: &mut Renderer) {
         let all = [
-            self.ball, self.orb, self.wall, self.ring, self.shard, self.beam,
+            self.ball,
+            self.orb,
+            self.wall,
+            self.ring,
+            self.sigil,
+            self.crystal,
+            self.beam,
         ];
         for m in all.into_iter().chain(self.land.held).chain(self.cubes) {
             r.free(m);
@@ -184,6 +175,7 @@ impl Look {
                 p: [at[0] + a.cos() * d, at[1] + up * d, at[2] + a.sin() * d],
                 size: 0.15,
                 c: [0.5 + c[0] * 0.5, 0.5 + c[1] * 0.5, 0.5 + c[2] * 0.5, k],
+                ..Default::default()
             });
         }
     }
@@ -230,6 +222,7 @@ impl Look {
                 p: [centre[0] + a.cos() * r, y, centre[1] + a.sin() * r],
                 size: 0.2 + 0.25 * unit(hash(flick, n, 73)),
                 c: [0.85, 0.6, 1.0, 0.9],
+                ..Default::default()
             });
         }
     }

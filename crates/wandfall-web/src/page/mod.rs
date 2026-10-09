@@ -114,6 +114,9 @@ struct Page {
     sounds: Sounds,
     /// `?hold=ms`: every effect held at that age.
     hold: Option<f64>,
+    /// `?fx=name` (`fx::NAMES`): that effect shown by you, again and
+    /// again, or (`&age=ms`) held at that age.
+    gallery: Option<(String, Option<f64>)>,
     /// How each wizard has been moving (for its stride).
     anims: HashMap<u16, rig::Anim>,
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
@@ -283,6 +286,8 @@ pub fn start() {
                 touch: kit::touch(),
                 sounds: Sounds::new(),
                 hold: query_value("hold").and_then(|v| v.parse().ok()),
+                gallery: query_value("fx")
+                    .map(|n| (n, query_value("age").and_then(|v| v.parse().ok()))),
                 anims: HashMap::new(),
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,

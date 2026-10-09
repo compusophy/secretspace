@@ -63,6 +63,11 @@ pub enum Material {
     Cloth = 6,
     /// Skin: light that wraps past the edge of the shadow, warmed.
     Skin = 7,
+    /// Energy (fire, plasma, magic): noise flowing over the surface,
+    /// bright where it is thick, unlit; `detail` its grain (noise cells a
+    /// metre, 0 for 2.2); `rough` how much its rim glows (0 fire, ragged
+    /// at its edges; 1 plasma, a bubble). Drawn in `Glow`.
+    Energy = 8,
 }
 
 /// One drawn thing: a mesh, where, its tint (alpha for `Faint`), how much
@@ -143,12 +148,33 @@ pub struct Light {
     pub c: V3,
 }
 
-/// A spark: a round point of light, `size` metres across.
+/// A spark: a point of light (or a puff) `size` metres across, facing
+/// the eye; stretched along `v` (where it was a moment ago, behind it:
+/// a streak, brighter at its head); in a `shape`. `seed` (0..1) keeps a
+/// flame's or a puff's noise its own from frame to frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Spark {
     pub p: V3,
     pub size: f32,
     pub c: [f32; 4],
+    pub v: V3,
+    pub shape: Shape,
+    pub seed: f32,
+}
+
+/// What a spark looks like.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Shape {
+    /// A soft round light with a hot core (added).
+    #[default]
+    Glow = 0,
+    /// A licking flame: a hot core in a ragged, flickering edge (added).
+    Flame = 1,
+    /// A puff of smoke or mist, lit by the sky and sun (laid over, not
+    /// added: it can darken).
+    Smoke = 2,
+    /// A glint: a bright core and four thin rays (added).
+    Star = 3,
 }
 
 /// Where the camera is and where it looks. Forward is (cos yaw cos pitch,

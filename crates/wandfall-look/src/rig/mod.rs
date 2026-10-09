@@ -184,6 +184,7 @@ impl Rig {
                 ],
                 size: 0.12 * (1.0 - u) + 0.03,
                 c: [glow[0], glow[1], glow[2], 1.0 - u],
+                ..Default::default()
             });
         }
         d.lights.push(Light {

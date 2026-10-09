@@ -16,6 +16,8 @@ pub const GLOBALS: u64 = 4 * 64 + 18 * 16;
 pub fn scene() -> String {
     format!("{}{}", common::COMMON, world::WORLD)
         .replace("SPARK_MAX_PX", &format!("{:.1}", crate::laws::SPARK_MAX_PX))
+        .replace("PUFF_MAX", &format!("{:.3}", crate::laws::PUFF_MAX))
+        .replace("SPARK_NEAR", &format!("{:.3}", crate::laws::SPARK_NEAR))
 }
 
 pub fn shadow() -> String {

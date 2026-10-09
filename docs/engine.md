@@ -237,6 +237,13 @@ Done, across phases, in `crates/render`:
   contrast) and a dither against banding. Cloth (wrapped light and a
   Charlie sheen, its colour lighter) and skin (light wrapped further in
   red) materials. Not yet: auto exposure, DoF, IBL.
+- Phase 5 (part): sparks with shapes (`Shape`: a glow, a licking flame,
+  a puff of smoke laid over rather than added, a four-rayed glint), each
+  stretched along its motion into a streak (`Spark::v`), flames and
+  puffs let grow to a share of the screen, every spark fading right by
+  the eye; an `Energy` material (noise flowing over the surface: fire,
+  ragged at its edges, or plasma, bright at its rim). Not yet: GPU
+  simulation, soft particles, ribbons.
 - Phase 3: the sun's cascaded shadows (3 x 2048 on High, PCF 3x3, snapped
   to texels). Not yet: static caster caching, point shadows, froxels.
 - Phase 4 (part): ambient occlusion (`ao.rs`, `shaders/ao.rs`), HBAO
