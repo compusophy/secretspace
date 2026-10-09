@@ -202,21 +202,20 @@ impl Look {
                 .material(Material::Rim)
                 .pass(Pass::Glow),
         );
-        // Storm cloud flowing up the wall, broad and then fine.
-        for (grow, grain, a) in [(0.9, 0.045, 0.6), (1.4, 0.16, 0.35)] {
-            d.items.push(
-                Item::new(
-                    self.wall,
-                    m4::place(at, -t * 0.02, [r + grow, 75.0, r + grow]),
-                )
-                .tint(rgb(185, 110, 255), a)
-                .glow(0.25)
-                .detail(grain)
-                .rough(0.55)
-                .material(Material::Energy)
-                .pass(Pass::Glow),
-            );
-        }
+        // Storm cloud flowing up the wall (one layer: it can fill the
+        // screen, and phones draw it too).
+        d.items.push(
+            Item::new(
+                self.wall,
+                m4::place(at, -t * 0.02, [r + 0.9, 75.0, r + 0.9]),
+            )
+            .tint(rgb(185, 110, 255), 0.65)
+            .glow(0.25)
+            .detail(0.06)
+            .rough(0.55)
+            .material(Material::Energy)
+            .pass(Pass::Glow),
+        );
         let foot = [centre[0], SEA - 0.5, centre[1]];
         d.items.push(
             Item::new(self.wall, m4::place(foot, 0.0, [r + 0.2, 3.0, r + 0.2]))

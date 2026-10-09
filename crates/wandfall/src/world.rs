@@ -2,8 +2,8 @@
 //! lobby (anyone here warms up, unhurt) → the fight (everyone drops from
 //! the sky, bots fill the island to MATCH_SIZE, the storm closes) → over
 //! (the last one standing is shown) → lobby again. Whoever comes during
-//! a fight watches until the next. Spells are in `spells`, chests,
-//! scrolls and levels in `loot`.
+//! a fight watches until the next. Spells are in `spells`, spell cubes
+//! and levels in `loot`.
 
 use std::collections::VecDeque;
 

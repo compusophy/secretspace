@@ -106,8 +106,7 @@ pub fn title(c: &mut Canvas, spots: &mut Spots, ui: i32, note: &str) {
         ui,
     );
     let mut ty = y as i32 + 2 * bh as i32 + 26 * ui;
-    let how =
-        "drop on the island, find spells in chests, outlast the storm: last wizard standing wins";
+    let how = "drop on the island, grab spell cubes, outlast the storm: last wizard standing wins";
     let half = pixels::text_width(how, ui) / 2 + 8 * ui;
     for line in pixels::wrap(how, half.min(w - 16 * ui), ui) {
         c.text_centred(w / 2, ty, &line, ui, DIM);
