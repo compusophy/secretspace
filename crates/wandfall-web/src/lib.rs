@@ -16,7 +16,7 @@ pub mod sound;
 pub mod touch;
 
 // How it looks, shared with the hub's card.
-pub use wandfall_look::{aura, fx, icon, land, look, rig, scene, state};
+pub use wandfall_look::{aura, camera, fx, icon, land, look, rig, scene, state};
 
 #[cfg(target_arch = "wasm32")]
 mod page;

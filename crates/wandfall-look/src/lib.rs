@@ -6,6 +6,7 @@
 //! card, which spectates the match live (`spectate`).
 
 pub mod aura;
+pub mod camera;
 pub mod fx;
 pub mod icon;
 pub mod land;

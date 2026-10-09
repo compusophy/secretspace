@@ -17,11 +17,9 @@ const STORM: V3 = rgb(150, 70, 230);
 pub struct Look {
     /// Every wizard, jointed (`rig`).
     pub rig: Rig,
-    /// Your own sleeve in first person, and a plain ball (no glow).
-    pub sleeve: Mesh,
+    /// A plain ball (no glow).
     pub ball: Mesh,
     pub orb: Mesh,
-    pub rod: Mesh,
     pub wall: Mesh,
     pub chest: Mesh,
     pub lid: Mesh,
@@ -119,26 +117,8 @@ impl Look {
             }),
             // The right arm hangs from its shoulder down -y; it is turned
             // up to cast.
-            sleeve: smooth(r, |g| {
-                g.lathe(
-                    [0.0, -0.5, 0.0],
-                    &[(0.11, 0.0), (0.09, 0.22), (0.075, 0.5)],
-                    10,
-                    [1.0; 3],
-                    0.0,
-                );
-            }),
             orb: smooth(r, |g| {
                 g.sphere([0.0; 3], [1.0; 3], (2, 9, 0.0), rgb(255, 246, 225), 1.0)
-            }),
-            rod: smooth(r, |g| {
-                g.lathe(
-                    [0.0; 3],
-                    &[(1.0, 0.0), (0.9, 0.5), (0.8, 1.0)],
-                    8,
-                    rgb(110, 78, 52),
-                    0.0,
-                )
             }),
             chest: one(r, |g| {
                 let wood = rgb(120, 82, 50);
@@ -188,16 +168,7 @@ impl Look {
     /// Let every mesh go (another island takes this one's place).
     pub fn free(self, r: &mut Renderer) {
         let all = [
-            self.sleeve,
-            self.ball,
-            self.orb,
-            self.rod,
-            self.wall,
-            self.chest,
-            self.lid,
-            self.ring,
-            self.shard,
-            self.beam,
+            self.ball, self.orb, self.wall, self.chest, self.lid, self.ring, self.shard, self.beam,
         ];
         for m in all.into_iter().chain(self.land.held).chain(self.cubes) {
             r.free(m);
@@ -281,84 +252,6 @@ impl Look {
                 c: [0.85, 0.6, 1.0, 0.9],
             });
         }
-    }
-
-    /// Your wand before you: where its tip is, given the camera, and the
-    /// kick of a cast (1 just cast).
-    pub fn wand(
-        &self,
-        items: &mut Vec<Item>,
-        lights: &mut Vec<Light>,
-        cam: &render::Camera,
-        kick: f32,
-        (c, robe): (V3, V3),
-    ) -> V3 {
-        let fwd = cam.forward();
-        let (_, right, up) = cam.matrices(cam.fov);
-        let at = |ahead: f32, side: f32, lift: f32| {
-            geo::add(
-                cam.eye,
-                geo::add(
-                    geo::scale(fwd, ahead),
-                    geo::add(geo::scale(right, side), geo::scale(up, lift)),
-                ),
-            )
-        };
-        let grip = at(0.36 - 0.06 * kick, 0.2, -0.27);
-        let tip = at(0.7 - 0.06 * kick, 0.16, -0.21 + 0.05 * kick);
-        let along = geo::sub(tip, grip);
-        // Your sleeve, from out of sight to the hand on the grip.
-        let shoulder = at(0.02, 0.34, -0.55);
-        let arm = geo::sub(grip, shoulder);
-        let side = geo::norm(geo::cross(arm, up));
-        let other = geo::norm(geo::cross(side, arm));
-        items.push(
-            Item::new(
-                self.sleeve,
-                m4::basis(
-                    shoulder,
-                    geo::scale(side, 0.55),
-                    geo::scale(arm, -2.0),
-                    geo::scale(other, 0.55),
-                ),
-            )
-            .tint(robe, 1.0)
-            .rough(0.85)
-            .pass(Pass::View),
-        );
-        items.push(
-            Item::new(self.ball, m4::place(grip, 0.0, [0.04; 3]))
-                .tint(rgb(214, 160, 120), 1.0)
-                .pass(Pass::View),
-        );
-        items.push(
-            Item::new(
-                self.rod,
-                m4::basis(grip, along, geo::scale(up, 0.014), geo::scale(right, 0.014)),
-            )
-            .pass(Pass::View),
-        );
-        let s = 0.018 + 0.016 * kick;
-        items.push(
-            Item::new(
-                self.orb,
-                m4::basis(
-                    tip,
-                    geo::scale(fwd, s),
-                    geo::scale(up, s),
-                    geo::scale(right, s),
-                ),
-            )
-            .tint(c, 1.0)
-            .glow(1.0)
-            .pass(Pass::View),
-        );
-        lights.push(Light {
-            p: tip,
-            r: 2.5 + 4.0 * kick,
-            c: geo::scale(c, 0.6 + 1.6 * kick),
-        });
-        tip
     }
 }
 

@@ -74,9 +74,9 @@ crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
 crates/luciphon*  game #2, legacy: core, -look (2D), -web (WebGL2 3D)
 crates/wandfall   game #3's core: laws trig map places motion storm world bots
                   predict proto view room (spec: docs/plunder.md)
-crates/wandfall-look  its look (page + hub): look land aura rig fx state
-                  icon scene spectate
-crates/wandfall-web  its page: page bar hud menu sound touch
+crates/wandfall-look  its look (page + hub): look land aura rig/ fx
+                  state icon scene spectate camera
+crates/wandfall-web  its page: page/ bar hud menu sound touch
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -136,8 +136,8 @@ deviceScaleFactor: 3` at 390x844 for a phone.
 
 - **`pkill -f server` kills your own shell** when the command line holds
   the pattern. Track the server's PID.
-- New people are ghosts for `GHOST_TICKS`: they cannot die or kill. Without
-  it, test players died within eight seconds of joining.
+- New people are ghosts for `GHOST_TICKS`: they cannot die or kill
+  (without it, test players died within eight seconds).
 - Bodies are rebuilt into the grid after deaths and before spawning; a
   stale grid indexes snakes that are gone.
 - The page steers by the pointer's angle from the screen's centre, where

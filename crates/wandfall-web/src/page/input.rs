@@ -1,0 +1,230 @@
+//! Your hands: the mouse and fingers turning the view, buttons and keys
+//! casting and pressing the menus; each tick's input predicted at once
+//! and sent; and the pace kept (a tier down when frames run slow).
+
+use super::*;
+
+pub(super) fn hands(p: &mut Page) {
+    let locked = kit::input::locked();
+    for h in p.hands.drain() {
+        // A browser lets sound play once a person acts.
+        if matches!(
+            h,
+            Hand::Button { down: true, .. }
+                | Hand::Finger {
+                    kind: kit::input::Kind::Down,
+                    ..
+                }
+        ) {
+            p.sounds.audio.wake();
+        }
+        match h {
+            Hand::Mouse { dx, dy, .. } if locked => {
+                // Slower when zoomed, so the aim holds.
+                let k = MOUSE * zoom(p);
+                p.yaw += dx as f32 * k;
+                p.pitch = (p.pitch - dy as f32 * k).clamp(-1.5, 1.5);
+            }
+            Hand::Button {
+                button: 2, down, ..
+            } => p.aiming = down && locked,
+            Hand::Finger {
+                kind: kit::input::Kind::Down,
+                x,
+                y,
+                ..
+            } if p.touch && in_menu(p) => {
+                let (lx, ly) = p.g.to_px(x, y);
+                if let Some(a) = p.spots.hit(lx, ly) {
+                    act(p, a);
+                }
+            }
+            Hand::Finger { id, kind, x, y, .. } if p.touch => {
+                let (dy, dp) = p.pad.finger(id, kind, x, y, p.g.css);
+                let k = zoom(p);
+                p.yaw += dy * k;
+                p.pitch = (p.pitch + dp * k).clamp(-1.5, 1.5);
+            }
+            Hand::Button {
+                button: 0,
+                down,
+                x,
+                y,
+                ..
+            } => {
+                if down && !locked && !p.touch {
+                    let (lx, ly) = p.g.to_px(x, y);
+                    match p.spots.hit(lx, ly) {
+                        Some(a) => act(p, a),
+                        // Off the buttons, in a game, with no book open: play.
+                        None if !matches!(p.mode, Mode::Title) && !p.book => {
+                            kit::input::lock(p.g.canvas());
+                        }
+                        None => {}
+                    }
+                } else {
+                    p.firing = down && locked;
+                }
+            }
+            _ => {}
+        }
+    }
+    if p.touch {
+        p.aiming = p.pad.aim;
+    } else if !locked {
+        p.firing = false;
+        p.aiming = false;
+    }
+    if std::mem::take(&mut p.pad.menu) {
+        p.paused = !p.paused;
+    }
+    for code in p.hands.pressed() {
+        p.sounds.audio.wake();
+        if code == "KeyM" {
+            let on = !p.sounds.audio.muted;
+            p.sounds.mute(on);
+            continue;
+        }
+        if code == "KeyB" && !matches!(p.mode, Mode::Title) {
+            act(p, if p.book { Act::CloseBook } else { Act::Book });
+            continue;
+        }
+        let slot = match code.as_str() {
+            "KeyQ" | "Digit1" => 0,
+            "KeyE" | "Digit2" => 1,
+            "KeyR" | "Digit3" => 2,
+            "KeyF" | "Digit4" => 3,
+            _ => continue,
+        };
+        if locked || p.touch {
+            p.asked |= cast::SLOT[slot];
+        }
+    }
+}
+
+/// The inputs due since the last frame, each applied at once (predicted)
+/// and sent.
+pub(super) fn inputs(p: &mut Page, dt: f64) {
+    let Some(island) = &p.island else {
+        return;
+    };
+    p.acc = (p.acc + dt).min(MS_A_TICK * 6.0);
+    if matches!(p.mode, Mode::Title) {
+        p.acc = 0.0;
+        return;
+    }
+    let busy = p.book || p.paused;
+    let held = |k: &str| p.hands.held(k) && !busy;
+    let mut k = 0;
+    if held("KeyW") || held("ArrowUp") {
+        k |= keys::FWD;
+    }
+    if held("KeyS") || held("ArrowDown") {
+        k |= keys::BACK;
+    }
+    if held("KeyA") || held("ArrowLeft") {
+        k |= keys::LEFT;
+    }
+    if held("KeyD") || held("ArrowRight") {
+        k |= keys::RIGHT;
+    }
+    if held("Space") {
+        k |= keys::JUMP;
+    }
+    if held("KeyC") {
+        k |= keys::CROUCH;
+    }
+    if p.firing {
+        k |= keys::FIRE;
+    }
+    if p.aiming {
+        k |= keys::AIM;
+    }
+    let mut tapped = 0;
+    if p.touch && !busy {
+        k |= p.pad.keys();
+        tapped |= p.pad.casts();
+    }
+    while p.acc >= MS_A_TICK {
+        p.acc -= MS_A_TICK;
+        if !p.alive {
+            continue;
+        }
+        p.seq = p.seq.wrapping_add(1);
+        let asked = std::mem::take(&mut p.asked);
+        let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
+        if let Some(sp) = own.and_then(|o| {
+            (0..4).find_map(|k| {
+                (asked & cast::SLOT[k] != 0 && o.cds[k] == 0)
+                    .then_some(o.slots[k])
+                    .flatten()
+                    .map(|s| s.0)
+            })
+        }) {
+            p.sounds.cast(sp, None, p.ear);
+        }
+        let i = Input {
+            seq: p.seq,
+            yaw: trig::heading(p.aim.0),
+            pitch: trig::pitch(p.aim.1),
+            keys: k,
+            cast: asked | tapped,
+        };
+        p.prev = p.pred.body;
+        p.pred.push(i, &island.map);
+        // Feet leaving the ground, and meeting it again.
+        let (was, is) = (p.prev, p.pred.body);
+        if !was.ground && is.ground {
+            let hard = ((-was.v[1] - 3.0) / 17.0).clamp(0.0, 1.0);
+            if hard > 0.0 || was.glide {
+                let hard = if was.glide { 0.8 } else { hard };
+                p.sounds.thud(hard);
+                p.st.dust.push((kit::now(), is.p, hard));
+            }
+        } else if was.ground && !is.ground && is.v[1] > 1.0 {
+            p.sounds.hop();
+        }
+        p.cool = p.cool.saturating_sub(1);
+        if k & keys::FIRE != 0 && p.cool == 0 && !p.pred.body.glide {
+            p.cool = BOLT_COOLDOWN;
+            p.sounds.wand(None, p.ear, (p.seq % 5) as f32 / 5.0);
+        }
+        p.outbox.push(i);
+    }
+    let out = std::mem::take(&mut p.outbox);
+    for chunk in out.chunks(proto::MAX_INPUTS) {
+        send(p, &Up::Inputs(chunk.to_vec()));
+    }
+}
+
+/// Too slow for this tier (over 2.5 s of play, frames over 30 ms on
+/// average): one tier down, the island built again on it.
+pub(super) fn pace(p: &mut Page, dt: f64) {
+    if p.fixed || !p.alive || dt <= 0.0 {
+        return;
+    }
+    p.pace.0 += 1;
+    p.pace.1 += dt;
+    if p.pace.1 < 2500.0 {
+        return;
+    }
+    let slow = p.pace.1 / p.pace.0 as f64 > 30.0;
+    p.pace = (0, 0.0);
+    let Some(q) = p.r.quality().lower().filter(|_| slow) else {
+        return;
+    };
+    p.r = Renderer::new(&p.g.device, &p.g.queue, p.g.format(), q);
+    p.island = None;
+    if let Some(seed) = p.st.seed.take() {
+        island(p, seed);
+    }
+}
+
+/// The view turns slower aiming (zoomed in), so the aim holds.
+fn zoom(p: &Page) -> f32 {
+    if p.aiming {
+        camera::FOV_AIM / camera::FOV
+    } else {
+        1.0
+    }
+}
