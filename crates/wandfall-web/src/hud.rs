@@ -295,6 +295,27 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
                 ward,
             );
         }
+        // Stamina, over the health while any is spent: red while winded.
+        let b = &o.body;
+        if b.spent > 0 || b.sprint {
+            let left = 1.0 - b.spent as f32 / wandfall::laws::STAMINA as f32;
+            let sy = if v.touch { y + bh + 3 * ui } else { y - 6 * ui };
+            let col = if b.winded {
+                RED
+            } else {
+                Rgba::rgb(240, 200, 90)
+            };
+            c.round_rect(
+                Rect::new(x as f32, sy as f32, bw as f32, 3.0 * u),
+                1.5 * u,
+                SHADE,
+            );
+            c.round_rect(
+                Rect::new(x as f32, sy as f32, bw as f32 * left, 3.0 * u),
+                1.5 * u,
+                col,
+            );
+        }
         let hp = format!("{} / {}", o.hp, full);
         let ko = format!("knocked out {}", o.kills);
         if v.touch {

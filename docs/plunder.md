@@ -269,7 +269,9 @@ of combat styles and all varieties to counter all varieties".
       `running_through_a_wood_the_view_never_leaps`).
 - [x] **Moving like it matters** (on the owner's word: "crouching,
       sliding, sprinting, gravity down hill, momentum"). Shift sprints
-      (10 m/s against 7; forward only, not aiming, casting or wading).
+      (10 m/s against 7; forward only, not aiming, casting or wading), as
+      long as stamina lasts (6 s; it comes back in 4 after a breath; run
+      dry, you are winded till a third is back; a bar over your health).
       Crouching at a sprint slides: a boost (once a second), then friction,
       gravity along the slope (a hill makes a slide gather speed, to
       18 m/s), a little steering; it ends when you stand or slow to a

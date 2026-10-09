@@ -44,6 +44,14 @@ pub const RIFT_DEPTH: f32 = 3.5;
 pub const RUN: f32 = 7.0;
 /// Sprinting (forward only; not aiming, casting or crouched).
 pub const SPRINT: f32 = 10.0;
+/// Stamina, spent sprinting (ten a tick): a full store sprints 6 s; after
+/// a breath (1 s) of not sprinting it comes back (in 4 s); spent to
+/// nothing, a wizard is winded until a third is back.
+pub const STAMINA: u16 = 6 * TICK_HZ as u16 * 10;
+pub const STAMINA_SPEND: u16 = 10;
+pub const STAMINA_BACK: u16 = 15;
+pub const STAMINA_BREATH: u8 = TICK_HZ as u8;
+pub const WINDED_UNTIL: u16 = STAMINA * 2 / 3;
 pub const WADE: f32 = 0.55;
 /// Speeding up toward where you steer, on the ground and in the air;
 /// slowing with no keys held; and how fast speed above your pace bleeds

@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 7;
+pub const PROTO: u8 = 8;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -234,9 +234,12 @@ impl Frame {
                     | (b.glide as u8) << 1
                     | (b.crouch as u8) << 2
                     | (b.sprint as u8) << 3
-                    | (b.slide as u8) << 4)
+                    | (b.slide as u8) << 4
+                    | (b.winded as u8) << 5)
                     .u8(b.coyote.min(15) | b.buffer.min(15) << 4)
                     .u8(b.slide_cd)
+                    .u16(b.spent)
+                    .u8(b.breath)
                     .u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
@@ -307,6 +310,7 @@ impl Frame {
             let g = r.u8()?;
             let jump = r.u8()?;
             let slide_cd = r.u8()?;
+            let (spent, breath) = (r.u16()?, r.u8()?);
             let mut o = Own {
                 body: Body {
                     p,
@@ -316,7 +320,10 @@ impl Frame {
                     crouch: g & 4 != 0,
                     sprint: g & 8 != 0,
                     slide: g & 16 != 0,
+                    winded: g & 32 != 0,
                     slide_cd,
+                    spent,
+                    breath,
                     coyote: jump & 15,
                     buffer: jump >> 4,
                     chill: r.u16()?,
@@ -635,6 +642,9 @@ mod tests {
                     sprint: false,
                     slide: true,
                     slide_cd: 17,
+                    spent: 1234,
+                    breath: 9,
+                    winded: true,
                 },
                 seq: 65535,
                 hp: 252,

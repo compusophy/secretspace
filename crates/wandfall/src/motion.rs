@@ -58,6 +58,11 @@ pub struct Body {
     pub sprint: bool,
     pub slide: bool,
     pub slide_cd: u8,
+    /// Stamina spent (0 fresh, `STAMINA` none left), ticks since it last
+    /// sprinted, and winded (it cannot sprint till some comes back).
+    pub spent: u16,
+    pub breath: u8,
+    pub winded: bool,
 }
 
 impl Body {
@@ -144,7 +149,22 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
         && !has(keys::FIRE)
         && !b.glide
         && !wading
-        && b.chill == 0;
+        && b.chill == 0
+        && !b.winded;
+    // Sprinting spends stamina; a breath after, it comes back.
+    if b.sprint {
+        b.spent = (b.spent + STAMINA_SPEND).min(STAMINA);
+        b.breath = 0;
+        b.winded = b.spent >= STAMINA;
+    } else {
+        b.breath = b.breath.saturating_add(1);
+        if b.breath >= STAMINA_BREATH {
+            b.spent = b.spent.saturating_sub(STAMINA_BACK);
+        }
+        if b.winded && b.spent <= WINDED_UNTIL {
+            b.winded = false;
+        }
+    }
     if b.slide && b.ground {
         // Gravity down the slope; friction; a little steering, no faster.
         let k = GRAVITY * DT / (1.0 + gx * gx + gz * gz);
@@ -369,6 +389,46 @@ mod tests {
             yaw: 0,
             ..Input::default()
         }
+    }
+
+    #[test]
+    fn sprinting_tires_and_a_breath_brings_it_back() {
+        let map = Map::new(3);
+        let (flat, _) = grounds(&map);
+        let mut b = Body {
+            p: [flat[0], map.height(flat[0], flat[1]), flat[1]],
+            ground: true,
+            ..Body::default()
+        };
+        let run = |b: &mut Body, keys: u16, ticks: u32| {
+            for k in 0..ticks {
+                // Back and forth on the plaza, so it never leaves it.
+                let yaw = if (k / 45) % 2 == 0 { 0 } else { 32768 };
+                step(
+                    b,
+                    &Input {
+                        seq: 0,
+                        yaw,
+                        pitch: 0,
+                        keys,
+                        cast: 0,
+                    },
+                    &map,
+                );
+            }
+        };
+        let full = (STAMINA / STAMINA_SPEND) as u32;
+        run(&mut b, keys::FWD | keys::SPRINT, full - 2);
+        assert!(b.sprint && !b.winded, "still sprinting: {b:?}");
+        run(&mut b, keys::FWD | keys::SPRINT, 4);
+        assert!(b.winded && !b.sprint, "winded: {b:?}");
+        // Holding sprint winded is only running; a rest brings it back.
+        run(&mut b, keys::FWD | keys::SPRINT, 10);
+        assert!(!b.sprint);
+        run(&mut b, 0, STAMINA_BREATH as u32 + 60);
+        assert!(!b.winded && b.spent < STAMINA / 2, "rested: {b:?}");
+        run(&mut b, keys::FWD | keys::SPRINT, 2);
+        assert!(b.sprint, "sprinting again");
     }
 
     #[test]
