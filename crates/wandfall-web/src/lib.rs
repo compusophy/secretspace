@@ -15,6 +15,7 @@ pub mod hud;
 pub mod lessons;
 pub mod menu;
 pub mod sound;
+pub mod steps;
 pub mod touch;
 
 // How it looks, shared with the hub's card.

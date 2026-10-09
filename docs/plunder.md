@@ -332,6 +332,11 @@ of combat styles and all varieties to counter all varieties".
   the storm's roar as its wall comes near, and all round inside it;
   crickets at night and birds at dawn and through the afternoon, hushed
   high up and in the storm.
+- **Footsteps** (`wandfall-web/src/steps.rs`): every wizard's feet as
+  they come down, in time with the stride it is drawn with (`Anim`'s
+  footfall), on grass, sand, stone or in the shallows; louder at a
+  sprint, hushed crouching, so creeping up on someone is quiet. Yours are
+  soft and close; others' come from where they are, out to 40 m.
 - **Lessons on the range** (`wandfall-web/src/lessons.rs`), the first
   time: twelve steps under the top line, each ticked off as you do it
   (move, jump, a timed hop, an air jump, a climb, a launch rune, sprint,

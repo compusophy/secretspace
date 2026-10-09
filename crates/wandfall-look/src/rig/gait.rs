@@ -60,6 +60,9 @@ pub struct Anim {
     pub phase: f32,
     /// Metres a step now.
     pub stride: f32,
+    /// A foot came down in the last step (on the ground, going, not
+    /// sliding): a footfall to hear.
+    pub footfall: bool,
     /// Leaning forward, banking right (radians).
     pub lean: Spring,
     pub bank: Spring,
@@ -143,10 +146,15 @@ impl Anim {
         self.stride = (STEP_WALK + (STEP_RUN - STEP_WALK) * run + 0.35 * sprint)
             * (1.0 - 0.3 * self.crouch)
             * (1.0 - 0.4 * self.course.sin().abs());
+        let was = self.phase;
         if ground {
             // Two steps a cycle: the feet move as far as the body does.
             self.phase = (self.phase + self.speed * dt / (2.0 * self.stride)).fract();
         }
+        self.footfall = ground
+            && !slide
+            && self.speed > 0.6
+            && (self.phase < was || (was < 0.5 && self.phase >= 0.5));
         let lean =
             0.12 * run + 0.14 * sprint + (accel.0 * 0.012).clamp(-0.12, 0.12) + 0.08 * run * moving;
         self.lean.step(lean.clamp(-0.2, 0.35), 0.15, dt);
@@ -209,5 +217,31 @@ mod tests {
         let mut a = Anim::default();
         walk(&mut a, (7.0, 0.0), 0.0, 1.0);
         assert!(a.run.x > 0.9 && a.stride > 1.3 && a.lean.x > 0.1, "{a:?}");
+    }
+
+    #[test]
+    fn a_foot_falls_each_stride() {
+        // Running at 7 m/s for 4 s: a footfall each stride's length.
+        let mut a = Anim::default();
+        walk(&mut a, (7.0, 0.0), 0.0, 1.0);
+        let (mut falls, mut p) = (0, a.last);
+        for _ in 0..240 {
+            p = [p[0] + 7.0 / 60.0, 0.0, p[2]];
+            a.step(p, (0.0, 0.0), (true, false, false), 1.0 / 60.0);
+            falls += a.footfall as i32;
+        }
+        let want = 28.0 / a.stride;
+        assert!(
+            (falls as f32 - want).abs() <= 1.5,
+            "{falls} falls, {want} strides"
+        );
+        // Standing, or in the air: none.
+        for ground in [true, false] {
+            for _ in 0..60 {
+                p = [p[0] + if ground { 0.0 } else { 0.1 }, 0.0, p[2]];
+                a.step(p, (0.0, 0.0), (ground, false, false), 1.0 / 60.0);
+                assert!(!a.footfall || ground && a.speed > 0.6);
+            }
+        }
     }
 }

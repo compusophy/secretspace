@@ -35,8 +35,9 @@ pub struct Sounds {
     take: usize,
     hop: usize,
     thud: usize,
-    /// The island's sound under everything.
+    /// The island's sound under everything; footsteps.
     pub ambience: crate::ambience::Ambience,
+    pub steps: crate::steps::Steps,
 }
 
 fn wand() -> Vec<f32> {
@@ -562,6 +563,25 @@ fn take() -> Vec<f32> {
     s.done(0.45)
 }
 
+/// Sound `id` from `p`, heard from `ear` (where, facing which way):
+/// quieter far off, to the left or the right.
+pub fn heard(audio: &Audio, id: usize, gain: f32, p: V3, ear: (V3, f32), speed: f32) {
+    let (e, yaw) = ear;
+    let (dx, dz) = (p[0] - e[0], p[2] - e[2]);
+    let d = (dx * dx + dz * dz + (p[1] - e[1]).powi(2)).sqrt();
+    if d > 90.0 {
+        return;
+    }
+    let near = 1.0 / (1.0 + d / 10.0).powf(1.3);
+    let (s, c) = yaw.sin_cos();
+    let pan = if d > 0.5 {
+        (dx * -s + dz * c) / d * 0.8
+    } else {
+        0.0
+    };
+    audio.play(id, gain * near, pan, speed);
+}
+
 impl Default for Sounds {
     fn default() -> Sounds {
         Sounds::new()
@@ -605,6 +625,7 @@ impl Sounds {
             hop: add(hop()),
             thud: add(thud()),
             ambience: crate::ambience::Ambience::new(&mut audio),
+            steps: crate::steps::Steps::new(&mut audio),
             audio,
         }
     }
@@ -615,20 +636,7 @@ impl Sounds {
     }
 
     fn at(&self, id: usize, gain: f32, p: V3, ear: (V3, f32), speed: f32) {
-        let (e, yaw) = ear;
-        let (dx, dz) = (p[0] - e[0], p[2] - e[2]);
-        let d = (dx * dx + dz * dz + (p[1] - e[1]).powi(2)).sqrt();
-        if d > 90.0 {
-            return;
-        }
-        let near = 1.0 / (1.0 + d / 10.0).powf(1.3);
-        let (s, c) = yaw.sin_cos();
-        let pan = if d > 0.5 {
-            (dx * -s + dz * c) / d * 0.8
-        } else {
-            0.0
-        };
-        self.audio.play(id, gain * near, pan, speed);
+        heard(&self.audio, id, gain, p, ear, speed);
     }
 
     /// Your own wand, or someone's at `p` (heard from `ear`: where you

@@ -79,6 +79,12 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         fx::gallery(&i.look, &mut d, name, (age, now), feet, right);
     }
     p.ear = (cam.eye, cam.yaw);
+    if let Some(i) = &p.island {
+        let you = p.alive.then_some(p.st.you);
+        p.sounds
+            .steps
+            .hear(&p.sounds.audio, &i.map, (&others, &p.anims), you, p.ear);
+    }
     // The island's sound under everything, for where you are.
     if let Some(i) = &p.island {
         let at = |place: wandfall::places::Place, up: f32| {

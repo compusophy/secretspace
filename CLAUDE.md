@@ -76,7 +76,7 @@ crates/wandfall   game #3's core: laws trig map places motion storm world bots
                   predict proto view room (spec: docs/plunder.md)
 crates/wandfall-look  its look (page + hub): look land aura rig/ fx/
                   state icon scene spectate camera sky
-crates/wandfall-web  its page: page/ bar hud menu sound ambience touch lessons
+crates/wandfall-web  its page: page/ bar hud menu sound ambience steps touch lessons
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM)
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -128,8 +128,8 @@ up` of `ship/`, secret RAILWAY_TOKEN, variable RAILWAY_SERVICE) and the
 pages to Vercel (secrets VERCEL_*), pointed at the server by the variable
 RELAY (`wss://<railway domain>/ws`). No RELAY, no page deploy.
 
-Browser checks: Playwright, `executablePath` at the installed
-Chromium; separate contexts are separate players; `hasTouch, isMobile,
+Browser checks: Playwright, `executablePath` the installed Chromium;
+separate contexts are separate players; `hasTouch, isMobile,
 deviceScaleFactor: 3` at 390x844 for a phone.
 
 ## Gotchas
