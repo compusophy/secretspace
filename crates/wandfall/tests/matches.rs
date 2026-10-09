@@ -16,8 +16,24 @@ fn a_match_runs_to_a_winner_and_starts_again() {
     let (mut began, mut winner, mut shot, mut storm, mut lobby) = (false, None, 0, 0, false);
     let (mut casts, mut levels, mut top, mut opened) = (0, 0, 1, 0);
     let (mut lying, mut fought): (Vec<u16>, bool) = (Vec::new(), false);
+    let (mut hops, mut launches) = (0, 0);
     for _ in 0..TICK_HZ * 60 * 6 {
-        for e in w.step() {
+        let before: Vec<(u16, wandfall::motion::Body)> =
+            w.players.iter().map(|p| (p.id, p.body)).collect();
+        let events = w.step();
+        // The bots' moves: timed hops, and launch runes taken.
+        for p in &w.players {
+            if let Some((_, was)) = before.iter().find(|b| b.0 == p.id) {
+                let is = &p.body;
+                if was.ground && !is.ground && is.v[1] > 1.0 && was.landed <= HOP_WINDOW {
+                    hops += 1;
+                }
+                if was.ground && !was.glide && is.glide {
+                    launches += 1;
+                }
+            }
+        }
+        for e in events {
             match e {
                 Event::Begin => {
                     began = true;
@@ -68,7 +84,10 @@ fn a_match_runs_to_a_winner_and_starts_again() {
         levels >= 10 && top >= 4,
         "wizards level up: {levels} times, to {top}"
     );
-    println!("knocked out {shot}, storm {storm}, cubes {opened}, casts {casts}, levels {levels} (top {top})");
+    assert!(hops >= 20, "bots hop their way about: {hops}");
+    println!(
+        "knocked out {shot}, storm {storm}, cubes {opened}, casts {casts}, levels {levels} (top {top}), hops {hops}, launches {launches}"
+    );
     let _ = winner;
 }
 

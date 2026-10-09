@@ -1,8 +1,10 @@
 //! Bots: wizards that fill each match. They land where they aimed in the
-//! drop, keep inside the storm's next circle, pick the nearest wizard
-//! they can see, and duel: strafing, keeping their distance, leading
-//! their shots, a little off. They see as people do (not through hills,
-//! trees or pillars) and take a moment to notice.
+//! drop, keep inside the storm's next circle (hopping, timed to each
+//! landing, when they have far to go; up a launch rune and gliding when
+//! the storm comes and one is on the way), pick the nearest wizard they
+//! can see, and duel: strafing, keeping their distance, leading their
+//! shots, a little off. They see as people do (not through hills, trees
+//! or pillars) and take a moment to notice.
 
 use engine::rng::splitmix;
 
@@ -149,6 +151,7 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
     // Walking: toward a point, as keys relative to where it faces.
     let walk_to = |to: [f32; 2]| (to[1] - me.body.p[2]).atan2(to[0] - me.body.p[0]);
     let mut walk: Option<f32> = None;
+    let mut far = false;
     if let Some((p, d)) = seen.filter(|_| !flee) {
         let c = chest(p);
         // Lead the shot, and miss a little.
@@ -198,11 +201,28 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
             })
             .map(|s| (s.p, near(s.p)))
             .min_by(|a, b| a.1.total_cmp(&b.1));
-        let to = match (flee, cube) {
-            (true, _) => next.0,
-            (false, Some((p, _))) => [p[0], p[2]],
-            (false, None) => m.goal,
+        // Running from the storm: a launch rune near and on the way
+        // throws it up to glide there.
+        let pad = w
+            .map
+            .pads
+            .iter()
+            .filter(|q| {
+                let (dx, dz) = (q[0] - me.body.p[0], q[2] - me.body.p[2]);
+                let (tx, tz) = (next.0[0] - me.body.p[0], next.0[1] - me.body.p[2]);
+                flee && me.body.ground
+                    && dx * dx + dz * dz < BOT_PAD * BOT_PAD
+                    && dx * tx + dz * tz > 0.0
+            })
+            .map(|q| [q[0], q[2]])
+            .next();
+        let to = match (flee, pad, cube) {
+            (true, Some(q), _) => q,
+            (true, None, _) => next.0,
+            (false, _, Some((p, _))) => [p[0], p[2]],
+            (false, _, None) => m.goal,
         };
+        far = flee || (to[0] - me.body.p[0]).hypot(to[1] - me.body.p[2]) > BOT_HOP_FAR;
         walk = Some(around(w, me.body.p, walk_to(to)));
     }
     if let Some(a) = walk {
@@ -210,8 +230,13 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
         let want = trig::heading(a);
         let diff = want.wrapping_sub(yaw) as i16;
         yaw = yaw.wrapping_add((diff as i32).clamp(-1800, 1800) as i16 as u16);
-        // Going somewhere (not fighting): at a sprint.
+        // Going somewhere (not fighting): at a sprint; far, hopping, each
+        // hop timed to the landing (a press, so let go between).
         keys |= keys::FWD | keys::SPRINT;
+        let b = &me.body;
+        if far && b.ground && !b.held && (b.landed <= 1 || unit(m.seed, tick, 9) < 0.05) {
+            keys |= keys::JUMP;
+        }
     }
     // Stuck against something: jump, and walk elsewhere.
     if tick.is_multiple_of(TICK_HZ) {

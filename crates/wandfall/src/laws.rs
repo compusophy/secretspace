@@ -173,6 +173,10 @@ pub const BOT_AIM_ERROR: f32 = 0.05;
 pub const BOT_NOTICE: u32 = 14;
 /// The distance they like to duel at.
 pub const BOT_RANGE: f32 = 16.0;
+/// Bots going this far (m) hop their way there; running from the storm,
+/// they take a launch rune this near (m) on the way.
+pub const BOT_HOP_FAR: f32 = 25.0;
+pub const BOT_PAD: f32 = 30.0;
 /// How far a bot goes out of its way for a cube.
 pub const LOOT_SIGHT: f32 = 70.0;
 pub const BOT_NAMES: &[&str] = &[
