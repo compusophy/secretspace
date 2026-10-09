@@ -81,6 +81,8 @@ pub struct View<'a> {
     pub practice: bool,
     /// A wizard under the crosshair, in reach of the Lance.
     pub on_target: bool,
+    /// The spellbook is open (it takes the place of the cube underfoot).
+    pub book: bool,
 }
 
 fn clock(secs: u16) -> String {
@@ -310,7 +312,7 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
             let cold = bar::rgba(crate::fx::colour(wandfall::laws::spell::FROST));
             c.text_centred(cx, h / 2 + 18 * ui, "chilled", ui, cold);
         }
-        bar::draw(c, o, v.st, v.now, ui, !v.touch);
+        bar::draw(c, o, v.st, v.now, ui, (!v.touch, !v.book));
     }
     // The island, the storm's circles, and you.
     let s = (MINI * ui).min(w / 4).min(h / 4);

@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 6;
+pub const PROTO: u8 = 7;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -546,28 +546,18 @@ pub fn read_events(b: &[u8]) -> Option<Vec<Ev>> {
     Some(v)
 }
 
-/// The chests (id, where, opened) and the scrolls (id, spell, rank,
-/// where) on the island, sent when they change.
+/// The spell cubes (id, spell, rank, where) on the island, sent when
+/// they change.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Loot {
-    pub chests: Vec<(u16, [f32; 3], bool)>,
     pub scrolls: Vec<(u16, u8, u8, [f32; 3])>,
 }
 
 impl Loot {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::default();
-        let n = self.chests.len().min(u16::MAX as usize);
-        w.u8(tag::LOOT).u16(n as u16);
-        for (id, p, open) in &self.chests[..n] {
-            w.u16(*id)
-                .i16(q(p[0]))
-                .i16(q(p[1]))
-                .i16(q(p[2]))
-                .u8(*open as u8);
-        }
         let n = self.scrolls.len().min(u16::MAX as usize);
-        w.u16(n as u16);
+        w.u8(tag::LOOT).u16(n as u16);
         for (id, spell, rank, p) in &self.scrolls[..n] {
             w.u16(*id)
                 .u8(*spell)
@@ -585,15 +575,6 @@ impl Loot {
             return None;
         }
         let mut l = Loot::default();
-        let n = r.u16()? as usize;
-        r.room(n, 9)?;
-        for _ in 0..n {
-            l.chests.push((
-                r.u16()?,
-                [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
-                r.u8()? != 0,
-            ));
-        }
         let n = r.u16()? as usize;
         r.room(n, 10)?;
         for _ in 0..n {

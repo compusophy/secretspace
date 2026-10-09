@@ -186,23 +186,19 @@ pub fn think(w: &World, k: usize, storm: &Now, tick: u32) -> (Input, Mind) {
             keys |= keys::JUMP;
         }
     } else {
-        // Loot nearby (a closed chest, a scroll worth having), else its goal.
+        // A cube worth having nearby (inside the storm), else its goal.
         let near = |q: [f32; 3]| (q[0] - me.body.p[0]).powi(2) + (q[2] - me.body.p[2]).powi(2);
-        let chest = w
-            .chests
+        let cube = w
+            .scrolls
             .iter()
-            .filter(|c| {
-                !c.open && near(c.p) < LOOT_SIGHT * LOOT_SIGHT && !storm.outside(c.p[0], c.p[2])
+            .filter(|s| {
+                near(s.p) < LOOT_SIGHT * LOOT_SIGHT
+                    && !storm.outside(s.p[0], s.p[2])
+                    && wants(me, s.spell, s.rank)
             })
-            .map(|c| (c.p, near(c.p)))
-            .chain(
-                w.scrolls
-                    .iter()
-                    .filter(|s| near(s.p) < 25.0 * 25.0 && wants(me, s.spell, s.rank))
-                    .map(|s| (s.p, near(s.p))),
-            )
+            .map(|s| (s.p, near(s.p)))
             .min_by(|a, b| a.1.total_cmp(&b.1));
-        let to = match (flee, chest) {
+        let to = match (flee, cube) {
             (true, _) => next.0,
             (false, Some((p, _))) => [p[0], p[2]],
             (false, None) => m.goal,

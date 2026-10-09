@@ -15,6 +15,7 @@ fn a_match_runs_to_a_winner_and_starts_again() {
     assert_eq!(w.phase, Phase::Lobby);
     let (mut began, mut winner, mut shot, mut storm, mut lobby) = (false, None, 0, 0, false);
     let (mut casts, mut levels, mut top, mut opened) = (0, 0, 1, 0);
+    let (mut lying, mut fought): (Vec<u16>, bool) = (Vec::new(), false);
     for _ in 0..TICK_HZ * 60 * 6 {
         for e in w.step() {
             match e {
@@ -34,9 +35,13 @@ fn a_match_runs_to_a_winner_and_starts_again() {
                 _ => {}
             }
         }
-        if w.phase == Phase::Fight {
-            opened = opened.max(w.chests.iter().filter(|c| c.open).count());
+        // Cubes gone from where they lay mid-fight: run over.
+        let now: Vec<u16> = w.scrolls.iter().map(|s| s.id).collect();
+        let fight = w.phase == Phase::Fight;
+        if fight && fought {
+            opened += lying.iter().filter(|id| !now.contains(id)).count();
         }
+        (lying, fought) = (now, fight);
         if lobby {
             break;
         }
@@ -57,13 +62,13 @@ fn a_match_runs_to_a_winner_and_starts_again() {
         "back to the lobby, bots gone"
     );
     assert!(w.find(me).is_some());
-    assert!(opened >= 8, "chests are opened: {opened}");
+    assert!(opened >= 8, "cubes are picked up: {opened}");
     assert!(casts >= 10, "spells are cast: {casts}");
     assert!(
         levels >= 10 && top >= 4,
         "wizards level up: {levels} times, to {top}"
     );
-    println!("knocked out {shot}, storm {storm}, chests {opened}, casts {casts}, levels {levels} (top {top})");
+    println!("knocked out {shot}, storm {storm}, cubes {opened}, casts {casts}, levels {levels} (top {top})");
     let _ = winner;
 }
 

@@ -95,6 +95,10 @@ struct Page {
     spots: Spots,
     /// The spellbook is open, at this slot; the pause menu is (touch).
     book: bool,
+    /// The mouse was locked last frame; mouse moves to pass over (the
+    /// first after a lock can carry the whole way the cursor jumped).
+    was_locked: bool,
+    skip: u8,
     book_slot: usize,
     paused: bool,
     session: kit::Session,
@@ -265,6 +269,8 @@ pub fn start() {
                 local: 0.0,
                 spots: Spots::default(),
                 book: false,
+                was_locked: false,
+                skip: 0,
                 book_slot: 0,
                 paused: false,
                 session,

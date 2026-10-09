@@ -4,8 +4,15 @@
 
 use super::*;
 
+/// The most a single mouse move may turn the view (pixels).
+const MOUSE_MOST: f64 = 250.0;
+
 pub(super) fn hands(p: &mut Page) {
     let locked = kit::input::locked();
+    if locked && !p.was_locked {
+        p.skip = 2;
+    }
+    p.was_locked = locked;
     for h in p.hands.drain() {
         // A browser lets sound play once a person acts.
         if matches!(
@@ -20,6 +27,14 @@ pub(super) fn hands(p: &mut Page) {
         }
         match h {
             Hand::Mouse { dx, dy, .. } if locked => {
+                if p.skip > 0 {
+                    p.skip -= 1;
+                    continue;
+                }
+                let (dx, dy) = (
+                    dx.clamp(-MOUSE_MOST, MOUSE_MOST),
+                    dy.clamp(-MOUSE_MOST, MOUSE_MOST),
+                );
                 // Slower when zoomed, so the aim holds.
                 let k = MOUSE * zoom(p);
                 p.yaw += dx as f32 * k;
@@ -56,8 +71,15 @@ pub(super) fn hands(p: &mut Page) {
                     let (lx, ly) = p.g.to_px(x, y);
                     match p.spots.hit(lx, ly) {
                         Some(a) => act(p, a),
-                        // Off the buttons, in a game, with no book open: play.
-                        None if !matches!(p.mode, Mode::Title) && !p.book => grab(p),
+                        // Off the buttons, in a game: play (closing the
+                        // book if it is open).
+                        None if !matches!(p.mode, Mode::Title) => {
+                            if p.book {
+                                act(p, Act::CloseBook);
+                            } else {
+                                grab(p);
+                            }
+                        }
                         None => {}
                     }
                 } else {
@@ -80,8 +102,12 @@ pub(super) fn hands(p: &mut Page) {
         p.sounds.audio.wake();
         // Esc pauses (with the keyboard held it comes to the page instead
         // of letting the mouse go; held, it leaves full screen).
-        if code == "Escape" && locked {
-            kit::input::unlock();
+        if code == "Escape" {
+            if p.book {
+                act(p, Act::CloseBook);
+            } else if locked {
+                kit::input::unlock();
+            }
             continue;
         }
         if code == "KeyM" {
@@ -117,7 +143,8 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
         p.acc = 0.0;
         return;
     }
-    let busy = p.book || p.paused;
+    // With the book open you still move (the mouse is the book's).
+    let busy = p.paused;
     let held = |k: &str| p.hands.held(k) && !busy;
     let mut k = 0;
     if held("KeyW") || held("ArrowUp") {

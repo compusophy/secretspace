@@ -52,7 +52,7 @@ const CELLS: i32 = (MAP_HALF * 2.0 / CELL) as i32;
 pub struct Map {
     pub seed: u64,
     pub props: Vec<Prop>,
-    /// The places, the Spire first; where their chests wait.
+    /// The places, the Spire first; where their cubes wait.
     pub pois: Vec<Poi>,
     pub caches: Vec<[f32; 2]>,
     /// Where to stand above the ground (the Spire's stair and balcony).

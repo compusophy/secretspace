@@ -1,7 +1,7 @@
 //! The practice range: a world a page runs for itself. No storm and no
 //! match: you start by a ruin with training dummies about you (some
 //! stand, some strafe, two spar when you want them to), you are hurt
-//! only when sparring, the knocked out stand again, chests are set out
+//! only when sparring, the knocked out stand again, cubes are set out
 //! again now and then, and the spellbook's tools change your spells, your
 //! level and the rules.
 
@@ -21,7 +21,7 @@ pub struct Practice {
     pub spawn: [f32; 2],
     /// Who stands again, and when.
     respawns: Vec<(u16, u32)>,
-    chests_at: u32,
+    loot_at: u32,
 }
 
 /// Make `w` a practice range.
@@ -38,7 +38,7 @@ pub fn setup(w: &mut World) {
     let spawn = clear(w, spawn);
     w.practice = Some(Practice {
         spawn,
-        chests_at: w.tick + PRACTICE_CHESTS_EVERY,
+        loot_at: w.tick + PRACTICE_LOOT_EVERY,
         ..Practice::default()
     });
     w.phase = Phase::Fight;
@@ -111,8 +111,8 @@ pub fn step(w: &mut World, ev: &mut Vec<Event>) {
         .collect();
     r.respawns.retain(|x| tick < x.1);
     let (no_cd, spawn) = (r.no_cooldowns, r.spawn);
-    if tick >= r.chests_at {
-        r.chests_at = tick + PRACTICE_CHESTS_EVERY;
+    if tick >= r.loot_at {
+        r.loot_at = tick + PRACTICE_LOOT_EVERY;
         if tick > 0 {
             loot::scatter(w);
         }

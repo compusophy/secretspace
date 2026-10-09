@@ -21,8 +21,6 @@ pub struct Look {
     pub ball: Mesh,
     pub orb: Mesh,
     pub wall: Mesh,
-    pub chest: Mesh,
-    pub lid: Mesh,
     /// A flat ring a metre across (marks, shockwaves); an ice shard a
     /// metre each way along x; a beam a metre up y.
     pub ring: Mesh,
@@ -120,24 +118,6 @@ impl Look {
             orb: smooth(r, |g| {
                 g.sphere([0.0; 3], [1.0; 3], (2, 9, 0.0), rgb(255, 246, 225), 1.0)
             }),
-            chest: one(r, |g| {
-                let wood = rgb(120, 82, 50);
-                g.block([0.0; 3], [1.1, 0.6, 0.75], 0.0, wood, rgb(100, 66, 40), 0.0);
-                for x in [-0.4, 0.4] {
-                    g.block([x, 0.0, 0.0], [0.08, 0.62, 0.78], 0.0, GOLD, GOLD, 0.25);
-                }
-            }),
-            lid: one(r, |g| {
-                g.block(
-                    [0.0, 0.6, 0.0],
-                    [1.14, 0.22, 0.79],
-                    0.0,
-                    rgb(130, 90, 56),
-                    rgb(110, 74, 46),
-                    0.0,
-                );
-                g.block([0.0, 0.6, 0.0], [0.1, 0.24, 0.81], 0.0, GOLD, GOLD, 0.3);
-            }),
             ring: one(r, |g| {
                 let n = 48;
                 for k in 0..n {
@@ -168,7 +148,7 @@ impl Look {
     /// Let every mesh go (another island takes this one's place).
     pub fn free(self, r: &mut Renderer) {
         let all = [
-            self.ball, self.orb, self.wall, self.chest, self.lid, self.ring, self.shard, self.beam,
+            self.ball, self.orb, self.wall, self.ring, self.shard, self.beam,
         ];
         for m in all.into_iter().chain(self.land.held).chain(self.cubes) {
             r.free(m);

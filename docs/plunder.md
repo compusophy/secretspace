@@ -207,13 +207,13 @@ of combat styles and all varieties to counter all varieties".
 - [x] **A wizard's island** (`places.rs`, `land.rs`), on the owner's word
       ("not wizardy enough... a wizard tower at the centre"): the **Spire**,
       a tower in a wizard's hat on a paved plaza raised 7 m, lamps about
-      it, a beacon of light over it seen from anywhere, four chests at its
+      it, a beacon of light over it seen from anywhere, four caches of cubes at its
       foot; on a ring 76 m out, a **stone circle** (runed menhirs about an
       altar, an orb and runes turning over it), a **demon rift** (a
       scorched bowl, lava cracks, obsidian, a gate burning with runes,
       embers), a **crystal grove** (glowing clusters, giant mushrooms,
       glimmer). Each shapes the ground, blocks as trees do, and keeps two
-      chests. Between them: violet and teal wizard-wood, mushrooms, ruins;
+      caches. Between them: violet and teal wizard-wood, mushrooms, ruins;
       islets float over it all. Bots step around what stands ahead.
 - [x] **The Spire is climbed** (on the owner's word): a stone stair winds
       twice about the tower, a gold rail on posts at its edge, up to a
@@ -235,11 +235,15 @@ of combat styles and all varieties to counter all varieties".
       rank up everything you run over, no button press... the spellbook B
       to choose the spells... when players die they drop all their spells
       at the highest rank and their XP combines with yours"). Spells lie as
-      cubes, their icon on every face: 36 loose across the island, more
-      from 28 chests. Running over one learns it into your spellbook, or
-      ranks it up (to III); a spell new to you takes a free slot of its
-      kind. B opens the book anywhere: pick a slot, then any spell of its
-      kind you know (it waits 2 s before it can be cast; two slots trade).
+      cubes, their icon on every face: 36 loose across the island and a
+      pair at each of 28 caches (by the places, at the ruins); no chests
+      (the owner: "showing the chests instead of the spell cubes").
+      Running over one learns it into your spellbook, or ranks it up (to
+      III), and gives XP; a spell new to you takes a free slot of its
+      kind. B opens the book anywhere, and you keep moving while it is
+      open (Esc or a click off it closes it): pick a slot, then any spell
+      of its kind you know (it waits 2 s before it can be cast; two slots
+      trade).
       The fallen drop every spell they knew at its rank, and their XP joins
       their victor's. The wire carries the book (PROTO 5, `Up::Equip`).
 - [x] **Third person, and a wizard rebuilt** (on the owner's word:

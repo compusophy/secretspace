@@ -95,6 +95,7 @@ pub(super) fn act(p: &mut Page, a: Act) {
             }
         }
         Act::Slot(k) => p.book_slot = k,
+        Act::Stay => {}
         // Online or on the range, the room puts a spell you know in.
         Act::Spell(sp) => {
             let slot = p.book_slot as u8;

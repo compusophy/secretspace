@@ -90,10 +90,9 @@ pub fn frame(w: &World, you: u16) -> Frame {
     }
 }
 
-/// The chests and scrolls on the island.
+/// The spell cubes on the island.
 pub fn loot(w: &World) -> Loot {
     Loot {
-        chests: w.chests.iter().map(|c| (c.id, c.p, c.open)).collect(),
         scrolls: w
             .scrolls
             .iter()

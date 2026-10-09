@@ -335,31 +335,10 @@ pub fn tip(list: &[(f64, Ev)], who: u16, now: f64) -> (V3, f32) {
         .unwrap_or((GOLD, 0.0))
 }
 
-/// Chests (glowing until opened) and spell cubes (their icon on every
-/// face, under a pillar of their light, taller by rank).
+/// Spell cubes (their icon on every face, under a pillar of their light,
+/// taller by rank).
 pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
     let far = |p: V3| (p[0] - eye[0]).powi(2) + (p[2] - eye[2]).powi(2) > 140.0 * 140.0;
-    for &(id, p, open) in &l.chests {
-        if far(p) {
-            continue;
-        }
-        let m = m4::place(p, id as f32 * 0.7, [1.0; 3]);
-        d.items
-            .push(Item::new(look.chest, m).glow(if open { 0.0 } else { 0.1 }));
-        if !open {
-            d.items.push(Item::new(look.lid, m));
-            let pulse = 0.7 + 0.3 * (t * 2.0 + id as f32).sin();
-            light(d, [p[0], p[1] + 1.0, p[2]], 4.0, GOLD, pulse);
-            beam(
-                look,
-                d,
-                ([p[0], p[1] + 0.9, p[2]], [p[0], p[1] + 6.0, p[2]]),
-                0.07,
-                (GOLD, 0.6 * pulse),
-                true,
-            );
-        }
-    }
     for &(id, s, rank, p) in &l.scrolls {
         if far(p) {
             continue;

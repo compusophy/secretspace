@@ -134,7 +134,7 @@ pub const BOT_AIM_ERROR: f32 = 0.05;
 pub const BOT_NOTICE: u32 = 14;
 /// The distance they like to duel at.
 pub const BOT_RANGE: f32 = 16.0;
-/// How far a bot goes out of its way for a chest.
+/// How far a bot goes out of its way for a cube.
 pub const LOOT_SIGHT: f32 = 70.0;
 pub const BOT_NAMES: &[&str] = &[
     "Ashwick", "Brindle", "Corvane", "Dusk", "Elowen", "Fenwick", "Gilly", "Harrow", "Ivo",
@@ -142,13 +142,14 @@ pub const BOT_NAMES: &[&str] = &[
     "Thistle", "Umber", "Vesper", "Wren", "Yarrow",
 ];
 
-// Levels: 1 to 20 within a match, from chests, damage and knockouts.
+// Levels: 1 to 20 within a match, from cubes, damage and knockouts.
 pub const MAX_LEVEL: u8 = 20;
 pub const XP_PER_LEVEL: u32 = 100;
 /// Max health and damage (percent) a level above the first.
 pub const HEALTH_PER_LEVEL: i32 = 8;
 pub const POWER_PER_LEVEL: i32 = 5;
-pub const XP_CHEST: u32 = 45;
+/// XP for a spell cube run over.
+pub const XP_CUBE: u32 = 20;
 pub const XP_KNOCKOUT: u32 = 110;
 /// More for knocking out someone of a higher level, a level.
 pub const XP_KNOCKOUT_LEVEL: u32 = 12;
@@ -157,19 +158,19 @@ pub const XP_SHARE: u32 = 100;
 /// One XP for this much damage dealt.
 pub const XP_DAMAGE: i32 = 3;
 
-// Loot: spell cubes lying loose across the island, more in chests, and
-// every spell the fallen held. Running over a cube learns its spell or
-// ranks it up; the spellbook puts what you know in your four slots.
-pub const CHESTS: usize = 28;
+// Loot: spell cubes, lying loose across the island and in pairs at the
+// caches (by each place, at the ruins), and every spell the fallen held.
+// Running over a cube learns its spell or ranks it up (and gives XP); the
+// spellbook puts what you know in your four slots.
+pub const CACHES: usize = 28;
+pub const CUBES_A_CACHE: usize = 2;
 pub const LOOSE_CUBES: usize = 36;
 /// Ticks a spell put in a slot waits before it can be cast.
 pub const EQUIP_COOLDOWN: u32 = 2 * TICK_HZ;
-/// How close opens a chest, and picks up a cube.
-pub const CHEST_REACH: f32 = 1.7;
+/// How close picks up a cube.
 pub const SCROLL_REACH: f32 = 1.4;
-pub const SCROLLS_A_CHEST: usize = 2;
 pub const MAX_RANK: u8 = 3;
-/// One scroll in this many from a chest is rank 2.
+/// One cube in this many set out is rank 2.
 pub const RARE_SCROLL: u64 = 5;
 /// Each rank above the first: this much more power (percent), and this
 /// much less cooldown.
@@ -315,7 +316,7 @@ pub const GUST_DAMAGE: i32 = 5;
 // The practice range: dummies about where you start (metres away,
 // degrees round, and how they behave: 1 stands, 2 strafes, 3 spars when
 // sparring is on), how soon they stand again, and how soon a hurt one is
-// whole; chests are set out again this often.
+// whole; cubes are set out again this often.
 pub const DUMMIES: [(f32, f32, u8); 9] = [
     (12.0, 0.0, 1),
     (16.0, 40.0, 1),
@@ -329,4 +330,4 @@ pub const DUMMIES: [(f32, f32, u8); 9] = [
 ];
 pub const DUMMY_RESPAWN: u32 = 60;
 pub const DUMMY_WHOLE: u32 = 60;
-pub const PRACTICE_CHESTS_EVERY: u32 = 120 * TICK_HZ;
+pub const PRACTICE_LOOT_EVERY: u32 = 120 * TICK_HZ;

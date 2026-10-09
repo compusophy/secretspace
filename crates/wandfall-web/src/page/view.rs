@@ -158,6 +158,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                 touch: p.touch,
                 practice,
                 on_target,
+                book: p.book,
             };
             if p.orbit.is_none() {
                 hud::draw(&mut p.g.hud, &i.mini, &view);

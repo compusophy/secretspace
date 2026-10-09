@@ -11,7 +11,7 @@ use engine::rng::Rng;
 
 use crate::bots::{self, Mind};
 use crate::laws::*;
-use crate::loot::{self, Chest, Scroll};
+use crate::loot::{self, Scroll};
 use crate::map::Map;
 use crate::motion::{self, cast, keys, Body, Input};
 use crate::practice::{self, Practice};
@@ -156,7 +156,6 @@ pub struct World {
     pub storm: Storm,
     pub players: Vec<Player>,
     pub bolts: Vec<Bolt>,
-    pub chests: Vec<Chest>,
     pub scrolls: Vec<Scroll>,
     pub zones: Vec<Zone>,
     pub winner: u16,
@@ -183,7 +182,6 @@ impl World {
             storm: Storm::default(),
             players: Vec::new(),
             bolts: Vec::new(),
-            chests: Vec::new(),
             scrolls: Vec::new(),
             zones: Vec::new(),
             winner: 0,
@@ -386,7 +384,6 @@ impl World {
         }
         self.bolts.clear();
         self.zones.clear();
-        self.chests.clear();
         self.scrolls.clear();
         self.loot_dirty = true;
         self.phase = Phase::Lobby;

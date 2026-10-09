@@ -2,7 +2,7 @@
 //! wizard's tower on a raised plaza) and, on a ring about it, a stone
 //! circle, a demon rift and a crystal grove. Each shapes the ground under
 //! it and sets its own stones, spikes and crystals, which block as trees
-//! do, and marks where its chests wait.
+//! do, and marks where its cubes wait.
 
 use engine::rng::Rng;
 
@@ -182,7 +182,7 @@ fn about(p: &Poi, turn: u16, d: f32) -> (f32, f32) {
     (p.x + c * d, p.z + s * d)
 }
 
-/// Set each place's stones, spikes and crystals; mark its chests.
+/// Set each place's stones, spikes and crystals; mark its caches.
 pub fn set(m: &mut Map) {
     let mut rng = Rng::new(m.seed ^ 0x5e7);
     for p in m.pois.clone() {
@@ -244,7 +244,7 @@ pub fn set(m: &mut Map) {
                         scale: 1.0,
                     });
                 }
-                // Lamps about the plaza, and a chest between each pair.
+                // Lamps about the plaza, and a cache between each pair.
                 for k in 0..8u32 {
                     let turn = (k * 8192 + 4096) as u16;
                     stand(m, Kind::Lamp, about(&p, turn, p.r - 4.0), 0.3, 3.2, 0.0);

@@ -1,22 +1,14 @@
-//! Loot and levels. Spell cubes lie loose across the island when a match
-//! begins, and chests stand about it; walking into a chest opens it: XP,
-//! and cubes spill out around it. Running over a cube learns its spell
-//! into your spellbook, or ranks it up if you know it; a spell new to you
-//! goes into a free slot of its kind, and the spellbook (the page's B)
-//! puts any spell you know in any slot of its kind. The knocked out drop
-//! every spell they knew, each at its rank, and their XP goes to whoever
-//! felled them. XP from chests, damage and knockouts raises a wizard's
-//! level: more health, more power.
+//! Loot and levels. Spell cubes lie across the island when a match begins,
+//! loose and in pairs at the caches (by each place, at the ruins). Running
+//! over a cube learns its spell into your spellbook, or ranks it up if you
+//! know it, and gives XP; a spell new to you goes into a free slot of its
+//! kind, and the spellbook (the page's B) puts any spell you know in any
+//! slot of its kind. The knocked out drop every spell they knew, each at
+//! its rank, and their XP goes to whoever felled them. XP from cubes,
+//! damage and knockouts raises a wizard's level: more health, more power.
 
 use crate::laws::*;
 use crate::world::{Event, Phase, Player, Slot, World};
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Chest {
-    pub id: u16,
-    pub p: [f32; 3],
-    pub open: bool,
-}
 
 /// A spell cube lying on the island.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -107,10 +99,9 @@ pub fn drop_scroll(w: &mut World, spell: u8, rank: u8, at: [f32; 3], spread: f32
     w.loot_dirty = true;
 }
 
-/// Chests across the island: those the places keep first, then a third
-/// of the rest at the ruins.
+/// Cubes across the island: a pair at each cache (those the places keep
+/// first, then a third of the rest at the ruins), and more lying loose.
 pub fn scatter(w: &mut World) {
-    w.chests.clear();
     w.scrolls.clear();
     let caches = w.map.caches.clone();
     let ruins: Vec<[f32; 3]> = w
@@ -121,11 +112,12 @@ pub fn scatter(w: &mut World) {
         .map(|p| [p.x, p.y, p.z])
         .collect();
     let mut tries = 0;
-    while w.chests.len() < CHESTS && tries < CHESTS * 30 {
+    let mut cached: Vec<[f32; 2]> = Vec::new();
+    while cached.len() < CACHES && tries < CACHES * 30 {
         tries += 1;
         let [x, z] = if let Some(&at) = caches.get(tries - 1) {
             at
-        } else if !ruins.is_empty() && w.chests.len().is_multiple_of(3) {
+        } else if !ruins.is_empty() && cached.len().is_multiple_of(3) {
             let r = ruins[(w.rng.next_u64() % ruins.len() as u64) as usize];
             let a = unit(w) * std::f32::consts::TAU;
             [r[0] + a.cos() * 2.5, r[2] + a.sin() * 2.5]
@@ -135,32 +127,37 @@ pub fn scatter(w: &mut World) {
         if !w.map.land(x, z) || w.map.near(x, z, 1.0).next().is_some() {
             continue;
         }
-        if w.chests
+        if cached
             .iter()
-            .any(|c| (c.p[0] - x).powi(2) + (c.p[2] - z).powi(2) < 100.0)
+            .any(|c| (c[0] - x).powi(2) + (c[1] - z).powi(2) < 100.0)
         {
             continue;
         }
-        let id = fresh_id(w);
+        cached.push([x, z]);
         let y = w.map.height(x, z);
-        w.chests.push(Chest {
-            id,
-            p: [x, y, z],
-            open: false,
-        });
+        for _ in 0..CUBES_A_CACHE {
+            let (spell, rank) = any_cube(w);
+            drop_scroll(w, spell, rank, [x, y, z], 1.2);
+        }
     }
-    // And cubes lying loose, away from the chests.
+    // And cubes lying loose.
     for _ in 0..LOOSE_CUBES {
         let [x, z] = w.map.spot(&mut w.rng);
-        let spell = (w.rng.next_u64() % SPELLS.len() as u64) as u8;
-        let rank = if w.rng.next_u64().is_multiple_of(RARE_SCROLL) {
-            2
-        } else {
-            1
-        };
+        let (spell, rank) = any_cube(w);
         drop_scroll(w, spell, rank, [x, 0.0, z], 0.0);
     }
     w.loot_dirty = true;
+}
+
+/// A cube's spell, and its rank (now and then the second).
+fn any_cube(w: &mut World) -> (u8, u8) {
+    let spell = (w.rng.next_u64() % SPELLS.len() as u64) as u8;
+    let rank = if w.rng.next_u64().is_multiple_of(RARE_SCROLL) {
+        2
+    } else {
+        1
+    };
+    (spell, rank)
 }
 
 /// A knocked-out wizard's spells, every one it knew at its rank, lying
@@ -231,7 +228,7 @@ pub fn equip(p: &mut Player, slot: usize, spell: u8) -> bool {
     true
 }
 
-/// Chests opened and cubes picked up by whoever stands at them.
+/// Cubes picked up by whoever runs over them.
 pub fn touch(w: &mut World, ev: &mut Vec<Event>) {
     if w.phase != Phase::Fight {
         return;
@@ -245,31 +242,13 @@ pub fn touch(w: &mut World, ev: &mut Vec<Event>) {
         let near = |q: [f32; 3], r: f32| {
             (q[0] - at[0]).powi(2) + (q[2] - at[2]).powi(2) < r * r && (q[1] - at[1]).abs() < 2.5
         };
-        if let Some(c) = w
-            .chests
-            .iter()
-            .position(|c| !c.open && near(c.p, CHEST_REACH))
-        {
-            w.chests[c].open = true;
-            w.loot_dirty = true;
-            let cp = w.chests[c].p;
-            for _ in 0..SCROLLS_A_CHEST {
-                let spell = (w.rng.next_u64() % SPELLS.len() as u64) as u8;
-                let rank = if w.rng.next_u64().is_multiple_of(RARE_SCROLL) {
-                    2
-                } else {
-                    1
-                };
-                drop_scroll(w, spell, rank, cp, 1.6);
-            }
-            gain(w, id, XP_CHEST, ev);
-        }
         let Some(s) = w.scrolls.iter().position(|s| near(s.p, SCROLL_REACH)) else {
             continue;
         };
         let sc = w.scrolls.remove(s);
         learn(&mut w.players[k], sc.spell, sc.rank);
         w.loot_dirty = true;
+        gain(w, id, XP_CUBE, ev);
     }
 }
 

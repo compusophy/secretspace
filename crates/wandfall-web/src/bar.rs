@@ -57,8 +57,16 @@ pub fn layout(w: i32, h: i32, ui: i32) -> Layout {
 }
 
 /// The bar, your level, and what is underfoot.
-/// `slots`: draw the four slots (a touch screen has buttons instead).
-pub fn draw(c: &mut Canvas, own: &Own, st: &State, now: f64, ui: i32, slots: bool) {
+/// `slots`: draw the four slots (a touch screen has buttons instead);
+/// `under`: what is underfoot (not with the spellbook open).
+pub fn draw(
+    c: &mut Canvas,
+    own: &Own,
+    st: &State,
+    now: f64,
+    ui: i32,
+    (slots, under): (bool, bool),
+) {
     let (w, h) = (c.w, c.h);
     let u = ui as f32;
     let Layout { x: x0, y, s, total } = layout(w, h, ui);
@@ -129,7 +137,9 @@ pub fn draw(c: &mut Canvas, own: &Own, st: &State, now: f64, ui: i32, slots: boo
     } else {
         (None, 108 * ui)
     };
-    underfoot(c, own, st, at, ui);
+    if under {
+        underfoot(c, own, st, at, ui);
+    }
     // A level gained.
     learned(c, st, now, ui);
     let age = now - st.levelled.0;

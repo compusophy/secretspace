@@ -32,6 +32,9 @@ pub enum Act {
     Level(i8),
     NoCooldowns,
     Sparring,
+    /// A panel's own ground: a click there does nothing (off every panel,
+    /// a click goes back to the game).
+    Stay,
 }
 
 /// The buttons on screen now, in layer pixels.
@@ -264,6 +267,7 @@ pub fn book(
     let ph = (290.0 * u).min(h as f32 - 8.0 * u);
     let panel = Rect::new((w as f32 - pw) / 2.0, (h as f32 - ph) / 2.0, pw, ph);
     c.round_rect(panel, 6.0 * u, PANEL);
+    spots.0.push((panel, Act::Stay));
     let x0 = panel.x + 10.0 * u;
     let mut y = panel.y + 8.0 * u;
     c.text_shadowed(x0 as i32, y as i32, "spellbook", 2 * ui, GOLD);

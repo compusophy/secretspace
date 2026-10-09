@@ -4,7 +4,7 @@
 //! boom for fire, a zap for the Lance, glass for Frost, a rising hum and
 //! a crack of thunder for Lightning, a vwip for Blink, a shimmer (and
 //! shattering glass) for the Ward, a chime for Mend, wind for Gust. Then
-//! the wand, your hits, being hurt, a knockout, a level, a chest, a
+//! the wand, your hits, being hurt, a knockout, a level, a cube, a
 //! spell learned. Each is heard from where it happened: quieter far off, to the
 //! left or the right.
 
@@ -31,7 +31,7 @@ pub struct Sounds {
     hurt: usize,
     out: usize,
     level: usize,
-    chest: usize,
+    cube: usize,
     take: usize,
     hop: usize,
     thud: usize,
@@ -482,7 +482,7 @@ fn level() -> Vec<f32> {
     s.done(0.55)
 }
 
-fn chest() -> Vec<f32> {
+fn cube() -> Vec<f32> {
     let mut s = Synth::new(0.7);
     s.tone(
         Triangle,
@@ -598,7 +598,7 @@ impl Sounds {
             hurt: add(hurt()),
             out: add(knockout()),
             level: add(level()),
-            chest: add(chest()),
+            cube: add(cube()),
             take: add(take()),
             hop: add(hop()),
             thud: add(thud()),
@@ -682,8 +682,8 @@ impl Sounds {
         self.audio.play(self.level, 0.8, 0.0, 1.0);
     }
 
-    pub fn chest(&self, p: V3, ear: (V3, f32)) {
-        self.at(self.chest, 1.0, p, ear, 1.0);
+    pub fn cube(&self, p: V3, ear: (V3, f32)) {
+        self.at(self.cube, 1.0, p, ear, 1.0);
     }
 
     pub fn take(&self) {
@@ -781,12 +781,17 @@ impl Sounds {
         }
     }
 
-    /// The loot changed: a chest opened is heard where it stands.
+    /// The loot changed: a cube run over is heard where it lay (not all
+    /// of them when a match sets out new ones).
     pub fn loot(&self, old: &Loot, new: &Loot, ear: (V3, f32)) {
-        for &(id, at, open) in &new.chests {
-            let was = old.chests.iter().find(|c| c.0 == id);
-            if open && was.is_some_and(|c| !c.2) {
-                self.chest(at, ear);
+        let gone: Vec<_> = old
+            .scrolls
+            .iter()
+            .filter(|s| !new.scrolls.iter().any(|n| n.0 == s.0))
+            .collect();
+        if gone.len() <= 3 {
+            for s in gone {
+                self.cube(s.3, ear);
             }
         }
     }
