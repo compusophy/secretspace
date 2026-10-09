@@ -1,6 +1,7 @@
 //! The scene's shaders: the world (one shader, its material chosen by
-//! the instance: plain, terrain, foliage, water, metal), the sky with its
-//! clouds and sun, sparks, and grass grown on the terrain about the eye.
+//! the instance: plain, terrain, foliage, water, metal, rim, cloth,
+//! skin), the sky with its clouds and sun, sparks, and grass grown on
+//! the terrain about the eye.
 
 pub const WORLD: &str = r#"
 struct WorldIn {
@@ -30,6 +31,8 @@ const FOLIAGE: i32 = 2;
 const WATER: i32 = 3;
 const METAL: i32 = 4;
 const RIM: i32 = 5;
+const CLOTH: i32 = 6;
+const SKIN: i32 = 7;
 
 @vertex
 fn world_vs(v: WorldIn) -> WorldOut {
@@ -165,7 +168,7 @@ fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
     } else if (mat == METAL) {
         metal = 1.0;
     }
-    let c = shade(i.pos, n, base, rough, metal, glow, ao, through);
+    let c = shade(i.pos, n, base, rough, metal, glow, ao, through, mat);
     return vec4<f32>(air(c, i.pos), i.tint.a);
 }
 
@@ -313,7 +316,7 @@ fn grass_fs(i: GrassOut, @builtin(front_facing) front: bool) -> @location(0) vec
         s = -s;
     }
     let n = normalize(vec3<f32>(0.0, 1.0, 0.0) + s * 0.35);
-    let c = shade(i.pos, n, i.col, 0.85, 0.0, 0.0, mix(0.45, 1.0, i.tip), 0.6);
+    let c = shade(i.pos, n, i.col, 0.85, 0.0, 0.0, mix(0.45, 1.0, i.tip), 0.6, PLAIN);
     return vec4<f32>(air(c, i.pos), 1.0);
 }
 "#;

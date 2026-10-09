@@ -58,6 +58,11 @@ pub enum Material {
     /// Energy (shields, shockwaves, beams): bright edge on, clear face
     /// on, unlit. Drawn in the `Glow` or `Faint` pass.
     Rim = 5,
+    /// Cloth: soft-edged light, and a sheen where it turns away (light
+    /// caught by its fibres), the colour of the cloth.
+    Cloth = 6,
+    /// Skin: light that wraps past the edge of the shadow, warmed.
+    Skin = 7,
 }
 
 /// One drawn thing: a mesh, where, its tint (alpha for `Faint`), how much
@@ -231,6 +236,34 @@ pub struct Look {
     pub waves: f32,
     /// The wind over the ground (direction and strength).
     pub wind: [f32; 2],
+    /// The picture's grade, after tone mapping.
+    pub grade: Grade,
+}
+
+/// A colour grade, applied to the finished picture (as it is shown):
+/// lift raises the shadows, gamma bends the middle, gain scales the
+/// highlights, each per channel (so a tint toward a colour in shadow and
+/// another in light); then saturation and contrast (an S-curve; 1 for
+/// neither). Neutral by default.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grade {
+    pub lift: V3,
+    pub gamma: V3,
+    pub gain: V3,
+    pub saturation: f32,
+    pub contrast: f32,
+}
+
+impl Default for Grade {
+    fn default() -> Grade {
+        Grade {
+            lift: [0.0; 3],
+            gamma: [1.0; 3],
+            gain: [1.0; 3],
+            saturation: 1.0,
+            contrast: 1.0,
+        }
+    }
 }
 
 impl Default for Look {
@@ -255,6 +288,7 @@ impl Default for Look {
             water: [0.02, 0.10, 0.16],
             waves: 0.35,
             wind: [0.8, 0.4],
+            grade: Grade::default(),
         }
     }
 }

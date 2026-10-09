@@ -260,6 +260,7 @@ pub fn sky(in_storm: bool) -> render::Look {
         water: rgb(10, 40, 66),
         waves: 0.4,
         wind: [0.9, 0.35],
+        grade: GRADE,
     };
     if !in_storm {
         return day;
@@ -271,6 +272,22 @@ pub fn sky(in_storm: bool) -> render::Look {
         fog: 0.05,
         fog_falloff: 0.002,
         clouds: 0.9,
+        grade: render::Grade {
+            saturation: 0.85,
+            contrast: 1.2,
+            lift: [0.02, 0.0, 0.04],
+            ..GRADE
+        },
         ..day
     }
 }
+
+/// The island's grade: shadows a little cool (toward teal and violet),
+/// light a little warm, colour a touch richer, and a gentle S-curve.
+const GRADE: render::Grade = render::Grade {
+    lift: [0.0, 0.012, 0.03],
+    gamma: [1.0, 1.0, 1.02],
+    gain: [1.03, 1.0, 0.95],
+    saturation: 1.1,
+    contrast: 1.12,
+};

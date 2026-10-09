@@ -232,7 +232,11 @@ Done, across phases, in `crates/render`:
   and tent upsampling), ACES, a vignette, sRGB; GGX specular with a sky
   reflection for ambient sheen; procedural surface detail (noise bumps)
   instead of textures; the terrain material (grass, dry grass, rock by
-  slope, sand and wet sand by the sea). Not yet: auto exposure, DoF, IBL.
+  slope, sand and wet sand by the sea). A grade after tone mapping
+  (`Look::grade`: lift, gamma, gain per channel, saturation, an S-curve
+  contrast) and a dither against banding. Cloth (wrapped light and a
+  Charlie sheen, its colour lighter) and skin (light wrapped further in
+  red) materials. Not yet: auto exposure, DoF, IBL.
 - Phase 3: the sun's cascaded shadows (3 x 2048 on High, PCF 3x3, snapped
   to texels). Not yet: static caster caching, point shadows, froxels.
 - Phase 4 (part): ambient occlusion (`ao.rs`, `shaders/ao.rs`), HBAO

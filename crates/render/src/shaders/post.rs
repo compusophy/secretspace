@@ -1,6 +1,7 @@
 //! The sun's shadow map (depth only, from the sun), and what follows the
 //! scene: bloom (a chain of halvings, then back up, each a little wider)
-//! and the finish (exposure, ACES tone mapping, a vignette, sRGB).
+//! and the finish (exposure, ACES tone mapping, a vignette, sRGB, the
+//! grade, and a dither so the sky's gradients do not band).
 
 pub const SHADOW: &str = r#"
 struct Caster {
@@ -34,6 +35,14 @@ struct Post {
 @group(0) @binding(1) var lin: sampler;
 @group(0) @binding(2) var<uniform> pp: Post;
 @group(0) @binding(3) var bloom: texture_2d<f32>;
+
+struct Grade {
+    lift: vec4<f32>,    // rgb, w saturation
+    gamma: vec4<f32>,   // rgb, w contrast
+    gain: vec4<f32>,    // rgb, w unused
+};
+
+@group(0) @binding(4) var<uniform> grade: Grade;
 
 struct Out {
     @builtin(position) clip: vec4<f32>,
@@ -103,6 +112,17 @@ fn srgb(c: vec3<f32>) -> vec3<f32> {
     return select(hi, lo, c <= vec3<f32>(0.0031308));
 }
 
+/// The grade, on the picture as it is shown (0..1): lift, gamma and gain
+/// per channel, then saturation, then contrast (an S-curve).
+fn graded(x: vec3<f32>) -> vec3<f32> {
+    var c = grade.gain.rgb * (x + grade.lift.rgb * (vec3<f32>(1.0) - x));
+    c = pow(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), vec3<f32>(1.0) / max(grade.gamma.rgb, vec3<f32>(0.05)));
+    let luma = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+    c = clamp(mix(vec3<f32>(luma), c, grade.lift.w), vec3<f32>(0.0), vec3<f32>(1.0));
+    let s = c * c * (3.0 - 2.0 * c);
+    return clamp(mix(c, s, grade.gamma.w - 1.0), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 @fragment
 fn finish_fs(i: Out) -> @location(0) vec4<f32> {
     let hdr = textureSampleLevel(src, lin, i.uv, 0.0).rgb;
@@ -111,6 +131,11 @@ fn finish_fs(i: Out) -> @location(0) vec4<f32> {
     c = aces(c);
     let q = i.uv - 0.5;
     c = c * (1.0 - pp.k.z * dot(q, q) * 1.6);
-    return vec4<f32>(srgb(c), 1.0);
+    c = graded(srgb(c));
+    // Under a step of the screen's, from pixel to pixel, so gradients
+    // become a fine grain instead of bands.
+    let px = i.clip.xy;
+    let n = fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
+    return vec4<f32>(c + (n - 0.5) / 255.0, 1.0);
 }
 "#;

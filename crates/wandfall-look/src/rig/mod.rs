@@ -28,7 +28,7 @@ pub use pose::{Frames, Pose};
 use std::f32::consts::FRAC_PI_2;
 
 use render::geo::{self, hash, mix, rgb, unit, V3};
-use render::{m4, Item, Light, Mesh, Pass, Renderer, Spark, M4};
+use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Spark, M4};
 
 use crate::fx::Draw;
 use math::{chain, point, rz, tr};
@@ -108,36 +108,42 @@ impl Rig {
         let robe = mix(c, [1.0; 3], 0.7 * p.flash);
         let lit = 0.6 * p.flash;
         let dark = geo::scale(c, 0.6);
-        let mut put = |mesh: Mesh, at: M4, tint: Option<V3>| {
-            let it = Item::new(mesh, at).rough(0.8);
+        // Cloth takes the wizard's colour; gold shines; skin and
+        // hair wrap the light.
+        let mut put = |mesh: Mesh, at: M4, tint: Option<V3>, (mat, rough): (Material, f32)| {
+            let it = Item::new(mesh, at).rough(rough).material(mat);
             d.items.push(match tint {
                 Some(t) => it.tint(t, 1.0).glow(lit),
                 None => it,
             });
         };
+        let cloth = (Material::Cloth, 0.85);
+        let gold = (Material::Plain, 0.35);
+        let skin = (Material::Skin, 0.6);
+        let leather = (Material::Plain, 0.62);
         for k in 0..4 {
-            put(m.panels[k], f.panels[k], Some(robe));
-            put(m.hems[k], f.panels[k], None);
+            put(m.panels[k], f.panels[k], Some(robe), cloth);
+            put(m.hems[k], f.panels[k], None, gold);
         }
-        put(m.torso, f.chest, Some(robe));
-        put(m.belt, f.chest, None);
-        put(m.mantle, f.chest, Some(dark));
-        put(m.collar, f.chest, Some(dark));
-        put(m.trim, f.chest, None);
-        put(m.head[id as usize % 2], f.head, None);
-        put(m.hat, f.head, Some(dark));
-        put(m.band, f.head, None);
-        put(m.hat_tip, f.hat, Some(dark));
+        put(m.torso, f.chest, Some(robe), cloth);
+        put(m.belt, f.chest, None, leather);
+        put(m.mantle, f.chest, Some(dark), cloth);
+        put(m.collar, f.chest, Some(dark), cloth);
+        put(m.trim, f.chest, None, gold);
+        put(m.head[id as usize % 2], f.head, None, skin);
+        put(m.hat, f.head, Some(dark), cloth);
+        put(m.band, f.head, None, gold);
+        put(m.hat_tip, f.hat, Some(dark), cloth);
         for side in 0..2 {
-            put(m.thigh, f.thigh[side], None);
-            put(m.shin, f.shin[side], None);
-            put(m.boot, f.boot[side], None);
-            put(m.upper, f.upper[side], Some(robe));
-            put(m.fore, f.fore[side], Some(robe));
-            put(m.cuff, f.fore[side], None);
+            put(m.thigh, f.thigh[side], None, cloth);
+            put(m.shin, f.shin[side], None, cloth);
+            put(m.boot, f.boot[side], None, leather);
+            put(m.upper, f.upper[side], Some(robe), cloth);
+            put(m.fore, f.fore[side], Some(robe), cloth);
+            put(m.cuff, f.fore[side], None, gold);
         }
-        put(m.hand, f.fore[0], None);
-        put(m.wand, f.fore[1], None);
+        put(m.hand, f.fore[0], None, skin);
+        put(m.wand, f.fore[1], None, leather);
         let tip = f.tip();
         let (col, flare) = p.tip;
         let k = 0.05 + 0.07 * flare;

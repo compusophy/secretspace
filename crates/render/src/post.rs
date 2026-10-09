@@ -1,7 +1,8 @@
 //! After the scene: its targets (an HDR picture, multisampled and
-//! resolved, and its depth), ambient occlusion (`ao`), bloom (halve it, again and again, then back
-//! up, each step a little wider, added together), and the finish into the
-//! screen (exposure, tone mapping, a vignette, sRGB).
+//! resolved, and its depth), ambient occlusion (`ao`), bloom (halve it,
+//! again and again, then back up, each step a little wider, added
+//! together), and the finish into the screen (exposure, tone mapping, a
+//! vignette, sRGB, the grade).
 
 use gpu::wgpu;
 
@@ -96,6 +97,7 @@ pub struct Post {
     passes: Vec<Pass>,
     finish_group: Option<wgpu::BindGroup>,
     finish_buf: wgpu::Buffer,
+    grade_buf: wgpu::Buffer,
     ao: Option<Ao>,
 }
 
@@ -186,6 +188,10 @@ impl Post {
         });
         let mut with_bloom = common.to_vec();
         with_bloom.push(tex(3));
+        with_bloom.push(wgpu::BindGroupLayoutEntry {
+            binding: 4,
+            ..common[2]
+        });
         let finish_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("finish"),
             entries: &with_bloom,
@@ -256,6 +262,12 @@ impl Post {
             finish_buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("finish"),
                 size: 32,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            grade_buf: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("grade"),
+                size: 48,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
@@ -396,6 +408,10 @@ impl Post {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(&self.chain[0]),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.grade_buf.as_entire_binding(),
+                },
             ],
         }));
         self.targets = Some(targets);
@@ -421,6 +437,23 @@ impl Post {
         ];
         let bytes: Vec<u8> = k.iter().flat_map(|f| f.to_le_bytes()).collect();
         queue.write_buffer(&self.finish_buf, 0, &bytes);
+        let g = &look.grade;
+        let grade = [
+            g.lift[0],
+            g.lift[1],
+            g.lift[2],
+            g.saturation,
+            g.gamma[0],
+            g.gamma[1],
+            g.gamma[2],
+            g.contrast,
+            g.gain[0],
+            g.gain[1],
+            g.gain[2],
+            0.0,
+        ];
+        let bytes: Vec<u8> = grade.iter().flat_map(|f| f.to_le_bytes()).collect();
+        queue.write_buffer(&self.grade_buf, 0, &bytes);
         for p in &self.passes {
             let load = if p.up {
                 wgpu::LoadOp::Load

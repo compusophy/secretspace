@@ -1,6 +1,7 @@
 //! What every scene shader shares: the globals, the lights' grid, the
 //! sun's shadow, the terrain's heights, noise, the sky, the air between
-//! (aerial perspective), and the light a surface gives back (GGX).
+//! (aerial perspective), and the light a surface gives back (GGX, and
+//! cloth's sheen).
 
 pub const COMMON: &str = r#"
 struct Globals {
@@ -197,26 +198,63 @@ fn ggx(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, rough: f32, f0: vec3<f32>) -> v
     return dist * geo * f / (4.0 * nv * max(nl, 0.001));
 }
 
+/// Cloth's sheen (Charlie, after Estevez and Kulla, with Neubelt's
+/// visibility): light caught by fibres, strongest where the cloth turns
+/// away from the eye or the light.
+fn sheen(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, rough: f32) -> f32 {
+    let h = normalize(v + l);
+    let nh = dot(n, h);
+    let sin2 = max(1.0 - nh * nh, 0.0001);
+    let inv = 1.0 / rough;
+    let d = (2.0 + inv) * pow(sin2, inv * 0.5) / (2.0 * PI);
+    let nl = max(dot(n, l), 0.0);
+    let nv = max(dot(n, v), 0.001);
+    return d / (4.0 * (nl + nv - nl * nv));
+}
+
 /// The light a surface gives back: the sun (shadowed), the sky and the
 /// ground's light, the sky in its sheen, the lights near it, its glow.
-fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, glow: f32, ao: f32, through: f32) -> vec3<f32> {
+/// Cloth takes the light softly and shines at its edges; skin lets it
+/// wrap past the shadow's edge, reddened (`kind`: the world's materials).
+fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, glow: f32, ao: f32, through: f32, kind: i32) -> vec3<f32> {
     let v = normalize(g.eye.xyz - pos);
     let l = g.sun_dir.xyz;
-    let f0 = mix(vec3<f32>(0.04), base, metal);
+    let cloth = kind == CLOTH;
+    let skin = kind == SKIN;
+    let f0 = mix(vec3<f32>(select(0.04, 0.02, cloth)), base, metal);
     let diffuse = base * (1.0 - metal);
     var c = vec3<f32>(0.0);
     let nl = dot(n, l);
     let lit = sunlit(pos, n);
+    // How the sun falls on it: the cosine, softened for cloth, and for
+    // skin wrapped further in red than in green and blue.
+    var wrap = vec3<f32>(0.0);
+    if (cloth) {
+        wrap = vec3<f32>(0.3);
+    } else if (skin) {
+        wrap = vec3<f32>(0.55, 0.3, 0.25);
+    }
+    let fall = max((vec3<f32>(nl) + wrap) / (vec3<f32>(1.0) + wrap), vec3<f32>(0.0));
+    c = c + diffuse * g.sun.rgb * fall * lit;
     if (nl > 0.0) {
-        c = c + (diffuse + ggx(n, v, l, rough, f0) * PI) * g.sun.rgb * nl * lit;
+        c = c + ggx(n, v, l, rough, f0) * PI * g.sun.rgb * nl * lit;
     }
     // Light through leaves and blades, from behind.
     c = c + diffuse * g.sun.rgb * max(-nl, 0.0) * through * lit;
     let amb = mix(g.low.rgb, g.sky.rgb, n.y * 0.5 + 0.5);
     c = c + diffuse * amb * ao;
     let nv = max(dot(n, v), 0.0);
-    let fr = f0 + (max(vec3<f32>(1.0 - rough), f0) - f0) * pow(1.0 - nv, 5.0);
-    c = c + fr * sky(reflect(-v, n)) * (1.0 - rough * 0.8) * ao * 0.5;
+    if (cloth) {
+        // The sheen's colour: the cloth's own, lighter.
+        let tone = min(sqrt(base) * 0.5 + base, vec3<f32>(1.0));
+        if (nl > 0.0) {
+            c = c + tone * sheen(n, v, l, 0.45) * PI * g.sun.rgb * nl * lit;
+        }
+        c = c + tone * amb * pow(1.0 - nv, 3.0) * ao * 2.5;
+    } else {
+        let fr = f0 + (max(vec3<f32>(1.0 - rough), f0) - f0) * pow(1.0 - nv, 5.0);
+        c = c + fr * sky(reflect(-v, n)) * (1.0 - rough * 0.8) * ao * 0.5;
+    }
     let side = i32(g.grid.w);
     let gc = vec2<i32>(floor((pos.xz - g.grid.xy) / g.grid.z));
     if (gc.x >= 0 && gc.y >= 0 && gc.x < side && gc.y < side) {
