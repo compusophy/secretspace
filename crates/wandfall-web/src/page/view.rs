@@ -122,6 +122,13 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         };
         p.sounds.ambience.tune(&p.sounds.audio, &here, false);
     }
+    // Music under the title, the lobby and the result; none in a match.
+    let music = match (&p.mode, p.st.frame.as_ref().map(|f| f.phase)) {
+        (Mode::Title, _) => 0.32,
+        (Mode::Online(_), Some(0) | Some(2)) => 0.2,
+        _ => 0.0,
+    };
+    p.sounds.music.tune(&p.sounds.audio, music);
     // What the crosshair is on: you aim there from your own eyes (the
     // camera's place over your shoulder taken out); where Lightning would
     // strike, aiming with it ready.

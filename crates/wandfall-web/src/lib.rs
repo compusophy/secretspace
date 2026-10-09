@@ -14,6 +14,7 @@ pub mod bar;
 pub mod hud;
 pub mod lessons;
 pub mod menu;
+pub mod music;
 pub mod settings;
 pub mod sound;
 pub mod steps;

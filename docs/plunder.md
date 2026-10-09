@@ -347,6 +347,10 @@ of combat styles and all varieties to counter all varieties".
   the storm's roar as its wall comes near, and all round inside it;
   crickets at night and birds at dawn and through the afternoon, hushed
   high up and in the storm.
+- **Music** under the title, the lobby and the result
+  (`wandfall-web/src/music.rs`): eight bars in D minor written at start
+  by `engine::synth` (four chords held soft, a harp-like arpeggio, bells
+  over the second half), going round; none in a match or on the range.
 - **Settings** (`wandfall-web/src/settings.rs`, in the pause menu, kept
   between visits): look speed (mouse and fingers), the sound's loudness,
   and the picture (auto steps down when frames run slow; low, mid or high
