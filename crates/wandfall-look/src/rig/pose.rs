@@ -125,19 +125,22 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
     let step = a.stride * moving;
     let duty = (0.6 - 0.24 * run).min(CONTACT / (2.0 * step).max(0.01));
     let lift = (0.11 + 0.15 * run) * (1.0 - 0.4 * crouch);
-    // Backing away plays the stride backward (through standing, as it
-    // turns from one to the other).
-    let back = 1.0 - 2.0 * a.back.x;
+    // Each foot steps along the way it goes, off the hips.
+    let (cs, cc) = a.course.sin_cos();
     let cyc = a.phase;
     let mut feet = [([0.0; 3], 0.0); 2];
     for (side, foot_at) in feet.iter_mut().enumerate() {
         let u = (cyc + 0.5 * side as f32).fract();
-        let (x, y, pitch) = foot(u, step, duty, lift * moving);
-        let x = x * back;
+        let (along, y, pitch) = foot(u, step, duty, lift * moving);
+        let (x, across) = (along * cc, along * cs);
         let out = (HIP_W + 0.02 + 0.06 * crouch - 0.025 * run) * if side == 0 { -1.0 } else { 1.0 };
         // In the air the legs tuck.
         let tuck = [0.1 + 0.08 * side as f32, 0.36 - 0.06 * side as f32];
-        let at = [x + (tuck[0] - x) * air, y + (tuck[1] - y) * air, out];
+        let at = [
+            x + (tuck[0] - x) * air,
+            y + (tuck[1] - y) * air,
+            out + across * (1.0 - air),
+        ];
         *foot_at = (at, pitch * moving * (1.0 - air));
     }
     // The hips ride over each step: highest over the planted foot at a
@@ -157,8 +160,10 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
     };
     let sprint = a.sprint.x;
     let elbow = 0.18 + 1.05 * run * moving + 0.3 * sprint + 0.3 * crouch;
-    let out = 0.1 + 0.05 * run + 0.6 * air + 0.25 * a.land;
-    let rest = (swing(1), out * 0.6, elbow);
+    // Out from the body, so the bell sleeves hang clear of the robe.
+    let out = 0.3 + 0.05 * run + 0.5 * air + 0.2 * a.land;
+    // The wand held forward, clear of the legs.
+    let rest = (swing(1) + 0.15, out * 0.8, elbow.max(0.75));
     let up = FRAC_PI_2 + p.aim.clamp(-1.0, 1.0);
     let cast = (up + 0.25 * p.tip.1, 0.05, 0.12);
     let k = p.arm.clamp(0.0, 1.0);
@@ -171,7 +176,7 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
         hip: (HIP - low + bob + 0.05 * air, a.land),
         sway,
         hips: a.hips.x,
-        wobble: 0.09 * moving * (TAU * cyc).cos() * back,
+        wobble: 0.09 * moving * (TAU * cyc).cos() * cc,
         lean: a.lean.x + 0.3 * crouch + 0.15 * a.land - 0.35 * flinch,
         bank: a.bank.x,
         breathe: 1.0 + 0.015 * (p.t * 2.4 + id as f32).sin() * (1.0 - moving),
@@ -251,8 +256,10 @@ fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
     let hip_y = b.hip.0;
     let pelvis = chain(&[tr([0.0, hip_y, b.sway]), turn, rz(-0.3 * b.lean)]);
     let mut legs = [(root, root, root); 2];
-    // How far each thigh swings forward (radians), in the hips' turn.
+    // How far each thigh swings forward (radians), in the hips' turn; and
+    // the legs' points the robe must hang clear of.
     let mut swings = [0.0f32; 2];
+    let mut shins: Vec<(V3, f32)> = Vec::with_capacity(10);
     let (sh, ch) = b.hips.sin_cos();
     for (side, &(f, pitch)) in b.feet.iter().enumerate() {
         let s = if side == 0 { -1.0 } else { 1.0 };
@@ -263,6 +270,15 @@ fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
         let d = geo::sub(knee, hip);
         swings[side] = (d[0] * ch + d[2] * sh).atan2(-d[1]);
         let toe = b.hips + 0.1 * s;
+        let boot = chain(&[tr(ankle), ry(toe), rz(pitch)]);
+        let mid = |a: V3, b: V3| geo::scale(geo::add(a, b), 0.5);
+        shins.extend([
+            (mid(hip, knee), 0.1),
+            (knee, 0.09),
+            (mid(knee, ankle), 0.085),
+            (ankle, 0.085),
+            (point(&boot, [0.22, -0.05, 0.0]), 0.06),
+        ]);
         legs[side] = (
             m4mul(&root, &bone(hip, knee, pole)),
             m4mul(&root, &bone(knee, ankle, pole)),
@@ -274,7 +290,10 @@ fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
     // The robe's panels: a front one swings out with its thigh going
     // forward, a back one with it going back; all drag behind at speed.
     let [sl, sr] = swings;
-    let panel = |c: f32, tilt: f32| chain(&[pelvis_w, ry(c), rz(tilt), ry(-c)]);
+    let panel = |c: f32, tilt: f32| {
+        let tilt = tilt.max(clear(c, &shins, &unpelvis(b, hip_y)));
+        chain(&[pelvis_w, ry(c), rz(tilt), ry(-c)])
+    };
     let drag = b.cloth;
     let panels = [
         panel(-PI / 4.0, sl.max(0.0) * 0.85 + 0.04 - 0.1 * drag),
@@ -317,6 +336,46 @@ fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
         upper: [l.0, r.0],
         fore: [l.1, r.1],
     }
+}
+
+/// From the root's frame into the pelvis's (as `frames` places it).
+fn unpelvis(b: &Body, hip_y: f32) -> M4 {
+    chain(&[
+        rz(0.3 * b.lean),
+        ry(-(b.hips + b.wobble)),
+        tr([0.0, -hip_y, -b.sway]),
+    ])
+}
+
+/// How far the robe's panel about angle `c` must swing out (radians) to
+/// hang clear of the legs' points (each with how thick the leg is
+/// there), brought into the pelvis's frame by `into`: none if they are
+/// all inside it, or not before it.
+fn clear(c: f32, legs: &[(V3, f32)], into: &M4) -> f32 {
+    let span = PI / 4.0 + 0.15;
+    let mut most: f32 = 0.0;
+    for &(at, thick) in legs {
+        let q = point(into, at);
+        let h = -q[1];
+        if h < 0.06 {
+            continue;
+        }
+        let a = q[2].atan2(q[0]);
+        if super::math::wrap(a - c).abs() > span {
+            continue;
+        }
+        // The robe at that depth, swung out by t, reaches
+        // r cos t + h sin t from the middle; it must pass the leg.
+        let need = (q[0] * q[0] + q[2] * q[2]).sqrt() + thick + 0.015;
+        let r = super::parts::robe_r((h / super::parts::HEM).min(1.0)) * 0.97;
+        if need <= r {
+            continue;
+        }
+        let l = (r * r + h * h).sqrt();
+        let t = (need / l).min(1.0).asin() - r.atan2(h);
+        most = most.max(t.min(1.2));
+    }
+    most
 }
 
 fn m4mul(a: &M4, b: &M4) -> M4 {
@@ -435,32 +494,44 @@ mod tests {
 
     #[test]
     fn a_planted_foot_does_not_slide() {
-        // Running east: while a foot bears the weight it stays put on the
-        // ground, though the body moves on over it.
-        let mut a = Anim::default();
-        let mut at = run(&mut a, [0.0; 3], (6.5, 0.0), 0.0, 90);
-        let mut planted: Option<(V3, usize)> = None;
-        let mut worst: f32 = 0.0;
-        for _ in 0..40 {
-            at = run(&mut a, at, (6.5, 0.0), 0.0, 1);
-            let f = wizard(at, 0.0, &a, &pose(), 1);
-            let left = sole(&f, 0);
-            if left[1] < 0.01 {
-                match planted {
-                    Some((p, n)) => {
-                        worst = worst.max((left[0] - p[0]).abs());
-                        planted = Some((p, n + 1));
+        // Facing east and running every way (ahead, strafing, backing
+        // away, on the diagonals): while a foot bears the weight it stays
+        // put on the ground, though the body moves on over it.
+        for (vx, vz) in [
+            (6.5, 0.0),
+            (0.0, 6.0),
+            (0.0, -6.0),
+            (-4.5, 0.0),
+            (4.5, 4.5),
+            (-3.5, 3.5),
+        ] {
+            let mut a = Anim::default();
+            let mut at = run(&mut a, [0.0; 3], (vx, vz), 0.0, 90);
+            let mut planted: Option<(V3, usize)> = None;
+            let mut worst: f32 = 0.0;
+            for _ in 0..60 {
+                at = run(&mut a, at, (vx, vz), 0.0, 1);
+                let f = wizard(at, 0.0, &a, &pose(), 1);
+                let left = sole(&f, 0);
+                if left[1] < 0.01 {
+                    match planted {
+                        Some((p, n)) => {
+                            let d = ((left[0] - p[0]).powi(2) + (left[2] - p[2]).powi(2)).sqrt();
+                            worst = worst.max(d);
+                            planted = Some((p, n + 1));
+                        }
+                        None => planted = Some((left, 0)),
                     }
-                    None => planted = Some((left, 0)),
+                } else if planted.is_some_and(|p| p.1 > 3) {
+                    break;
+                } else {
+                    planted = None;
                 }
-            } else if planted.is_some_and(|p| p.1 > 3) {
-                break;
-            } else {
-                planted = None;
             }
+            let v = (vx, vz);
+            assert!(planted.is_some_and(|p| p.1 > 3), "{v:?}: it plants a foot");
+            assert!(worst < 0.12, "{v:?}: and it stays: slid {worst}");
         }
-        assert!(planted.is_some_and(|p| p.1 > 3), "it plants a foot");
-        assert!(worst < 0.12, "and it stays: slid {worst}");
     }
 
     #[test]
@@ -559,7 +630,10 @@ mod tests {
         let f = wizard(at, 0.0, &a, &pose(), 1);
         let hips_fwd = dir(&f.pelvis, [1.0, 0.0, 0.0]);
         let chest_fwd = dir(&f.chest, [1.0, 0.0, 0.0]);
-        assert!(hips_fwd[2] > 0.6, "hips turned right: {hips_fwd:?}");
+        assert!(
+            hips_fwd[2] > 0.4 && hips_fwd[2] < 0.7,
+            "hips turned partly right: {hips_fwd:?}"
+        );
         assert!(chest_fwd[0] > 0.9, "chest ahead: {chest_fwd:?}");
     }
 }

@@ -3,9 +3,10 @@
 //!
 //! - its velocity, and from it how fast it goes and which way, relative to
 //!   where it faces (its aim);
-//! - its hips, turning toward where it goes (a strafe turns them up to a
-//!   right angle's two thirds; backing away keeps them forward and plays
-//!   the stride backward) while its chest keeps its aim;
+//! - its hips, turning a little toward where it goes (backing away, a
+//!   little toward the way it backs) while its chest keeps its aim; and
+//!   its course off them, along which its feet step (sideways in a
+//!   strafe, back when it backs away), so a planted foot never slides;
 //! - its stride: a step's length grows from a walk to a run, and the
 //!   phase advances by distance travelled, so each foot stays planted on
 //!   the ground while it bears the weight;
@@ -28,8 +29,8 @@ const STEP_RUN: f32 = 1.45;
 const WALK: f32 = 2.0;
 const RUN: f32 = 5.2;
 /// The furthest the hips turn from the aim, going forward and backing.
-const HIPS_FWD: f32 = 1.05;
-const HIPS_BACK: f32 = 0.55;
+const HIPS_FWD: f32 = 0.6;
+const HIPS_BACK: f32 = 0.45;
 /// How quickly it turns to face (and look) where it aims (seconds).
 const FACE: f32 = 0.06;
 
@@ -52,6 +53,9 @@ pub struct Anim {
     pub run: Spring,
     pub sprint: Spring,
     pub slide: Spring,
+    /// Which way it goes off its hips (radians): the feet step along it,
+    /// so a strafe steps sideways and backing away steps back.
+    pub course: f32,
     /// Through two steps, 0 to 1 (the left foot lands at 0).
     pub phase: f32,
     /// Metres a step now.
@@ -127,14 +131,18 @@ impl Anim {
         } else {
             rel.clamp(-HIPS_FWD, HIPS_FWD)
         };
-        self.hips.step(turn * moving, 0.11, dt);
+        let hips = self.hips.step(turn * moving, 0.11, dt);
+        self.course = wrap(rel - hips);
         let run = self.run.step(ease(WALK, RUN, self.speed), 0.2, dt);
         let sprint = self.sprint.step(ease(7.6, 9.6, self.speed), 0.2, dt);
         self.slide.step(slide as i32 as f32, 0.07, dt);
         let low = if crouch { 1.0 } else { 0.0 };
         self.crouch += (low - self.crouch) * (1.0 - (-dt * 12.0).exp());
-        self.stride =
-            (STEP_WALK + (STEP_RUN - STEP_WALK) * run + 0.35 * sprint) * (1.0 - 0.3 * self.crouch);
+        // Steps to the side are shorter (and quicker), so the feet never
+        // cross.
+        self.stride = (STEP_WALK + (STEP_RUN - STEP_WALK) * run + 0.35 * sprint)
+            * (1.0 - 0.3 * self.crouch)
+            * (1.0 - 0.4 * self.course.sin().abs());
         if ground {
             // Two steps a cycle: the feet move as far as the body does.
             self.phase = (self.phase + self.speed * dt / (2.0 * self.stride)).fract();
@@ -185,15 +193,18 @@ mod tests {
 
     #[test]
     fn hips_turn_to_a_strafe_and_stay_forward_backing_away() {
-        // Facing +x, running to its right (+z): the hips turn right.
+        // Facing +x, running to its right (+z): the hips turn a little
+        // right, and the feet step the rest of the way.
         let mut a = Anim::default();
         walk(&mut a, (0.0, 6.0), 0.0, 1.0);
-        assert!(a.hips.x > 0.9, "{a:?}");
+        assert!(a.hips.x > 0.5 && a.hips.x < 0.7, "{a:?}");
+        assert!((a.hips.x + a.course - FRAC_PI_2).abs() < 0.05, "{a:?}");
         assert!(a.back.x < 0.1);
         // Backing away (-x): hips forward, the stride played back.
         let mut a = Anim::default();
         walk(&mut a, (-5.0, 0.0), 0.0, 1.0);
         assert!(a.hips.x.abs() < 0.1 && a.back.x > 0.9, "{a:?}");
+        assert!(a.course.abs() > 3.0, "it steps back: {a:?}");
         // Running forward: a run, a long stride, leaning in.
         let mut a = Anim::default();
         walk(&mut a, (7.0, 0.0), 0.0, 1.0);

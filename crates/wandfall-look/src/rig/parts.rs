@@ -87,7 +87,7 @@ fn carved_soft(
 // The robe.
 
 /// Its radius going down (0 at the waist, 1 at the hem), flaring.
-fn robe_r(v: f32) -> f32 {
+pub fn robe_r(v: f32) -> f32 {
     0.255 + 0.19 * v.powf(1.3)
 }
 
@@ -536,7 +536,7 @@ pub fn upper(q: f32) -> Geo {
 /// The forearm's bell sleeve: wide at the cuff, folded, lined.
 pub fn fore(q: f32) -> Geo {
     let r =
-        |v: f32, a: f32| 0.082 + 0.075 * v * v + (0.003 + 0.012 * v) * (a * 7.0 + v * 2.0).sin();
+        |v: f32, a: f32| 0.082 + 0.052 * v * v + (0.003 + 0.012 * v) * (a * 7.0 + v * 2.0).sin();
     let mut g = Geo::default();
     sheet(
         &mut g,
@@ -572,7 +572,7 @@ pub fn cuff(q: f32) -> Geo {
         |u, v| {
             let a = u * TAU;
             let w = -v * TAU;
-            let rr = 0.157 + 0.012 * (a * 7.0 + 2.0).sin() + 0.009 * w.cos();
+            let rr = 0.134 + 0.012 * (a * 7.0 + 2.0).sin() + 0.009 * w.cos();
             [a.cos() * rr, -FORE + 0.009 * w.sin(), a.sin() * rr]
         },
         |_, _| GOLD,
@@ -778,7 +778,7 @@ mod tests {
                         (a[2] + b[2] + c[2]) / 3.0,
                     ];
                     let flat = (m[0] * m[0] + m[2] * m[2]).sqrt();
-                    let mid = [m[0] / flat * 0.157, -FORE, m[2] / flat * 0.157];
+                    let mid = [m[0] / flat * 0.134, -FORE, m[2] / flat * 0.134];
                     render::geo::dot(n, render::geo::sub(m, mid)) > 0.0
                 })
                 .count();
