@@ -67,6 +67,8 @@ pub struct WandWatch {
     /// Everyone's names, and who won the last match.
     names: Vec<(u16, bool, String)>,
     winner: u16,
+    /// The hall of wizards' first, if anyone has won.
+    champion: Option<String>,
     buf: Canvas,
     three: Option<Three>,
     /// The room's last roster and loot, for a spectator that starts late.
@@ -92,6 +94,7 @@ impl WandWatch {
             falls: Vec::new(),
             names: Vec::new(),
             winner: 0,
+            champion: None,
             buf: Canvas::new(1, 1),
             three: None,
             said: Vec::new(),
@@ -130,6 +133,13 @@ impl WandWatch {
                 self.said
                     .retain(|o| proto::read_roster(o).is_some() != roster);
                 self.said.push(b.clone());
+            }
+            if let Some(h) = proto::read_hall(&b) {
+                // Short enough for the card's corner on a phone.
+                self.champion = h
+                    .into_iter()
+                    .find(|r| r.1 > 0)
+                    .map(|r| r.0.chars().take(14).collect());
             }
             if let Some((_, _, seed, _)) = proto::read_welcome(&b) {
                 if self.seed != Some(seed) {
@@ -331,7 +341,10 @@ impl WandWatch {
         match f.phase {
             _ if now - self.frame_at > 3000.0 => ("reconnecting".to_string(), false),
             1 => (format!("LIVE  {} of {} left", f.alive, f.entrants), true),
-            0 => (format!("next match in {}s", f.secs), false),
+            0 => match &self.champion {
+                Some(c) => (format!("next match in {}s - champion {c}", f.secs), false),
+                None => (format!("next match in {}s", f.secs), false),
+            },
             _ => {
                 let name = self
                     .names
