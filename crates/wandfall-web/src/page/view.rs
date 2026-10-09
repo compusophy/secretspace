@@ -79,6 +79,32 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         fx::gallery(&i.look, &mut d, name, (age, now), feet, right);
     }
     p.ear = (cam.eye, cam.yaw);
+    // The island's sound under everything, for where you are.
+    if let Some(i) = &p.island {
+        let at = |place: wandfall::places::Place, up: f32| {
+            i.map
+                .pois
+                .iter()
+                .find(|q| q.place == place)
+                .map(|q| [q.x, q.level + up, q.z])
+        };
+        let b = &p.pred.body;
+        let e = cam.eye;
+        let storm = match (&p.st.frame, &p.mode) {
+            (Some(f), Mode::Online(_)) if f.phase == 1 => Some(f.storm),
+            _ => None,
+        };
+        let here = crate::ambience::Here {
+            ear: p.ear,
+            over: e[1] - i.map.height(e[0], e[2]),
+            glide: p.alive && b.glide,
+            speed: if p.alive { b.v[0].hypot(b.v[2]) } else { 0.0 },
+            rift: at(wandfall::places::Place::Rift, -2.0),
+            spire: at(wandfall::places::Place::Spire, 12.0),
+            storm,
+        };
+        p.sounds.ambience.tune(&p.sounds.audio, &here, false);
+    }
     // What the crosshair is on: you aim there from your own eyes (the
     // camera's place over your shoulder taken out); where Lightning would
     // strike, aiming with it ready.

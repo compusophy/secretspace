@@ -325,6 +325,11 @@ of combat styles and all varieties to counter all varieties".
   `?nocd`, `?spar`, `?look=yaw,pitch`, `?hold=ms` (every effect held at
   that age), `?fx=name&age=ms` (any one effect shown by you, held at an
   age or again and again: `fx::NAMES`).
+- **The island's sound under everything** (`wandfall-web/src/ambience.rs`,
+  seamless loops written by `engine::synth`, eased by `kit::audio`'s
+  hums): wind, more of it high up, on a broom and going fast; the rift's
+  rumble and crackle near it; the Spire's humming chord near its tower;
+  the storm's roar as its wall comes near, and all round inside it.
 - **Lessons on the range** (`wandfall-web/src/lessons.rs`), the first
   time: twelve steps under the top line, each ticked off as you do it
   (move, jump, a timed hop, an air jump, a climb, a launch rune, sprint,

@@ -138,6 +138,33 @@ impl Synth {
         self
     }
 
+    /// The finished sound to play round and round, its loudest at `peak`:
+    /// its last `overlap` seconds faded into its first, so the turn from
+    /// end to start cannot be heard (it is that much shorter).
+    pub fn looped(self, peak: f32, overlap: f32) -> Vec<f32> {
+        let mut v = self.out;
+        let top = v.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        if top > 1e-6 {
+            let k = peak / top;
+            for x in &mut v {
+                *x *= k;
+            }
+        }
+        let n = v.len();
+        let o = ((overlap * RATE as f32) as usize).min(n / 2);
+        for i in 0..o {
+            // Equal power: noise keeps its loudness through the fade.
+            let k = i as f32 / o as f32;
+            let (a, b) = (
+                (k * std::f32::consts::FRAC_PI_2).sin(),
+                (k * std::f32::consts::FRAC_PI_2).cos(),
+            );
+            v[i] = v[i] * a + v[n - o + i] * b;
+        }
+        v.truncate(n - o);
+        v
+    }
+
     /// The finished sound, its loudest at `peak`.
     pub fn done(mut self, peak: f32) -> Vec<f32> {
         let top = self.out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
@@ -160,6 +187,28 @@ impl Synth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_loop_turns_from_its_end_to_its_start_without_a_step() {
+        let mut s = Synth::new(2.0);
+        s.noise(
+            (0.0, 2.0),
+            Env::new(0.8, 0.0, 1e6),
+            (200.0, 200.0),
+            (900.0, 900.0),
+            0.0,
+        );
+        let v = s.looped(0.5, 0.5);
+        assert_eq!(v.len(), (1.5 * RATE as f32) as usize);
+        let rms = (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt();
+        assert!(rms > 0.05, "{rms}");
+        // From its end to its start no bigger a step than within it.
+        let most = v
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!((v[0] - v[v.len() - 1]).abs() <= most * 1.01);
+    }
 
     #[test]
     fn a_tone_has_its_pitch_and_dies_away() {

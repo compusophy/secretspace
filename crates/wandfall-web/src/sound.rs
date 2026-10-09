@@ -35,6 +35,8 @@ pub struct Sounds {
     take: usize,
     hop: usize,
     thud: usize,
+    /// The island's sound under everything.
+    pub ambience: crate::ambience::Ambience,
 }
 
 fn wand() -> Vec<f32> {
@@ -602,6 +604,7 @@ impl Sounds {
             take: add(take()),
             hop: add(hop()),
             thud: add(thud()),
+            ambience: crate::ambience::Ambience::new(&mut audio),
             audio,
         }
     }
