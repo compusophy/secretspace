@@ -54,6 +54,13 @@ pub(super) fn hands(p: &mut Page) {
                     act(p, a);
                 }
             }
+            // Out, a tap watches the next one still in it.
+            Hand::Finger {
+                kind: kit::input::Kind::Down,
+                ..
+            } if p.touch && !p.alive && !matches!(p.mode, Mode::Title) => {
+                p.cycle += 1;
+            }
             // A tap on the lesson skips it.
             Hand::Finger {
                 kind: kit::input::Kind::Down,
@@ -131,6 +138,14 @@ pub(super) fn hands(p: &mut Page) {
         if code == "KeyB" && !matches!(p.mode, Mode::Title) {
             act(p, if p.book { Act::CloseBook } else { Act::Book });
             continue;
+        }
+        // Out: the next one to watch, or the last.
+        if !p.alive && !matches!(p.mode, Mode::Title) {
+            match code.as_str() {
+                "Space" | "ArrowRight" | "KeyD" => p.cycle += 1,
+                "ArrowLeft" | "KeyA" => p.cycle -= 1,
+                _ => {}
+            }
         }
         let slot = match code.as_str() {
             "KeyQ" | "Digit1" => 0,

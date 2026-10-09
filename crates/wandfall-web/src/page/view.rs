@@ -374,12 +374,31 @@ fn camera(
         camera::shake(&mut cam, camera::rumble(&p.st.shows, now, feet), now);
         return (cam, None, None);
     }
-    // Out: over the shoulder of the winner, or someone still in it.
-    let f = p.st.frame.as_ref();
-    let pick = f
-        .and_then(|f| others.iter().find(|s| s.id == f.winner && f.winner != 0))
-        .or_else(|| others.iter().find(|s| s.flags & flag::ENTRANT != 0))
-        .or(others.first());
+    // Out: over the shoulder of whoever took you, then of whoever is
+    // still in it (space or the arrows, or a tap: the next one).
+    let mut list: Vec<&proto::Seen> = others
+        .iter()
+        .filter(|s| s.flags & flag::ENTRANT != 0)
+        .collect();
+    list.sort_by_key(|s| s.id);
+    let step = std::mem::take(&mut p.cycle);
+    let n = list.len() as i32;
+    let on = p.watch.and_then(|id| list.iter().position(|s| s.id == id));
+    let winner = p.st.frame.as_ref().map_or(0, |f| f.winner);
+    let first = || {
+        let by = p.st.out.map_or(0, |o| o.0);
+        [by, winner]
+            .into_iter()
+            .filter(|&id| id != 0)
+            .find_map(|id| list.iter().position(|s| s.id == id))
+            .or((n > 0).then_some(0))
+    };
+    let at = match on {
+        Some(k) => Some((k as i32 + step).rem_euclid(n.max(1)) as usize),
+        None => first(),
+    };
+    let pick = at.map(|k| list[k]).or(others.first());
+    p.watch = pick.map(|s| s.id);
     match pick {
         Some(s) => {
             let yaw = trig::radians(s.yaw) + 0.4 * ((now / 9000.0) as f32).sin();
@@ -390,7 +409,13 @@ fn camera(
             let cam = p
                 .chase
                 .view(&i.map, s.p, (yaw, -0.25), stance, aspect, secs);
-            (cam, Some(p.st.name(s.id)), None)
+            let name = p.st.name(s.id);
+            let label = match (n > 1, p.touch) {
+                (false, _) => name,
+                (true, false) => format!("{name} - space: the next one"),
+                (true, true) => format!("{name} - tap: the next one"),
+            };
+            (cam, Some(label), None)
         }
         None => {
             let a = (now / 20000.0) as f32;

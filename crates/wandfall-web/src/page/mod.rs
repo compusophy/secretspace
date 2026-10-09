@@ -132,6 +132,9 @@ struct Page {
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
     orbit: Option<u16>,
     orbit_at: Option<[f32; 3]>,
+    /// Out: who you watch, and a step to the next (or the last) asked.
+    watch: Option<u16>,
+    cycle: i32,
     /// Where sound is heard from (the camera) and which way it faces.
     ear: ([f32; 3], f32),
 }
@@ -305,6 +308,8 @@ pub fn start() {
                 anims: HashMap::new(),
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,
+                watch: None,
+                cycle: 0,
                 ear: ([0.0; 3], 0.0),
             })
         });
