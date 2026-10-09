@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 13;
+pub const PROTO: u8 = 14;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -249,8 +249,11 @@ impl Frame {
                     .u8(b.breath)
                     .u8(b.landed)
                     .u8(b.mantle)
-                    .u8(b.tether);
+                    .u8(b.tether)
+                    .u8(b.walls)
+                    .u8(b.wall);
                 f32s(&mut w, b.anchor);
+                w.u32(b.wall_n[0].to_bits()).u32(b.wall_n[1].to_bits());
                 w.u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
@@ -323,7 +326,9 @@ impl Frame {
             let jump = r.u8()?;
             let slide_cd = r.u8()?;
             let (spent, breath, landed, mantle) = (r.u16()?, r.u8()?, r.u8()?, r.u8()?);
-            let (tether, anchor) = (r.u8()?, read_f32s(&mut r)?);
+            let (tether, walls, wall) = (r.u8()?, r.u8()?, r.u8()?);
+            let anchor = read_f32s(&mut r)?;
+            let wall_n = [f32::from_bits(r.u32()?), f32::from_bits(r.u32()?)];
             let mut o = Own {
                 body: Body {
                     p,
@@ -340,6 +345,9 @@ impl Frame {
                     mantle,
                     tether,
                     anchor,
+                    walls,
+                    wall,
+                    wall_n,
                     slide_cd,
                     spent,
                     breath,
@@ -671,6 +679,9 @@ mod tests {
                     mantle: 5,
                     tether: 9,
                     anchor: [3.25, -1.0e-3, 77.7],
+                    walls: 2,
+                    wall: 4,
+                    wall_n: [0.6, -0.8],
                 },
                 seq: 65535,
                 hp: 252,

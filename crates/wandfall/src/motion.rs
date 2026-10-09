@@ -2,8 +2,8 @@
 //! above your pace bleeds away, it does not vanish), slide (crouch at
 //! speed; gravity carries it down a hill), walk slower up a slope and
 //! faster down it, jump, glide down in the drop, wade in the shallows,
-//! step up small rises, and never through trees, rocks or pillars; a
-//! Tether hauls you (`tether`).
+//! step up small rises, and never through trees, rocks or pillars; kick
+//! off their sides (`wall`); a Tether hauls you (`tether`).
 //! Arithmetic only, so the page predicts its own wizard to the bit.
 
 use crate::laws::*;
@@ -74,6 +74,11 @@ pub struct Body {
     /// Ticks left pulled by a Tether, toward where it caught.
     pub tether: u8,
     pub anchor: [f32; 3],
+    /// Wall jumps since it last landed; ticks it may still kick off the
+    /// wall it last touched, and which way that wall faces (x, z).
+    pub walls: u8,
+    pub wall: u8,
+    pub wall_n: [f32; 2],
 }
 
 impl Body {
@@ -281,6 +286,7 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     if b.ground {
         b.landed = b.landed.saturating_add(1);
         b.air_jumped = false;
+        b.walls = 0;
     }
     if b.buffer > 0 && (b.ground || b.coyote > 0) && b.v[1] <= 0.5 && !b.glide {
         // Out of a slide, the slide's speed goes with it. Timed to the
@@ -295,6 +301,15 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
         b.ground = false;
         b.slide = false;
         b.coyote = 0;
+        b.buffer = 0;
+    } else if press
+        && b.coyote == 0
+        && crate::wall::can(b)
+        && (b.air_jumped || !crate::wall::into(b, (wx, wz), len))
+    {
+        // Off a wall (pushing into it with the air jump to spend, that
+        // is the climb's: the air jump).
+        crate::wall::kick(b);
         b.buffer = 0;
     } else if press
         && !b.ground
@@ -382,6 +397,10 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     // it, it holds you rather than pushing you off it.
     let mut out = [p[0], p[1].max(b.p[1]), p[2]];
     map.push_out(&mut out, b.tall());
+    b.wall = b.wall.saturating_sub(1);
+    if !was {
+        crate::wall::touch(b, [out[0] - p[0], out[2] - p[2]]);
+    }
     (p[0], p[2]) = (out[0], out[2]);
     // The ground, or a deck under you (the sea floor too: you wade, you
     // do not swim).

@@ -1,6 +1,7 @@
 //! The range's first lessons, a step at a time under the top line, each
 //! ticked off as you do it: move, jump, hop as you land, jump again in the
-//! air, climb onto a rock, take a launch rune, ride a Tether, sprint,
+//! air, climb onto a rock, kick off a wall, take a launch rune, ride a
+//! Tether, sprint,
 //! slide, hit a dummy with your wand, cast a spell, pick up a spell cube,
 //! open the spellbook. Shown once (remembered); Enter (or a tap on it)
 //! skips a step; the range's menu starts them again.
@@ -28,6 +29,7 @@ enum Step {
     Hop,
     Air,
     Climb,
+    Wall,
     Launch,
     Tether,
     Sprint,
@@ -38,12 +40,13 @@ enum Step {
     Book,
 }
 
-const STEPS: [Step; 13] = [
+const STEPS: [Step; 14] = [
     Step::Move,
     Step::Jump,
     Step::Hop,
     Step::Air,
     Step::Climb,
+    Step::Wall,
     Step::Launch,
     Step::Tether,
     Step::Sprint,
@@ -84,6 +87,10 @@ impl Step {
             (Step::Climb, _) => (
                 "climb: jump at a rock or a pillar",
                 "push toward its top and you pull yourself up",
+            ),
+            (Step::Wall, _) => (
+                "wall jump: in the air by a pillar, jump",
+                "steer away from it as you do; three before you land",
             ),
             (Step::Launch, _) => (
                 "launch: step on a rune of light",
@@ -239,6 +246,7 @@ impl Lessons {
             Step::Hop => hop,
             Step::Air => !was.air_jumped && is.air_jumped,
             Step::Climb => was.mantle == 0 && is.mantle > 0,
+            Step::Wall => is.walls > was.walls,
             Step::Launch => was.ground && !was.glide && is.glide,
             Step::Tether => was.tether == 0 && is.tether > 0,
             Step::Sprint => self.sprint > 30,

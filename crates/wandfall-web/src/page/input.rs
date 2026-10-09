@@ -257,6 +257,12 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
         } else if was.mantle == 0 && is.mantle > 0 {
             // Pulling up onto a ledge.
             p.sounds.hop();
+        } else if is.walls > was.walls {
+            // Off a wall: a hop, and dust kicked from it.
+            p.sounds.hop();
+            let n = was.wall_n;
+            let at = [is.p[0] - n[0] * 0.4, is.p[1] + 0.8, is.p[2] - n[1] * 0.4];
+            p.st.dust.push((kit::now(), at, 0.5));
         } else if !was.air_jumped && is.air_jumped {
             // The air jump: a hop, and a puff of magic under the feet.
             p.sounds.hop();

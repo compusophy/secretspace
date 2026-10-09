@@ -19,4 +19,5 @@ pub mod storm;
 pub mod tether;
 pub mod trig;
 pub mod view;
+pub mod wall;
 pub mod world;

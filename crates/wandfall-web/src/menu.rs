@@ -162,7 +162,7 @@ fn keys_help(width: i32, ui: i32) -> Vec<String> {
     const KEYS: [&str; 11] = [
         "WASD move",
         "shift sprint",
-        "space jump (again in the air; at a ledge: climb)",
+        "space jump (again in the air; at a ledge: climb; off a wall)",
         "C or ctrl crouch",
         "crouch at a sprint: slide",
         "click cast",

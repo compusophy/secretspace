@@ -93,6 +93,14 @@ pub const HOP_MAX: f32 = 12.5;
 /// Once in the air, a second jump (magic): this fast up, the way you
 /// steer; it costs stamina, so not when winded.
 pub const AIR_JUMP: f32 = 7.0;
+/// Wall jumps: off a wall touched in the last few ticks, out from it and
+/// up (m/s), keeping a share of the speed along it; so many before you
+/// land.
+pub const WALL_GRACE: u8 = 6;
+pub const WALL_KICK: f32 = 7.5;
+pub const WALL_JUMP: f32 = 8.5;
+pub const WALL_KEEP: f32 = 0.8;
+pub const WALL_JUMPS: u8 = 3;
 /// Climbing a ledge (a rock, a pillar, a stone, the altar) in the air,
 /// pushing toward it: its top no more than this far over your feet (and
 /// more than the low mark), its edge this close beyond your body, ahead

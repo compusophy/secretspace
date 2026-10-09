@@ -326,6 +326,12 @@ of combat styles and all varieties to counter all varieties".
       an air jump too; PROTO 10). Launch runes (one by each place, eight
       in the wild, gold on the map): step on one and it throws you 18 m
       up onto your broom, to glide down wherever you steer (PROTO 11).
+      Wall jumps (`wandfall/src/wall.rs`): in the air against the side of
+      a rock, pillar, trunk or the tower, a jump steering away from it
+      kicks you 7.5 m/s off it and 8.5 up, keeping most of your speed
+      along it; three before you land, the air jump kept (pushing into
+      it with the air jump to spend, the press is the air jump, to
+      climb; PROTO 14).
 - Balance as bots play it (24 matches): every spell is in the winners'
   hands (attack 16/13/10/8 for Fireball, Lance, Frost, Lightning; life
   15/12/10/9 for Mend, Blink, Gust, Ward); the wand still deals about half
@@ -351,8 +357,8 @@ of combat styles and all varieties to counter all varieties".
   sprint, hushed crouching, so creeping up on someone is quiet. Yours are
   soft and close; others' come from where they are, out to 40 m.
 - **Lessons on the range** (`wandfall-web/src/lessons.rs`), the first
-  time: thirteen steps under the top line, each ticked off as you do it
-  (move, jump, a timed hop, an air jump, a climb, a launch rune, a
+  time: fourteen steps under the top line, each ticked off as you do it
+  (move, jump, a timed hop, an air jump, a climb, a wall jump, a launch rune, a
   Tether (always in F on the range), sprint,
   slide, a wand hit, a cast, a spell cube, the spellbook), keys or fingers in their words;
   Enter or a tap skips one; the range's menu starts them again.
