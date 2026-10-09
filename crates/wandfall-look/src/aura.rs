@@ -1,12 +1,13 @@
 //! What moves at the island's places each frame, and their light: the
-//! beacon turning over the Spire and its rune rings, the lamps, the
-//! circle's orb, the rift's gate swirling and its embers, the grove's
-//! glimmer.
+//! beacon turning over the Spire and its rune rings, the lamps' violet
+//! flames, the circle's orb in its shell of light, the rift's gate
+//! burning and swirling, embers streaking up off its lava into smoke, the
+//! grove's glimmer and glints.
 
 use std::f32::consts::TAU;
 
 use render::geo::{self, hash, mix, rgb, unit, V3};
-use render::{m4, Item, Light, Material, Mesh, Pass, Spark};
+use render::{m4, Item, Light, Material, Mesh, Pass, Shape, Spark};
 
 use crate::fx::Draw;
 use crate::land::{CYAN, EMBER, GOLDEN, VIOLET};
@@ -22,11 +23,24 @@ impl Look {
             d.items
                 .push(Item::new(mesh, m).tint(c, a).glow(1.0).pass(Pass::Glow));
         };
-        for &p in &l.lamps {
+        for (k, &p) in l.lamps.iter().enumerate() {
+            // A violet flame, flickering, and its light with it.
+            let k = k as i32;
+            let flick =
+                0.85 + 0.1 * (t * 9.0 + k as f32).sin() + 0.05 * (t * 23.0 + k as f32 * 2.0).sin();
+            let c = mix(VIOLET, [1.0; 3], 0.25);
+            d.sparks.push(Spark {
+                p: [p[0], p[1] + 0.1, p[2]],
+                size: 0.5 * flick,
+                c: [c[0], c[1], c[2], 0.9],
+                shape: Shape::Flame,
+                seed: unit(hash(k, 1, 51)),
+                ..Default::default()
+            });
             d.lights.push(Light {
                 p,
                 r: 9.0,
-                c: geo::scale(VIOLET, 1.6),
+                c: geo::scale(VIOLET, 1.6 * flick),
             });
         }
         for &(p, c) in &l.crystals {
@@ -95,6 +109,15 @@ impl Look {
                             .tint(CYAN, 1.0)
                             .glow(2.0),
                     );
+                    d.items.push(
+                        Item::new(self.orb, m4::place(at, 0.0, [0.55; 3]))
+                            .tint(CYAN, 0.5)
+                            .glow(0.3)
+                            .detail(3.0)
+                            .rough(1.0)
+                            .material(Material::Energy)
+                            .pass(Pass::Glow),
+                    );
                     glow(d, l.runes, m4::place(at, t * 0.6, [1.4; 3]), CYAN, 0.9);
                     let floor = [p.x, base[1] + 0.56, p.z];
                     glow(
@@ -125,12 +148,22 @@ impl Look {
                         )
                     };
                     let pulse = 0.8 + 0.2 * (t * 3.0).sin();
-                    // A void, a red rim about it, runes wheeling in it.
+                    // A void, fire burning over it and round its rim,
+                    // runes wheeling in it.
                     d.items.push(
                         Item::new(self.ball, face(2.45))
                             .tint(rgb(255, 50, 20), 0.55 * pulse)
                             .glow(1.0)
                             .material(Material::Rim)
+                            .pass(Pass::Glow),
+                    );
+                    d.items.push(
+                        Item::new(self.ball, face(2.5))
+                            .tint(rgb(255, 90, 30), 0.7)
+                            .glow(0.4)
+                            .detail(1.1)
+                            .rough(0.6)
+                            .material(Material::Energy)
                             .pass(Pass::Glow),
                     );
                     d.items.push(
@@ -187,6 +220,28 @@ impl Look {
                                 EMBER[2],
                                 (1.0 - f) * 0.9,
                             ],
+                            v: [0.0, 0.35 + 0.3 * u(6), 0.0],
+                            ..Default::default()
+                        });
+                    }
+                    // Smoke rolling up off the lava, lit red from below.
+                    for k in 0..10 {
+                        let u = |i| unit(hash(k, i, 33));
+                        let f = (t / (7.0 + 3.0 * u(0)) + u(1)).fract();
+                        let a = u(2) * TAU + f * 0.6;
+                        let r = 2.0 + 7.0 * u(3) + f * 2.0;
+                        let warm = mix(rgb(120, 40, 20), rgb(40, 34, 36), f);
+                        d.sparks.push(Spark {
+                            p: [p.x + a.cos() * r, floor + 1.0 + f * 14.0, p.z + a.sin() * r],
+                            size: 2.0 + 4.0 * f,
+                            c: [
+                                warm[0],
+                                warm[1],
+                                warm[2],
+                                0.35 * (f * 6.0).min(1.0) * (1.0 - f),
+                            ],
+                            shape: Shape::Smoke,
+                            seed: u(4),
                             ..Default::default()
                         });
                     }
@@ -202,10 +257,13 @@ impl Look {
                             + (t * (0.5 + u(4)) + u(5) * TAU).sin() * 0.4;
                         let tw = 0.5 + 0.5 * (t * 2.0 + u(6) * TAU).sin();
                         let c = mix(VIOLET, CYAN, u(7));
+                        // One in four a glint, now and then.
+                        let star = k % 4 == 0;
                         d.sparks.push(Spark {
                             p: [p.x + a.cos() * r, y, p.z + a.sin() * r],
-                            size: 0.06,
+                            size: if star { 0.35 * tw * tw } else { 0.06 },
                             c: [c[0], c[1], c[2], 0.8 * tw],
+                            shape: if star { Shape::Star } else { Shape::Glow },
                             ..Default::default()
                         });
                     }
