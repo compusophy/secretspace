@@ -1,8 +1,8 @@
 //! The sun's shadow map (depth only, from the sun), and what follows the
-//! scene: bloom (a chain of halvings, then back up, each a little wider)
-//! and the finish (the sun's shafts added, exposure, ACES tone mapping,
-//! a vignette, sRGB, the grade, and a dither so the sky's gradients do
-//! not band).
+//! scene: bloom (what is past white, a chain of halvings, then back up,
+//! each a little wider) and the finish (the glow and the sun's shafts
+//! added, exposure, ACES tone mapping, a vignette, sRGB, the grade, and a
+//! dither so the sky's gradients do not band).
 
 pub const SHADOW: &str = r#"
 struct Caster {
@@ -29,7 +29,8 @@ fn shadow_vs(v: CastIn) -> @builtin(position) vec4<f32> {
 pub const POST: &str = r#"
 struct Post {
     texel: vec4<f32>,   // xy one texel of the source (the finish: rgb the shafts' light)
-    k: vec4<f32>,       // x bloom, y exposure, z vignette, w spread
+    k: vec4<f32>,       // down: x 1 the first, y exposure; up: x the share added, w spread;
+                        // finish: x bloom, y exposure, z vignette, w 1 / the levels' sum
 };
 
 @group(0) @binding(0) var src: texture_2d<f32>;
@@ -64,7 +65,27 @@ fn tap(uv: vec2<f32>, dx: f32, dy: f32) -> vec3<f32> {
     return textureSampleLevel(src, lin, uv + vec2<f32>(dx, dy) * pp.texel.xy, 0.0).rgb;
 }
 
-/// Half the size: thirteen taps, weighted so bright specks do not flicker.
+/// How much a group of taps counts in the first halving: the brighter,
+/// the less (Karis), half at `BLOOM_KARIS`, so a speck a pixel wide does
+/// not flicker the bloom (and a thin glow still blooms).
+fn karis(c: vec3<f32>) -> f32 {
+    return 1.0 / (1.0 + dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)) / BLOOM_KARIS);
+}
+
+/// What of `c` is past white once exposed by `exposure`: none well under
+/// `BLOOM_WHITE`, all that is over it well past it, eased between (a soft
+/// knee `BLOOM_KNEE` either side), so what glows blooms and the rest of
+/// the picture stays sharp.
+fn past_white(c: vec3<f32>, exposure: f32) -> vec3<f32> {
+    let peak = max(c.r, max(c.g, c.b)) * exposure;
+    let s = clamp(peak - BLOOM_WHITE + BLOOM_KNEE, 0.0, 2.0 * BLOOM_KNEE);
+    let over = max(s * s / (4.0 * BLOOM_KNEE), peak - BLOOM_WHITE);
+    return c * (over / max(peak, 1e-4));
+}
+
+/// Half the size: thirteen taps in five groups of four (Jimenez); in the
+/// first halving each group weighed down by how bright it is, and only
+/// what is past white kept.
 @fragment
 fn down_fs(i: Out) -> @location(0) vec4<f32> {
     let uv = i.uv;
@@ -81,13 +102,25 @@ fn down_fs(i: Out) -> @location(0) vec4<f32> {
     let l = tap(uv, -2.0, 2.0);
     let n = tap(uv, 0.0, 2.0);
     let o = tap(uv, 2.0, 2.0);
-    var c4 = (d + e + j + k) * 0.125;
-    c4 = c4 + (a + b + f + m) * 0.03125 + (b + c + m + h) * 0.03125;
-    c4 = c4 + (f + m + l + n) * 0.03125 + (m + h + n + o) * 0.03125;
+    let g0 = (d + e + j + k) * 0.25;
+    let g1 = (a + b + f + m) * 0.25;
+    let g2 = (b + c + m + h) * 0.25;
+    let g3 = (f + m + l + n) * 0.25;
+    let g4 = (m + h + n + o) * 0.25;
+    var w = vec4<f32>(0.125);
+    var w0 = 0.5;
+    if (pp.k.x > 0.5) {
+        w0 = w0 * karis(g0);
+        w = w * vec4<f32>(karis(g1), karis(g2), karis(g3), karis(g4));
+    }
+    var c4 = (g0 * w0 + g1 * w.x + g2 * w.y + g3 * w.z + g4 * w.w) / (w0 + w.x + w.y + w.z + w.w);
+    if (pp.k.x > 0.5) {
+        c4 = past_white(c4, pp.k.y);
+    }
     return vec4<f32>(min(c4, vec3<f32>(64.0)), 1.0);
 }
 
-/// Back up: a tent of nine taps, added to what is there.
+/// Back up: a tent of nine taps, added to what is there at its share.
 @fragment
 fn up_fs(i: Out) -> @location(0) vec4<f32> {
     let uv = i.uv;
@@ -95,7 +128,28 @@ fn up_fs(i: Out) -> @location(0) vec4<f32> {
     var c = tap(uv, 0.0, 0.0) * 4.0;
     c = c + (tap(uv, -r, 0.0) + tap(uv, r, 0.0) + tap(uv, 0.0, -r) + tap(uv, 0.0, r)) * 2.0;
     c = c + tap(uv, -r, -r) + tap(uv, r, -r) + tap(uv, -r, r) + tap(uv, r, r);
-    return vec4<f32>(c / 16.0, 1.0);
+    return vec4<f32>(c / 16.0 * pp.k.x, 1.0);
+}
+
+/// Khronos's PBR Neutral: colours kept as they are up to near white, then
+/// eased toward it with their hue kept (fire stays orange, a bright blue
+/// goes pale, not neon); the light first raised so its middle grey and
+/// its shadows meet ACES's.
+fn neutral(x: vec3<f32>) -> vec3<f32> {
+    let start = 0.76;
+    let lo = x * 1.7;
+    let m = min(lo.r, min(lo.g, lo.b));
+    let offset = select(0.04, m - 6.25 * m * m, m < 0.08);
+    var c = lo - offset;
+    let peak = max(c.r, max(c.g, c.b));
+    if (peak < start) {
+        return max(c, vec3<f32>(0.0));
+    }
+    let d = 1.0 - start;
+    let top = 1.0 - d * d / (peak + d - start);
+    c = c * (top / peak);
+    let pale = 1.0 - 1.0 / (0.15 * (peak - top) + 1.0);
+    return mix(c, vec3<f32>(top), pale);
 }
 
 /// ACES, fitted (Narkowicz): film's response to light.
@@ -130,15 +184,13 @@ fn finish_fs(i: Out) -> @location(0) vec4<f32> {
     let hdr = textureSampleLevel(src, lin, i.uv, 0.0).rgb;
     let glow = textureSampleLevel(bloom, lin, i.uv, 0.0).rgb;
     let shaft = textureSampleLevel(shafts, lin, i.uv, 0.0).r;
-    var c = (mix(hdr, glow, pp.k.x) + pp.texel.rgb * shaft) * pp.k.y;
-    c = aces(c);
+    var c = (hdr + glow * (pp.k.w * pp.k.x) + pp.texel.rgb * shaft) * pp.k.y;
+    c = TONE_MAP(c);
     let q = i.uv - 0.5;
     c = c * (1.0 - pp.k.z * dot(q, q) * 1.6);
     c = graded(srgb(c));
     // Under a step of the screen's, from pixel to pixel, so gradients
     // become a fine grain instead of bands.
-    let px = i.clip.xy;
-    let n = fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
-    return vec4<f32>(c + (n - 0.5) / 255.0, 1.0);
+    return vec4<f32>(c + (ign(i.clip.xy) - 0.5) / 255.0, 1.0);
 }
 "#;

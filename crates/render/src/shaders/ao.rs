@@ -2,7 +2,12 @@
 //! (after HBAO): each pixel's place and facing found from the depth about
 //! it, then a few ways out across the screen (turned pixel by pixel), a
 //! few steps each; whatever rises over the surface within reach shades
-//! it, the more the steeper and the nearer. Then a blur that keeps to its own depth, and a pass that lays it over
+//! it, the more the steeper and the nearer. It is laid over the lit
+//! picture, so it is eased by how much of a pixel's light is direct (the
+//! sun's where it reaches, a light's, a glow's: the solid pass keeps that
+//! in the picture's alpha), which only the sky's light is shut out of,
+//! and where the air between hides the surface (fog is not occluded).
+//! Then a blur that keeps to its own depth, and a pass that lays it over
 //! the picture (multiplied), each pixel taking its nearer neighbours' so
 //! edges stay sharp.
 
@@ -11,12 +16,16 @@ struct Ao {
     proj: vec4<f32>,   // x f/aspect, y f, z near, w reach (metres)
     size: vec4<f32>,   // xy the screen, zw half of it (pixels)
     k: vec4<f32>,      // x power, y slack (a slope), z ways, w fade (metres)
-    m: vec4<f32>,      // x strength, yzw unused
+    m: vec4<f32>,      // x strength, yzw how far up the camera's right, up and forward go
+    air: vec4<f32>,    // x the eye's height, y fog a metre, z its falloff with height, w how much direct light eases it
 };
 
 @group(0) @binding(0) var depth: DEPTH_TYPE;
 @group(0) @binding(1) var<uniform> ao: Ao;
 @group(0) @binding(2) var src: texture_2d<f32>;
+// The picture of what is solid: alpha how much of its light is direct
+// (only the occlusion itself reads it, not the pass laying it over).
+@group(1) @binding(0) var picture: PICTURE_TYPE;
 
 struct Out {
     @builtin(position) clip: vec4<f32>,
@@ -56,13 +65,6 @@ fn alike(z: f32, z0: f32) -> f32 {
     return 1.0 / (1.0 + rel * 60.0);
 }
 
-/// A number in 0..1 that shifts from pixel to pixel with little pattern
-/// (interleaved gradient noise), so the blur evens it out.
-fn noise(px: vec2<i32>) -> f32 {
-    let v = vec2<f32>(px);
-    return fract(52.9829189 * fract(0.06711056 * v.x + 0.00583715 * v.y));
-}
-
 @fragment
 fn ao_fs(i: Out) -> @location(0) vec4<f32> {
     let half = vec2<i32>(i.clip.xy);
@@ -92,8 +94,9 @@ fn ao_fs(i: Out) -> @location(0) vec4<f32> {
     // Out across the screen each way, a few steps each: whatever rises
     // over the surface within reach shades it, the more the steeper and
     // the nearer.
-    let turn = noise(half);
-    let jitter = noise(half + vec2<i32>(7, 3));
+    // Turned and stepped from pixel to pixel, so the blur evens it out.
+    let turn = ign(vec2<f32>(half));
+    let jitter = ign(vec2<f32>(half + vec2<i32>(7, 3)));
     let ways = max(i32(ao.k.z), 1);
     let reach2 = ao.proj.w * ao.proj.w;
     var shut = 0.0;
@@ -110,7 +113,26 @@ fn ao_fs(i: Out) -> @location(0) vec4<f32> {
     }
     let open = clamp(1.0 - shut / f32(ways * 4) * ao.m.x, 0.0, 1.0);
     let fade = smoothstep(ao.k.w, ao.k.w * 0.6, far);
-    return vec4<f32>(mix(1.0, pow(open, ao.k.x), fade), 0.0, 0.0, 1.0);
+    var a = mix(1.0, pow(open, ao.k.x), fade);
+    // What of its light is direct (the sun's where it reaches it), the
+    // occlusion does not shut out: only the sky's.
+    a = mix(a, 1.0, ao.air.w * textureLoad(picture, px, 0).a);
+    return vec4<f32>(mix(1.0, a, through_air(p)), 0.0, 0.0, 1.0);
+}
+
+/// How much of a surface at `p` (seen from the eye) shows through the
+/// air between, as the scene's fog has it (`air` in the scene's shaders).
+fn through_air(p: vec3<f32>) -> f32 {
+    let dist = length(p);
+    let rise = (p.x * ao.m.y + p.y * ao.m.z - p.z * ao.m.w) / max(dist, 1e-3);
+    let falloff = ao.air.z;
+    let base = ao.air.y * exp(-falloff * max(ao.air.x, 0.0));
+    var optical = base * dist;
+    let k = falloff * rise * dist;
+    if (abs(k) > 0.001) {
+        optical = base * (1.0 - exp(-k)) / (falloff * rise);
+    }
+    return exp(-max(optical, 0.0));
 }
 
 /// Four by four, each kept to its own depth.
@@ -161,14 +183,15 @@ fn apply_fs(i: Out) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// The AO module, for a depth that is many-sampled (`msaa`) or not.
+/// The AO module, for a depth and a picture that are many-sampled
+/// (`msaa`) or not.
 pub fn ao(msaa: bool) -> String {
-    AO.replace(
-        "DEPTH_TYPE",
-        if msaa {
-            "texture_depth_multisampled_2d"
-        } else {
-            "texture_depth_2d"
-        },
-    )
+    let picture = if msaa {
+        "texture_multisampled_2d<f32>"
+    } else {
+        "texture_2d<f32>"
+    };
+    format!("{AO}{}", super::IGN)
+        .replace("DEPTH_TYPE", super::depth_type(msaa))
+        .replace("PICTURE_TYPE", picture)
 }

@@ -203,13 +203,9 @@ fn island(p: &mut Page, seed: u64) {
     p.island = Some(Island { map, look, mini });
 }
 
-/// The picture redrawn at `q`: a new renderer, the island built again.
+/// The picture redrawn at `q` (the island kept: nothing built again).
 fn repaint(p: &mut Page, q: render::Quality) {
-    p.r = Renderer::new(&p.g.device, &p.g.queue, p.g.format(), q);
-    p.island = None;
-    if let Some(seed) = p.st.seed.take() {
-        island(p, seed);
-    }
+    p.r.set_quality(q);
 }
 
 /// Start over in a new place: nothing known, nobody you.

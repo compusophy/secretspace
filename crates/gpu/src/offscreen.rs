@@ -1,6 +1,6 @@
 //! Drawing off any screen, read back as pixels.
 
-use crate::{wanted, Caps};
+use crate::{wanted, Caps, Health};
 
 /// Drawing off any screen: a device of its own, a target `size` pixels,
 /// and the picture read back as pixels (a frame or two behind), for a page
@@ -10,6 +10,8 @@ pub struct Offscreen {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub caps: Caps,
+    /// Whether the device is lost (nothing is drawn then).
+    pub health: Health,
     target: Option<(wgpu::Texture, wgpu::TextureView, (u32, u32))>,
     slots: Vec<Slot>,
     /// The slot this frame copies into.
@@ -60,6 +62,7 @@ impl Offscreen {
             limits,
         };
         Ok(Offscreen {
+            health: Health::watch(&device),
             device,
             queue,
             caps,
@@ -70,9 +73,13 @@ impl Offscreen {
     }
 
     /// Somewhere to draw this frame, `size` pixels, and an encoder; None
-    /// while every buffer is still being read (skip a frame).
+    /// while every buffer is still being read (skip a frame), or once the
+    /// device is lost.
     pub fn begin(&mut self, size: (u32, u32)) -> Option<(wgpu::TextureView, wgpu::CommandEncoder)> {
         use std::sync::atomic::Ordering;
+        if self.health.lost() {
+            return None;
+        }
         let size = (size.0.max(1), size.1.max(1));
         if self.target.as_ref().map(|t| t.2) != Some(size) {
             let tex = self.device.create_texture(&wgpu::TextureDescriptor {

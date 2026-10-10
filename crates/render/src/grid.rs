@@ -3,8 +3,10 @@
 //! lights near it (hundreds in a scene, a few a pixel). Built on the CPU
 //! each frame; Phase 3 moves it to froxels in compute.
 
-use crate::laws::{GRID_CELL, GRID_CELLS, MAX_PER_CELL};
-use crate::Light;
+use crate::buffers::{put_f32s, Grow};
+use crate::laws::{GRID_CELL, GRID_CELLS};
+use crate::{geo, Light};
+use gpu::wgpu;
 
 #[derive(Clone, Debug, Default)]
 pub struct Grid {
@@ -20,8 +22,9 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// The lights that reach the square about `centre` (x, z).
-    pub fn build(&mut self, lights: &[Light], centre: [f32; 2]) {
+    /// The lights that reach the square about `centre` (x, z), at most
+    /// `most` a cell (the nearest the centre kept).
+    pub fn build(&mut self, lights: &[Light], centre: [f32; 2], most: u32) {
         let (cell, n) = (GRID_CELL, GRID_CELLS);
         let half = cell * n as f32 / 2.0;
         // Snapped to whole cells, so lights do not swim as the eye moves.
@@ -59,7 +62,7 @@ impl Grid {
             for z in z0..=z1 {
                 for x in x0..=x1 {
                     let k = &mut count[(z * n + x) as usize];
-                    *k = (*k + 1).min(MAX_PER_CELL);
+                    *k = (*k + 1).min(most);
                 }
             }
         }
@@ -97,6 +100,53 @@ impl Grid {
     }
 }
 
+/// The grid on the GPU (the scene's group reads it): the lights, each
+/// cell's span of the index, the index.
+pub(crate) struct Lists {
+    pub lights: Grow,
+    pub cells: Grow,
+    pub index: Grow,
+}
+
+impl Lists {
+    pub fn new(device: &wgpu::Device) -> Lists {
+        let storage = wgpu::BufferUsages::STORAGE;
+        Lists {
+            lights: Grow::new(device, "lights", storage),
+            cells: Grow::new(device, "cells", storage),
+            index: Grow::new(device, "index", storage),
+        }
+    }
+
+    /// Put `grid` in, each light `glow` as bright (`b` the bytes to lay
+    /// them in); whether a buffer was replaced (the group made again).
+    pub fn put(
+        &mut self,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        grid: &Grid,
+        glow: f32,
+        b: &mut Vec<u8>,
+    ) -> bool {
+        b.clear();
+        for l in &grid.lights {
+            let c = geo::scale(l.c, glow);
+            put_f32s(b, &[l.p[0], l.p[1], l.p[2], l.r, c[0], c[1], c[2], 0.0]);
+        }
+        let mut grew = self.lights.put(device, queue, b);
+        b.clear();
+        for c in &grid.cells {
+            b.extend_from_slice(&c[0].to_le_bytes());
+            b.extend_from_slice(&c[1].to_le_bytes());
+        }
+        grew |= self.cells.put(device, queue, b);
+        b.clear();
+        for i in &grid.index {
+            b.extend_from_slice(&i.to_le_bytes());
+        }
+        grew | self.index.put(device, queue, b)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,7 +172,7 @@ mod tests {
             })
             .collect();
         let mut g = Grid::default();
-        g.build(&lights, [3.0, -2.0]);
+        g.build(&lights, [3.0, -2.0], 48);
         for (x, z) in [(0.0, 0.0), (10.5, -7.25), (-40.0, 33.0), (60.0, 60.0)] {
             let listed: Vec<usize> = g.at(x, z).iter().map(|&i| i as usize).collect();
             for (i, l) in g.lights.iter().enumerate() {
@@ -131,7 +181,7 @@ mod tests {
                     assert!(listed.contains(&i), "light {i} reaches ({x}, {z})");
                 }
             }
-            assert!(listed.len() <= MAX_PER_CELL as usize);
+            assert!(listed.len() <= 48);
         }
     }
 
@@ -141,8 +191,8 @@ mod tests {
             .map(|i| light(0.5, 0.5, 2.0 + i as f32 * 0.01))
             .collect();
         let mut g = Grid::default();
-        g.build(&lights, [0.0, 0.0]);
-        assert_eq!(g.at(0.5, 0.5).len(), MAX_PER_CELL as usize);
+        g.build(&lights, [0.0, 0.0], 16);
+        assert_eq!(g.at(0.5, 0.5).len(), 16);
         assert!(g.at(900.0, 0.0).is_empty(), "outside the grid: none");
     }
 }

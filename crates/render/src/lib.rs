@@ -13,6 +13,7 @@ pub mod laws;
 pub mod sculpt;
 pub mod shaders;
 pub mod shadow;
+pub mod slots;
 pub mod terrain;
 
 mod ao;
@@ -20,9 +21,11 @@ mod buffers;
 mod cull;
 mod decals;
 mod draw;
+mod fullscreen;
 mod globals;
 mod pipes;
 mod post;
+mod shadows;
 mod shafts;
 
 pub use draw::{Renderer, Stats};
@@ -158,8 +161,8 @@ pub struct Light {
 /// A mark laid on whatever lies under it (the ground, a rock, a step):
 /// a disc `r` across about `p`, turned `yaw`, cast down and up `depth`
 /// metres (fading toward both ends, and on what is steep). `c`: its
-/// colour, and how much of it (fade it out with this). Drawn once the
-/// scene's depth can be read (with ambient occlusion on).
+/// colour, and how much of it (fade it out with this). Drawn on the
+/// tiers that draw decals (`Quality::decals`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Decal {
     pub p: V3,
@@ -267,9 +270,10 @@ pub fn perspective(fov: f32, aspect: f32) -> M4 {
     m
 }
 
-/// How the world looks: the sun, the sky, the air, the sea. Colours are
-/// as people pick them (sRGB); the sun's and the sky's light are linear
-/// and may be brighter than 1 (the picture is HDR, tone mapped at the end).
+/// How the world looks: the sun, the sky, the air, the sea. Its lights
+/// and the sky's colours (sun, sky, low, zenith, horizon, deep) are
+/// linear and may be brighter than 1 (the picture is HDR, tone mapped at
+/// the end); only the sea's colour (`water`) is as people pick it (sRGB).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
     /// Toward the sun (or moon), its light, its disc's size (radians).
@@ -290,12 +294,13 @@ pub struct Look {
     /// Cloud cover 0 (clear) to 1 (overcast); stars (0 by day).
     pub clouds: f32,
     pub stars: f32,
-    /// Exposure, bloom (0..0.2), the vignette (0..1).
+    /// Exposure; bloom (how much of the glow about what is past white is
+    /// added, about 1); the vignette (0..1).
     pub exposure: f32,
     pub bloom: f32,
     pub vignette: f32,
-    /// The sea's level, if there is one, and its deep colour; how high
-    /// its waves read.
+    /// The sea's level, if there is one, and its deep colour (sRGB); how
+    /// high its waves read.
     pub sea: Option<f32>,
     pub water: V3,
     pub waves: f32,
@@ -354,7 +359,7 @@ impl Default for Look {
             clouds: 0.45,
             stars: 0.0,
             exposure: 1.0,
-            bloom: 0.05,
+            bloom: 0.6,
             vignette: 0.25,
             sea: None,
             water: [0.02, 0.10, 0.16],
@@ -367,12 +372,15 @@ impl Default for Look {
     }
 }
 
-/// How much the renderer does: anti-aliasing samples, the sun's shadow
-/// (cascades and their size), grass (spacing and reach), bloom's depth,
-/// how many ways ambient occlusion looks out from a pixel (0 none),
-/// shafts of sunlight.
+/// How much the renderer does: the scene's size (a share of the
+/// screen's), anti-aliasing samples, the sun's shadow (cascades and
+/// their size), grass (spacing and reach), bloom's depth, how many ways
+/// ambient occlusion looks out from a pixel (0 none), shafts of sunlight.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quality {
+    /// The scene is drawn at this share of the screen's size (each way),
+    /// and at most `laws::SCENE_PIXELS` in all; the finish scales it up.
+    pub scale: f32,
     pub msaa: u32,
     pub cascades: u32,
     pub shadow_size: u32,
@@ -384,12 +392,17 @@ pub struct Quality {
     /// Steps the sea's reflections march across the screen (0: the sky
     /// alone).
     pub ssr: u32,
+    /// Whether decals are laid.
+    pub decals: bool,
+    /// The most lights a cell of the light grid lists (the nearest).
+    pub lights: u32,
 }
 
 impl Quality {
     /// The tier a page asked for (`?q=low|medium|high`), else one for
     /// this device: software adapters Low, touch screens Medium, else High;
-    /// `ao=0` turns occlusion off, `shafts=0` the sun's shafts.
+    /// `ao=0` turns occlusion off, `shafts=0` the sun's shafts, `ssr=0`
+    /// the sea's reflections, `scale=0.5` sets the scene's size.
     pub fn pick(query: &str, software: bool, touch: bool) -> Quality {
         let q = match query {
             q if q.contains("q=low") => Quality::LOW,
@@ -399,15 +412,23 @@ impl Quality {
             _ if touch => Quality::MEDIUM,
             _ => Quality::HIGH,
         };
+        let scale = query
+            .split(['?', '&'])
+            .find_map(|kv| kv.strip_prefix("scale="))
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|s| s.is_finite());
         Quality {
             ao: if query.contains("ao=0") { 0 } else { q.ao },
             shafts: q.shafts && !query.contains("shafts=0"),
             ssr: if query.contains("ssr=0") { 0 } else { q.ssr },
+            scale: scale.map_or(q.scale, |s| s.clamp(0.25, 1.0)),
             ..q
         }
     }
 
-    /// One tier down (None at the bottom); what was turned off stays off.
+    /// A step down (None at the bottom): first the scene's size, down to
+    /// the next tier's (cheap: the targets only), then the next tier;
+    /// what was turned off stays off.
     pub fn lower(self) -> Option<Quality> {
         let tiers = [Quality::HIGH, Quality::MEDIUM, Quality::LOW];
         let at = tiers.iter().position(|t| {
@@ -415,51 +436,39 @@ impl Quality {
                 ao: self.ao,
                 shafts: self.shafts,
                 ssr: self.ssr,
+                scale: self.scale,
                 ..*t
             } == self
         })?;
         let next = *tiers.get(at + 1)?;
+        if self.scale > next.scale {
+            return Some(Quality {
+                scale: next.scale,
+                ..self
+            });
+        }
         Some(Quality {
             ao: if self.ao == 0 { 0 } else { next.ao },
             shafts: self.shafts && next.shafts,
             ssr: if self.ssr == 0 { 0 } else { next.ssr },
+            scale: self.scale,
             ..next
         })
     }
 
-    pub const HIGH: Quality = Quality {
-        msaa: 4,
-        cascades: 3,
-        shadow_size: 2048,
-        grass_spacing: 0.24,
-        grass_reach: 42.0,
-        bloom_levels: 6,
-        ao: 6,
-        shafts: true,
-        ssr: 16,
-    };
-    pub const MEDIUM: Quality = Quality {
-        msaa: 4,
-        cascades: 2,
-        shadow_size: 1536,
-        grass_spacing: 0.34,
-        grass_reach: 28.0,
-        bloom_levels: 5,
-        ao: 4,
-        shafts: true,
-        ssr: 10,
-    };
-    pub const LOW: Quality = Quality {
-        msaa: 1,
-        cascades: 1,
-        shadow_size: 1024,
-        grass_spacing: 0.0,
-        grass_reach: 0.0,
-        bloom_levels: 4,
-        ao: 0,
-        shafts: false,
-        ssr: 0,
-    };
+    /// The scene's size on a screen of `size` pixels: the tier's share
+    /// each way, and no more than `laws::SCENE_PIXELS` in all.
+    pub fn scene(&self, size: (u32, u32)) -> (u32, u32) {
+        let all = (size.0 as f32 * size.1 as f32).max(1.0);
+        let k = self.scale.min((laws::SCENE_PIXELS / all).sqrt());
+        let at = |v: u32| ((v as f32 * k).round() as u32).clamp(1, v.max(1));
+        (at(size.0), at(size.1))
+    }
+
+    /// The tiers (`laws`).
+    pub const HIGH: Quality = laws::HIGH;
+    pub const MEDIUM: Quality = laws::MEDIUM;
+    pub const LOW: Quality = laws::LOW;
 }
 
 /// Everything one frame draws besides the statics.
@@ -476,9 +485,82 @@ pub struct Frame<'a> {
     pub view_fov: f32,
 }
 
+/// A normal `n` as the world shader turns it by the model `m` (`world_vs`
+/// does the same): by its cofactor, the inverse-transpose up to a
+/// positive scale, turned back if `m` mirrors; not normalised.
+pub fn normal_of(m: &M4, n: V3) -> V3 {
+    let col = |k: usize| [m[k * 4], m[k * 4 + 1], m[k * 4 + 2]];
+    let (a0, a1, a2) = (col(0), col(1), col(2));
+    let c = [geo::cross(a1, a2), geo::cross(a2, a0), geo::cross(a0, a1)];
+    let sign = if geo::dot(a0, c[0]) < 0.0 { -1.0 } else { 1.0 };
+    (0..3)
+        .map(|k| geo::scale(c[k], n[k] * sign))
+        .fold([0.0; 3], geo::add)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A model's matrix applied to a direction (no move).
+    fn turn(m: &M4, v: V3) -> V3 {
+        [0, 1, 2].map(|r| m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2])
+    }
+
+    #[test]
+    fn a_normal_stays_square_to_its_surface_however_it_is_stretched() {
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        // A facet leaning 45 degrees, and a line along it.
+        let (n, along) = ([s, s, 0.0], [-s, s, 0.0]);
+        let stretched = m4::place([3.0, 1.0, -2.0], 0.7, [1.0, 5.0, 1.0]);
+        let thin = m4::basis([0.0; 3], [0.06, 0.0, 0.0], [0.0, 2.5, 0.0], [0.0, 0.0, 2.5]);
+        let mirrored = m4::basis([0.0; 3], [1.4, 0.0, 0.0], [0.0, -3.0, 0.0], [0.0, 0.0, 1.4]);
+        for m in [stretched, thin, mirrored] {
+            let w = geo::norm(normal_of(&m, n));
+            let t = geo::norm(turn(&m, along));
+            assert!(geo::dot(w, t).abs() < 1e-4, "square: {w:?} {t:?}");
+            // Still out of the shape: the same side as the point it is
+            // the normal of, on a ball about the origin.
+            assert!(geo::dot(w, turn(&m, n)) > 0.0, "out: {w:?}");
+        }
+        // Stretched tall, a steep facet stays steep (the model's own
+        // matrix would tip it toward the sky).
+        let w = geo::norm(normal_of(&stretched, n));
+        assert!(w[1] < 0.25, "steep: {w:?}");
+        let naive = geo::norm(turn(&stretched, n));
+        assert!(naive[1] > 0.9, "the model's matrix tips it up: {naive:?}");
+    }
+
+    #[test]
+    fn a_tier_steps_down_its_size_first_and_keeps_what_was_turned_off() {
+        let mut q = Quality::pick("q=high&shafts=0", false, false);
+        let mut steps = vec![q];
+        while let Some(next) = q.lower() {
+            q = next;
+            steps.push(q);
+        }
+        let seen: Vec<(u32, f32)> = steps.iter().map(|q| (q.msaa, q.scale)).collect();
+        // High, smaller; Medium, smaller; Low.
+        assert_eq!(steps.len(), 5, "{seen:?}");
+        assert_eq!(steps[1].cascades, Quality::HIGH.cascades);
+        assert_eq!(steps[1].scale, Quality::MEDIUM.scale);
+        assert_eq!(steps[2].cascades, Quality::MEDIUM.cascades);
+        assert_eq!(steps[4].cascades, Quality::LOW.cascades);
+        assert!(steps.iter().all(|q| !q.shafts), "shafts stay off");
+        assert!(steps.windows(2).all(|w| w[1].scale <= w[0].scale));
+    }
+
+    #[test]
+    fn the_scene_is_the_tier_s_share_of_the_screen_and_never_huge() {
+        assert_eq!(Quality::HIGH.scene((1280, 720)), (1280, 720));
+        assert_eq!(Quality::MEDIUM.scene((1000, 500)), (800, 400));
+        let (w, h) = Quality::HIGH.scene((3840, 2160));
+        assert!(w * h <= laws::SCENE_PIXELS as u32 + 4000, "{w}x{h}");
+        assert!((w as f32 / h as f32 - 16.0 / 9.0).abs() < 0.01);
+        assert_eq!(Quality::LOW.scene((1, 1)), (1, 1));
+        let q = Quality::pick("?q=high&scale=0.5", false, false);
+        assert_eq!(q.scene((800, 600)), (400, 300));
+    }
 
     #[test]
     fn depth_is_reversed_and_infinite() {
