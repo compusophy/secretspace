@@ -284,9 +284,8 @@ impl Ambience {
         }
     }
 
-    /// Each eased to where you are (silent when `quiet`: the title).
-    pub fn tune(&self, audio: &Audio, h: &Here, quiet: bool) {
-        let k = if quiet { 0.0 } else { 1.0 };
+    /// Each eased to where you are (the title too: the island is there).
+    pub fn tune(&self, audio: &Audio, h: &Here) {
         let (e, yaw) = h.ear;
         // How loud something `reach` metres across is from here, and from
         // which side.
@@ -306,11 +305,11 @@ impl Ambience {
             + (h.over / 30.0).clamp(0.0, 0.3)
             + if h.glide { 0.25 } else { 0.0 }
             + (h.speed / 14.0).clamp(0.0, 1.0) * 0.12;
-        audio.tune(self.wind, wind * k, 0.0);
+        audio.tune(self.wind, wind, 0.0);
         let (rv, rp) = h.rift.map_or((0.0, 0.0), |p| near(p, 70.0));
-        audio.tune(self.rift, 0.9 * rv * k, rp);
+        audio.tune(self.rift, 0.9 * rv, rp);
         let (sv, sp) = h.spire.map_or((0.0, 0.0), |p| near(p, 55.0));
-        audio.tune(self.spire, 0.35 * sv * k, sp);
+        audio.tune(self.spire, 0.35 * sv, sp);
         let roar = h.storm.map_or(0.0, |(c, r)| {
             let d = (e[0] - c[0]).hypot(e[2] - c[1]);
             if d > r {
@@ -320,14 +319,14 @@ impl Ambience {
                 0.8 * v * v
             }
         });
-        audio.tune(self.storm, roar * k, 0.0);
+        audio.tune(self.storm, roar, 0.0);
         // The island's own sounds, close to the ground and out of the
         // storm.
         let calm = (1.0 - h.over / 25.0).clamp(0.0, 1.0) * (1.0 - roar).max(0.0);
-        audio.tune(self.crickets, 0.3 * h.night * calm * k, 0.0);
-        audio.tune(self.birds, 0.22 * h.birds * calm * k, 0.0);
+        audio.tune(self.crickets, 0.3 * h.night * calm, 0.0);
+        audio.tune(self.birds, 0.22 * h.birds * calm, 0.0);
         // Rain all round, a little less inside the storm's roar.
-        audio.tune(self.rain, 0.5 * h.rain * (1.0 - 0.5 * roar) * k, 0.0);
+        audio.tune(self.rain, 0.5 * h.rain * (1.0 - 0.5 * roar), 0.0);
     }
 
     /// Thunder rolling in from far off (`pan`: from which side).

@@ -24,6 +24,9 @@ pub(super) fn hands(p: &mut Page) {
         open_menu(p);
     }
     p.was_locked = locked;
+    if upright(p) {
+        p.pad.reset();
+    }
     for h in p.hands.drain() {
         // A browser lets sound play once a person acts.
         if matches!(
@@ -63,6 +66,13 @@ pub(super) fn hands(p: &mut Page) {
                 let (lx, ly) = p.g.to_px(x, y);
                 tap(p, lx, ly);
             }
+            // The menu button, alive or out (when out, all there is).
+            Hand::Finger {
+                kind: kit::input::Kind::Down,
+                x,
+                y,
+                ..
+            } if p.touch && touch::on_menu(x, y) => p.pad.menu = true,
             // Out, a tap watches the next one still in it.
             Hand::Finger {
                 kind: kit::input::Kind::Down,
@@ -79,7 +89,8 @@ pub(super) fn hands(p: &mut Page) {
             } if p.touch && on_lesson(p, x, y) => {
                 p.lessons.skip(kit::now());
             }
-            Hand::Finger { id, kind, x, y, .. } if p.touch => {
+            // Held upright, the pad waits (a word says to turn it).
+            Hand::Finger { id, kind, x, y, .. } if p.touch && !upright(p) => {
                 let (dy, dp) = p.pad.finger(id, kind, x, y, p.g.css);
                 let k = zoom(p) * p.set.look;
                 p.yaw += dy * k;
@@ -104,9 +115,18 @@ pub(super) fn hands(p: &mut Page) {
     }
     if p.touch {
         p.aiming = p.pad.aim;
+        // Spells tapped go the way keys do: once, with their sound.
+        let tapped = p.pad.casts();
+        if !p.meta.is_open() {
+            p.asked |= tapped;
+        }
     } else if !locked {
         p.firing = false;
         p.aiming = false;
+    }
+    // Out, nothing is cast: a press then is not kept for the next life.
+    if !p.alive {
+        p.asked = 0;
     }
     if std::mem::take(&mut p.pad.menu) {
         if p.meta.is_open() {
@@ -117,6 +137,14 @@ pub(super) fn hands(p: &mut Page) {
     }
     for code in p.hands.pressed() {
         p.sounds.audio.wake();
+        // Writing your name on the title: the keys are the field's (Enter
+        // or Esc puts it down).
+        if p.name.focused() {
+            if matches!(code.as_str(), "Enter" | "Escape") {
+                p.name.blur();
+            }
+            continue;
+        }
         // Esc: the shared menu (with the keyboard held, full screen, it
         // comes to the page; a held Esc still leaves full screen).
         if code == "Escape" {
@@ -150,7 +178,7 @@ pub(super) fn hands(p: &mut Page) {
             p.sounds.mute(on);
             continue;
         }
-        if code == "KeyB" && !matches!(p.mode, Mode::Title) {
+        if code == "KeyB" && !matches!(p.mode, Mode::Title) && (p.alive || p.book) {
             act(p, if p.book { Act::CloseBook } else { Act::Book });
             continue;
         }
@@ -178,9 +206,9 @@ pub(super) fn hands(p: &mut Page) {
 /// The inputs due since the last frame, each applied at once (predicted)
 /// and sent.
 pub(super) fn inputs(p: &mut Page, dt: f64) {
-    let Some(island) = &p.island else {
+    if p.island.is_none() {
         return;
-    };
+    }
     p.acc = (p.acc + dt).min(MS_A_TICK * 6.0);
     if matches!(p.mode, Mode::Title) {
         p.acc = 0.0;
@@ -221,44 +249,39 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
     if p.aiming {
         k |= keys::AIM;
     }
-    let mut tapped = 0;
     if p.touch && !busy {
         k |= p.pad.keys();
-        tapped |= p.pad.casts();
     }
     while p.acc >= MS_A_TICK {
         p.acc -= MS_A_TICK;
-        if !p.alive {
+        // Out, or the room not there to hear (your wizard holds still
+        // till it is back, not running on alone).
+        if !p.alive || p.lost.is_some() {
             continue;
         }
         p.seq = p.seq.wrapping_add(1);
         let asked = std::mem::take(&mut p.asked);
-        let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
-        if let Some(sp) = own.and_then(|o| {
-            (0..4).find_map(|k| {
-                (asked & cast::SLOT[k] != 0 && o.cds[k] == 0)
-                    .then_some(o.slots[k])
-                    .flatten()
-                    .map(|s| s.0)
-            })
-        }) {
-            p.sounds.cast(sp, None, p.ear);
-        }
+        heard_cast(p, asked);
         let i = Input {
             seq: p.seq,
             yaw: trig::heading(p.aim.0),
             pitch: trig::pitch(p.aim.1),
             keys: k,
-            cast: asked | tapped,
+            cast: asked,
             view: p.st.view_tick(kit::now()) as u16,
         };
         p.prev = p.pred.body;
-        p.pred.push(i, &island.map);
+        if let Some(island) = &p.island {
+            p.pred.push(i, &island.map);
+        }
         if matches!(p.mode, Mode::Practice(_)) {
             p.lessons.tick(&p.prev, &p.pred.body, p.seq, kit::now());
         }
         // Feet leaving the ground, and meeting it again.
         let (was, is) = (p.prev, p.pred.body);
+        if p.touch {
+            p.pad.ease(&was, &is);
+        }
         if !was.ground && is.ground {
             let hard = ((-was.v[1] - 3.0) / 17.0).clamp(0.0, 1.0);
             if hard > 0.0 || was.glide {
@@ -298,6 +321,30 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
     }
 }
 
+/// A spell asked for (`asked`, a bit a slot) heard at once, if the room
+/// will cast it: it is ready, you are not gliding (nothing casts in the
+/// air on a broom or a rune's flight), and it was not already asked for
+/// in the time the room takes to answer.
+fn heard_cast(p: &mut Page, asked: u8) {
+    let Some(o) = p.st.frame.as_ref().and_then(|f| f.you.as_ref()) else {
+        return;
+    };
+    if asked == 0 || p.pred.body.glide {
+        return;
+    }
+    let now = kit::now();
+    // Inputs the room has not answered yet: the time it takes, near enough.
+    let wait = ((p.seq.wrapping_sub(o.seq) as f64 + 2.0) * MS_A_TICK).min(1000.0);
+    let ready = |k: usize| asked & cast::SLOT[k] != 0 && o.cds[k] == 0;
+    let Some((k, sp)) = (0..4).find_map(|k| Some((k, o.slots[k].filter(|_| ready(k))?.0))) else {
+        return;
+    };
+    if now - p.cast_heard[k] > wait {
+        p.cast_heard[k] = now;
+        p.sounds.cast(sp, None, p.ear);
+    }
+}
+
 /// Too slow for this tier (over 2.5 s of play, frames over 30 ms on
 /// average): a step down (first the scene's size, then the tier),
 /// nothing built again.
@@ -327,11 +374,11 @@ fn zoom(p: &Page) -> f32 {
     }
 }
 
-/// Whether a finger at (`x`, `y`) CSS pixels is on the lesson's panel.
+/// Whether a finger at (`x`, `y`) CSS pixels is on the lesson's skip
+/// chip (the rest of its panel is the stick's and the view's, as ever).
 fn on_lesson(p: &Page, x: f64, y: f64) -> bool {
     let (lx, ly) = p.g.to_px(x, y);
-    p.lesson_panel
-        .is_some_and(|r| lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h)
+    p.lesson_skip.is_some_and(|r| r.contains(lx, ly))
 }
 
 /// A press on the menus at (x, y) on the layer: the shared menu first,
