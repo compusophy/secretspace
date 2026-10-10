@@ -230,7 +230,8 @@ fn settings(
 
 /// The online lobby: who is here, waiting for the match, in the band the
 /// HUD keeps for it; the hall of wizards under them, down the left (on a
-/// touch screen at `hall_at`, under your health).
+/// touch screen at `hall_at`, under your health and the feed), as many
+/// rows as fit.
 pub fn lobby(
     c: &mut Canvas,
     ui: i32,
@@ -261,11 +262,15 @@ pub fn lobby(
     if hall.is_empty() {
         return;
     }
-    let rows = hall.len().min(5) as i32;
     let (px, py, pw) = match hall_at {
         Some((x, y)) => (x, y, 140 * ui),
         None => (8 * ui, y + 8 * ui, (164 * ui).min(c.w / 2 - 12 * ui)),
     };
+    // As many of the first five as the screen has room for under it.
+    let rows = (hall.len().min(5) as i32).min((c.h - 6 * ui - py - 18 * ui) / (10 * ui));
+    if rows < 1 {
+        return;
+    }
     let panel = Rect::new(
         px as f32,
         py as f32,
@@ -284,7 +289,7 @@ pub fn lobby(
     col(c, right, y, "ko", DIM);
     y += 12 * ui;
     let room = pw - 12 * ui - 10 * ui - 28 * ui - 30 * ui;
-    for (n, (name, wins, outs)) in hall.iter().take(5).enumerate() {
+    for (n, (name, wins, outs)) in hall.iter().take(rows as usize).enumerate() {
         let mut shown = name.clone();
         while pixels::text_width(&shown, ui) > room && shown.pop().is_some() {}
         c.text_shadowed(x, y, &format!("{}", n + 1), ui, DIM);
@@ -312,5 +317,36 @@ mod tests {
                 assert!(all.contains(k) || pixels::text_width(k, ui) > width, "{k}");
             }
         }
+    }
+
+    /// On a phone the hall goes under the feed's lines: however many there
+    /// are, it keeps on the screen (fewer rows, or none), clear of the foot.
+    #[test]
+    fn the_hall_keeps_on_a_phone_under_the_feed() {
+        let (w, h, ui) = (844, 390, 2);
+        let hall: Vec<(String, u32, u32)> = (0..5).map(|k| (format!("wizard {k}"), 3, 9)).collect();
+        let band = Rect::new(268.0, 21.0, 300.0, 140.0);
+        for lines in 0..=6 {
+            let mut c = Canvas::new(w, h);
+            let y = (crate::hud::column::FEED + lines * crate::hud::FEED_LINE) * ui;
+            lobby(&mut c, ui, &[], &hall, band, Some((12 * ui, y)));
+            let drawn = |row: i32| (0..w).any(|x| c.data[((row * w + x) * 4 + 3) as usize] > 0);
+            // Nothing over the feed's lines, nor in the last few rows.
+            let left =
+                |row: i32| (0..band.x as i32).any(|x| c.data[((row * w + x) * 4 + 3) as usize] > 0);
+            assert!(!(0..y).any(left), "{lines} lines: over the feed");
+            assert!(!(h - 6 * ui..h).any(drawn), "{lines} lines: off the foot");
+            assert!((y..h).any(left), "{lines} lines: the hall shown");
+        }
+        // No room for a row at all: no hall (only the band's words).
+        let mut c = Canvas::new(w, h);
+        lobby(&mut c, ui, &[], &hall, band, Some((12 * ui, h - 30 * ui)));
+        let left = |p: usize| (p / 4) as i32 % w < band.x as i32;
+        assert!(
+            !(0..c.data.len())
+                .step_by(4)
+                .any(|p| left(p) && c.data[p + 3] > 0),
+            "no room"
+        );
     }
 }

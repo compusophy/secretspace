@@ -52,8 +52,9 @@ const VERSION_EVERY: f64 = 5.0 * 60_000.0;
 const PRACTICE_SEED: u64 = 0x5eed_0007;
 /// The page's own connection to its practice world.
 const ME: u32 = 1;
-/// Kept across a reload: the build that reloaded (so it reloads once, not
-/// in a loop), and where it was (back online after it).
+/// Kept across a reload: the mark it left (`reload::mark`: so the same
+/// page does not reload for the same thing in a loop), and where it was
+/// (back online after it).
 const RELOADED: &str = "wandfall.reloaded";
 const RESUME: &str = "wandfall.resume";
 
@@ -112,8 +113,10 @@ struct Page {
     skip: u8,
     book_slot: usize,
     /// The menu every game shares (Esc): back to the game, this game's
-    /// own entries (`items`), feedback, leaving.
+    /// own entries (`items`, as last drawn: a pick is one of those, even
+    /// if the list has changed since), feedback, leaving.
     meta: kit::meta::Meta,
+    shown: Vec<(&'static str, Act)>,
     session: kit::Session,
     version: kit::Version,
     last: f64,
@@ -164,9 +167,9 @@ struct Page {
     lost: Option<f64>,
     /// A word for the title in place of how to play (why you are back).
     notice: Option<&'static str>,
-    /// A newer page is out, but this one came of reloading for it already
-    /// (it is not here yet): no more tries.
-    stale: bool,
+    /// A newer page is out, but this one came of reloading for it a
+    /// moment ago (it was not here yet): no try again before this (ms).
+    next_try: f64,
 }
 
 thread_local! {
@@ -297,15 +300,19 @@ fn online(p: &mut Page) {
     grab(p);
 }
 
-/// Load the page again (a newer build or protocol is out), unless this
-/// very build already did: then the newer one is not here yet, and
-/// another reload would only loop. Whether it reloads.
-fn reload() -> bool {
-    let from = format!("from {}", kit::version::PAGE);
-    if kit::load(RELOADED).as_deref() == Some(from.as_str()) {
+/// Load the page again for `what` (`reload::BUILD`, `reload::proto`: a
+/// newer build or protocol is out), unless this very page just did for
+/// the same: then the newer one is not here yet, and another reload now
+/// would only loop. Whether it reloads.
+fn reload(what: &str) -> bool {
+    let (page, now) = (
+        kit::version::PAGE,
+        wasm_bindgen_futures::js_sys::Date::now(),
+    );
+    if !crate::reload::may(kit::load(RELOADED).as_deref(), page, what, now) {
         return false;
     }
-    kit::save(RELOADED, &from);
+    kit::save(RELOADED, &crate::reload::mark(page, what, now));
     kit::version::reload();
     true
 }
@@ -381,29 +388,26 @@ fn in_menu(p: &Page) -> bool {
 
 /// This game's own entries in the shared menu, as it stands.
 fn items(p: &Page) -> Vec<(&'static str, Act)> {
-    // The spellbook (a phone has no B to press).
-    let book = (
+    // The spellbook (a phone has no B to press); out, there is no book of
+    // yours to open.
+    let book = p.alive.then_some((
         if p.touch {
             "spellbook"
         } else {
             "spellbook (B)"
         },
         Act::Book,
-    );
-    match p.mode {
-        Mode::Title => vec![("settings", Act::Settings)],
-        Mode::Practice(_) => vec![
-            book,
+    ));
+    let rest: &[(&'static str, Act)] = match p.mode {
+        Mode::Title => return vec![("settings", Act::Settings)],
+        Mode::Practice(_) => &[
             ("lessons", Act::Lessons),
             ("settings", Act::Settings),
             ("leave the range", Act::Leave),
         ],
-        Mode::Online(_) => vec![
-            book,
-            ("settings", Act::Settings),
-            ("leave the match", Act::Leave),
-        ],
-    }
+        Mode::Online(_) => &[("settings", Act::Settings), ("leave the match", Act::Leave)],
+    };
+    book.into_iter().chain(rest.iter().copied()).collect()
 }
 
 /// The shared menu up (the mouse let go), knowing what a report should.
@@ -427,7 +431,7 @@ fn picked(p: &mut Page, pick: kit::meta::Pick) {
     match pick {
         kit::meta::Pick::Resume => resume(p),
         kit::meta::Pick::Game(i) => {
-            if let Some(&(_, a)) = items(p).get(i) {
+            if let Some(&(_, a)) = p.shown.get(i) {
                 act(p, a);
             }
         }
@@ -517,6 +521,7 @@ pub fn start() {
                 skip: 0,
                 book_slot: 0,
                 meta: kit::meta::Meta::new("wandfall"),
+                shown: Vec::new(),
                 session,
                 version: kit::Version::watch(VERSION_EVERY),
                 last: kit::now(),
@@ -547,7 +552,7 @@ pub fn start() {
                 taken: false,
                 lost: None,
                 notice: None,
-                stale: false,
+                next_try: 0.0,
             })
         });
         PAGE.with(|p| {

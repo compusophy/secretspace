@@ -427,6 +427,17 @@ fn health(c: &mut Canvas, v: &View, o: &Own, lay: &Layout) {
     bar::draw(c, o, v.st, v.now, ui, (!v.touch, under));
 }
 
+/// How long a line stays in the feed (ms; it fades over the last two
+/// seconds), and how far down each takes (ui units).
+const FEED_MS: f64 = 8000.0;
+pub const FEED_LINE: i32 = 12;
+
+/// How many lines the feed shows now (on a touch screen, what goes down
+/// the left under them starts that much lower).
+pub fn feed_lines(st: &State, now: f64) -> i32 {
+    st.feed.iter().filter(|(at, _)| now - at <= FEED_MS).count() as i32
+}
+
 /// The feed: under the island map, or (on a touch screen, whose right
 /// side is the thumb's) under your health.
 fn feed(c: &mut Canvas, v: &View, lay: &Layout) {
@@ -439,7 +450,7 @@ fn feed(c: &mut Canvas, v: &View, lay: &Layout) {
     };
     for (at, line) in &v.st.feed {
         let age = v.now - at;
-        if age > 8000.0 {
+        if age > FEED_MS {
             continue;
         }
         let fade = (1.0 - (age - 6000.0).max(0.0) / 2000.0) as f32;
@@ -478,7 +489,7 @@ fn feed(c: &mut Canvas, v: &View, lay: &Layout) {
                 c.text_shadowed(x + wa + 2 * gap + isz, y, &b, ui, cb.fade(fade));
             }
         }
-        y += 12 * ui;
+        y += FEED_LINE * ui;
     }
 }
 
@@ -499,6 +510,18 @@ mod tests {
         let turned = bearing(at, std::f32::consts::FRAC_PI_2, [0.0, 0.0, 10.0]).unwrap();
         assert!(turned.abs() < 1e-4);
         assert!(bearing(at, 0.0, [0.1, 3.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn the_feed_counts_the_lines_still_showing() {
+        let mut st = State::default();
+        assert_eq!(feed_lines(&st, 0.0), 0);
+        for at in [0.0, 5000.0, 9000.0] {
+            st.feed.push_back((at, Line::Text("x".to_string())));
+        }
+        assert_eq!(feed_lines(&st, 9500.0), 2, "the first gone");
+        assert_eq!(feed_lines(&st, 13500.0), 1);
+        assert_eq!(feed_lines(&st, 17500.0), 0);
     }
 
     /// No two of the HUD's blocks on top of each other, on the screens

@@ -45,6 +45,10 @@ pub struct Touch {
     pub aim: bool,
     /// Crouching (a toggle, as aim is).
     pub crouch: bool,
+    /// The stick pushed to sprint since duck was pressed (that stands you
+    /// up), and whether it asked to sprint the tick before.
+    pushed: bool,
+    sprinted: bool,
     asked: u8,
     /// The menu button was tapped (the page takes it).
     pub menu: bool,
@@ -106,7 +110,13 @@ impl Touch {
                     Some(b) => {
                         match b {
                             Button::Aim => self.aim = !self.aim,
-                            Button::Crouch => self.crouch = !self.crouch,
+                            // A push to sprint from now on (not one
+                            // held already) stands you up.
+                            Button::Crouch => {
+                                self.crouch = !self.crouch;
+                                self.pushed = false;
+                                self.sprinted = self.keys() & keys::SPRINT != 0;
+                            }
                             // A jump stands you up (out of a slide, too).
                             Button::Jump => self.crouch = false,
                             Button::Slot(k) => self.asked |= cast::SLOT[k],
@@ -224,10 +234,16 @@ impl Touch {
 
     /// A tick played (your body before and after): duck lets go where
     /// holding it on would only get in the way, once a slide ends and
-    /// when you push to sprint (sprinting stands you up).
+    /// when you push to sprint after it, on the ground (sprinting stands
+    /// you up). Pressed at a sprint, it holds: you slide, at once or as
+    /// you land, or duck if too slow to.
     pub fn ease(&mut self, was: &Body, is: &Body) {
         let sprint = self.keys() & keys::SPRINT != 0;
-        if self.crouch && ((was.slide && !is.slide) || (sprint && !is.slide && !was.slide)) {
+        self.pushed |= sprint && !self.sprinted;
+        self.sprinted = sprint;
+        let ended = was.slide && !is.slide;
+        let run = self.pushed && was.ground && is.ground && !was.slide && !is.slide;
+        if self.crouch && (ended || run) {
             self.crouch = false;
         }
     }
@@ -254,9 +270,9 @@ impl Touch {
                 || (b == Button::Aim && self.aim)
                 || (b == Button::Crouch && self.crouch);
             disc(c, (px(x), px(y), px(r)), held);
-            // A word in the button, as big as fits it (to its ring).
+            // A word in the button, as big as fits inside its ring.
             let label = |c: &mut Canvas, t: &str| {
-                let k = pixels::fit_scale(t, (2.0 * px(r)) as i32 + 4, ui);
+                let k = pixels::fit_scale(t, (2.0 * px(r)) as i32 - 4 * ui, ui);
                 c.text_centred(px(x) as i32, px(y) as i32 - 3 * k, t, k, ink)
             };
             match b {
@@ -376,5 +392,81 @@ mod tests {
         let css = (844.0, 390.0);
         t.finger(1, Kind::Down, css.0 - 196.0, css.1 - 38.0, css);
         assert!(!t.crouch && t.keys() & keys::JUMP != 0);
+    }
+
+    /// The thumb on the stick, pushed to its edge straight ahead (a
+    /// sprint).
+    fn sprint(t: &mut Touch, css: (f64, f64)) {
+        t.finger(2, Kind::Down, 150.0, 250.0, css);
+        t.finger(2, Kind::Move, 150.0, 250.0 - REACH, css);
+        assert!(t.keys() & keys::SPRINT != 0, "sprinting");
+    }
+
+    fn duck(t: &mut Touch, css: (f64, f64)) {
+        t.finger(3, Kind::Down, css.0 - 254.0, css.1 - 34.0, css);
+        t.finger(3, Kind::Up, css.0 - 254.0, css.1 - 34.0, css);
+    }
+
+    #[test]
+    fn duck_at_a_sprint_in_the_air_slides_you_as_you_land() {
+        let css = (844.0, 390.0);
+        let mut t = Touch::default();
+        let ground = Body {
+            ground: true,
+            ..Body::default()
+        };
+        // Running, then a jump: the stick stays at its edge.
+        sprint(&mut t, css);
+        t.ease(&ground, &ground);
+        let air = Body::default();
+        t.ease(&ground, &air);
+        duck(&mut t, css);
+        assert!(t.crouch && t.keys() & keys::CROUCH != 0, "ducked");
+        t.ease(&air, &air);
+        assert!(t.crouch, "held through the air");
+        let landed = Body {
+            ground: true,
+            crouch: true,
+            ..Body::default()
+        };
+        t.ease(&air, &landed);
+        assert!(t.crouch, "held as it lands");
+        let sliding = Body {
+            slide: true,
+            ..landed
+        };
+        t.ease(&landed, &sliding);
+        assert!(t.crouch, "into a slide");
+        t.ease(&sliding, &landed);
+        assert!(!t.crouch, "up once it ends");
+    }
+
+    #[test]
+    fn duck_at_a_sprint_ducks_and_a_push_to_sprint_stands_you_up() {
+        let css = (844.0, 390.0);
+        let mut t = Touch::default();
+        let ground = Body {
+            ground: true,
+            ..Body::default()
+        };
+        // Too slow to slide: pressed at a sprint (the same moment the
+        // stick got there, even), it ducks you.
+        sprint(&mut t, css);
+        duck(&mut t, css);
+        let ducked = Body {
+            crouch: true,
+            ..ground
+        };
+        t.ease(&ground, &ducked);
+        t.ease(&ducked, &ducked);
+        assert!(t.crouch, "ducked");
+        // The thumb lets go, then pushes to sprint again: up.
+        t.finger(2, Kind::Up, 150.0, 250.0 - REACH, css);
+        t.ease(&ducked, &ducked);
+        assert!(t.crouch, "still ducked, standing still");
+        t.finger(2, Kind::Down, 150.0, 250.0, css);
+        t.finger(2, Kind::Move, 150.0, 250.0 - REACH, css);
+        t.ease(&ducked, &ducked);
+        assert!(!t.crouch, "up to sprint");
     }
 }

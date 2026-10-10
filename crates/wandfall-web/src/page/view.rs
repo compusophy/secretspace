@@ -19,14 +19,15 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     let aimed = aim(p, &others, aspect);
     inputs(p, dt);
     p.version.poll(now, false);
-    if p.version.newer() && !p.stale && calm(p) {
-        // Back online after it, if it was.
-        if matches!(p.mode, Mode::Online(_)) {
+    if p.version.newer() && now >= p.next_try && calm(p) {
+        // Back online after it, if it was (or was on its way: the title
+        // saying why not).
+        if matches!(p.mode, Mode::Online(_)) || p.notice.is_some() {
             kit::save(RESUME, "online");
         }
-        if !reload() {
+        if !reload(crate::reload::BUILD) {
             kit::save(RESUME, "");
-            p.stale = true;
+            p.next_try = now + crate::reload::RETRY;
         }
     }
     let feet = feet(p);
@@ -322,9 +323,12 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                         .filter(|n| !n.1)
                         .map(|n| n.0.clone())
                         .collect();
+                // On a touch screen, the hall down the left: under your
+                // health, and under the feed's lines there.
+                let feed = hud::feed_lines(&p.st, now) * hud::FEED_LINE;
                 let hall_at = p
                     .touch
-                    .then_some((hud::column::X * ui, hud::column::FEED * ui));
+                    .then_some((hud::column::X * ui, (hud::column::FEED + feed) * ui));
                 menu::lobby(&mut p.g.hud, ui, &names, &p.st.hall, lay.band, hall_at);
             }
             if p.book {
@@ -373,7 +377,8 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         } else {
             menu::keys_help((210 * ui).min(p.g.hud.w - 32 * ui), ui)
         };
-        let labels: Vec<&str> = items(p).iter().map(|i| i.0).collect();
+        p.shown = items(p);
+        let labels: Vec<&str> = p.shown.iter().map(|i| i.0).collect();
         let s = p.g.scale;
         p.meta.draw(&mut p.g.hud, ui, &labels, &help, now, |r| {
             (

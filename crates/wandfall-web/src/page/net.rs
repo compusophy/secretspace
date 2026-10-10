@@ -126,15 +126,16 @@ fn receive(p: &mut Page, b: &[u8], now: f64) {
 }
 
 /// The room speaks another protocol than this page. Newer: this page is
-/// old, so the new one is loaded (once; if that brings this same page
-/// back, the new pages are not out here yet, and the title says to try
-/// again soon). Older: the room is behind the page (its deploy on the
-/// way), so back to the title to say so; reloading would not help.
+/// old, so the new one is loaded (if that brings this same page back, the
+/// new pages are not out here yet: the title says to try again soon, and
+/// a try a minute on, or the new pages seen out, loads again). Older: the
+/// room is behind the page (its deploy on the way), so back to the title
+/// to say so; reloading would not help.
 fn mismatch(p: &mut Page, v: u8, now: f64) {
     if v > PROTO {
         // The new page goes straight back online.
         kit::save(RESUME, "online");
-        if reload() {
+        if reload(&crate::reload::proto(v)) {
             return;
         }
         kit::save(RESUME, "");
