@@ -422,6 +422,7 @@ dependencies = [
 name = "secretspace-hub"
 version = "0.1.0"
 dependencies = [
+ "secretspace-battlestation",
  "secretspace-engine",
  "secretspace-gpu",
  "secretspace-kit",

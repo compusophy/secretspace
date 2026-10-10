@@ -2,11 +2,13 @@
 //! are in it right now, and along the bottom how many are online anywhere
 //! and how many visits there have ever been. The numbers come live from
 //! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`),
-//! and Wandfall's its match while one is on (`wand`). A card opens its
+//! Wandfall's its match while one is on (`wand`), and Battlestation's its
+//! desk typing by itself (`desk`). A card opens its
 //! game over the page, full screen at once (`kit::shell`); the page rests
 //! till the game is left.
 //! Every pixel is drawn here, in Rust.
 
+mod desk;
 mod luci;
 mod wand;
 mod watch;
@@ -57,11 +59,12 @@ const CARDS: &[Card] = &[
         hidden: false,
     },
     Card {
+        // No room: each desk is its own.
         id: "",
-        title: "AND THEN",
-        blurb: ["one more after that", "made of rust too"],
-        path: "",
-        hue: 20.0,
+        title: "BATTLESTATION",
+        blurb: ["sit at a desk at night:", "its hands type your keys"],
+        path: "/battlestation/",
+        hue: 300.0,
         hidden: false,
     },
 ];
@@ -89,6 +92,8 @@ struct Hub {
     luci: Option<luci::LuciWatch>,
     /// Wandfall, live while a match is on, for its card.
     wand: wand::WandWatch,
+    /// Battlestation's desk, typing by itself, for its card.
+    desk: desk::DeskWatch,
     /// The cards on the shelf, by index into CARDS.
     shown: Vec<usize>,
     /// How far the page is scrolled, and the most it can be.
@@ -313,6 +318,8 @@ fn draw(h: &mut Hub, now: f64) {
             l.draw(c, pv, 6.0 * uf, u, now);
         } else if card.id == "wandfall" {
             h.wand.draw(c, pv, u, now);
+        } else if card.path == "/battlestation/" {
+            h.desk.draw(c, pv, u, now);
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }
@@ -339,7 +346,9 @@ fn draw(h: &mut Hub, now: f64) {
                 2.5 * uf,
                 GO.fade(0.6 + 0.4 * (t * 3.0).sin().abs()),
             );
-            let line = if stats.is_some() {
+            let line = if card.id.is_empty() {
+                "your own desk".to_string()
+            } else if stats.is_some() {
                 format!("{n} playing")
             } else {
                 "...".to_string()
@@ -435,6 +444,7 @@ pub fn start() -> Result<(), JsValue> {
             watch: watch::Watch::new(),
             luci: all.then(luci::LuciWatch::new),
             wand: wand::WandWatch::new(),
+            desk: desk::DeskWatch::new(),
             shown,
             scroll: 0.0,
             max_scroll: 0.0,

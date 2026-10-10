@@ -65,7 +65,7 @@ crates/render     the engine: retained scene, geo, sculpt, terrain, shadows,
                   HDR + AO + bloom + ACES, grass, sea, decals, light
                   grid; its test page crates/showcase-web (/showcase/)
 crates/hub-web    the front page (cards, live counts, scroll, footer), watch
-                  (wyrm's card, live, as a watcher), wand (Wandfall's)
+                  (wyrm's card, live, as a watcher), wand, desk (cards)
 crates/wyrm       the game: laws world bots grid proto view mirror room
 crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
