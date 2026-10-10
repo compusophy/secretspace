@@ -16,9 +16,9 @@ pub const HILLS: f32 = 9.0;
 pub const HILL_SIZE: f32 = 48.0;
 /// Trees, rocks, giant mushrooms and ruined pillars on the island.
 /// Trees grow in woods about this wide (m), where the woods' noise (0..1)
-/// is over the edge, thick this much over it; out in the meadows, one in
-/// so many takes root alone. Mushrooms grow within this far (m) of a
-/// tree.
+/// is over the edge, thick this much over it; out in the meadows, one
+/// takes root alone at these odds. Mushrooms grow within this far (m) of
+/// a tree.
 pub const TREES: usize = 400;
 pub const WOODS: f32 = 40.0;
 pub const WOOD_EDGE: f32 = 0.4;

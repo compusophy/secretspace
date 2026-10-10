@@ -32,8 +32,10 @@ const HEAD_GLIDE: f32 = 1.9;
 const SKIN: f32 = 0.3;
 const LIFT: f32 = 0.35;
 /// Things narrower than this (radius, metres: trunks, stems, posts,
-/// lamps) the camera slides round; wider ones are walls.
+/// lamps) the camera slides round, eased aside and back (a half-life,
+/// seconds); wider ones are walls.
 const THIN: f32 = 0.6;
+const ROUND: f32 = 0.05;
 /// Fields of view (radians, up and down): walking, aiming.
 pub const FOV: f32 = 1.15;
 pub const FOV_AIM: f32 = 0.78;
@@ -112,6 +114,7 @@ pub struct Chase {
     head: Spring,
     fov: Spring,
     rise: Spring,
+    round: [Spring; 2],
     started: bool,
 }
 
@@ -191,13 +194,15 @@ impl Chase {
         let half = if want < self.arm.x { 0.08 } else { 0.25 };
         self.arm.step(want, half, dt);
         let lift = LIFT * (self.arm.x / arm).min(1.0);
-        let eye = clear(
-            map,
-            geo::add(
-                geo::sub(pivot, geo::scale(fwd, self.arm.x)),
-                [0.0, lift, 0.0],
-            ),
+        let at = geo::add(
+            geo::sub(pivot, geo::scale(fwd, self.arm.x)),
+            [0.0, lift, 0.0],
         );
+        // Round a trunk behind, eased aside and back (a trunk passing
+        // close by would swing it round its side in a frame).
+        let out = clear(map, at);
+        let round = [0, 1].map(|k| self.round[k].step(out[k * 2] - at[k * 2], ROUND, dt));
+        let eye = [at[0] + round[0], at[1], at[2] + round[1]];
         Camera {
             eye,
             yaw,
