@@ -1,22 +1,31 @@
 //! The scene's globals, as the shaders read them (`shaders::common`'s
-//! `Globals`): the view, the sun's cascades, the eye and its axes, the
-//! look (sun, sky, air, sea), the lights' grid, the screen, the terrain,
-//! the wind, the water, the grass.
+//! `Globals`): the view, the sun's shadow (its cascades and the island's
+//! layer), the eye and its axes, the look (sun, sky, air, sea), the
+//! lights' grid, the screen, the terrain, the wind, the water, the grass.
 
 use crate::buffers::put_f32s;
 use crate::grid::Grid;
+use crate::shadow::Layer;
 use crate::{geo, laws, m4, shaders, Frame, Look, Quality, M4};
 
+/// The sun's shadow as the globals carry it: its cascades, and the
+/// island's layer and where it is in the map.
+pub(crate) struct Sun<'a> {
+    pub cascades: &'a [Layer],
+    pub island: Option<(Layer, u32)>,
+}
+
 /// The globals' bytes for frame `f` seen at `fov` on a screen of `size`,
-/// with the sun's `cascades`; the grid, the tier, the terrain's place and
-/// the grass's side as the renderer has them.
+/// under the sun's shadow `sun`; the grid, the tier, the terrain's place
+/// and the grass's side as the renderer has them.
 pub(crate) fn bytes(
     f: &Frame,
     fov: f32,
     size: (u32, u32),
-    cascades: &[M4],
+    sun: &Sun,
     (grid, quality, terrain, side): (&Grid, Quality, [f32; 4], u32),
 ) -> Vec<u8> {
+    let cascades = sun.cascades;
     let (vp, right, up): (M4, _, _) = f.cam.matrices(fov);
     let fwd = f.cam.forward();
     let t = (fov / 2.0).tan();
@@ -25,8 +34,9 @@ pub(crate) fn bytes(
     let mut b = Vec::with_capacity(shaders::GLOBALS as usize);
     put_f32s(&mut b, &vp);
     for c in 0..3 {
-        put_f32s(&mut b, cascades.get(c).unwrap_or(&m4::ID));
+        put_f32s(&mut b, cascades.get(c).map_or(&m4::ID, |l| &l.m));
     }
+    put_f32s(&mut b, sun.island.as_ref().map_or(&m4::ID, |l| &l.0.m));
     let v4 = |b: &mut Vec<u8>, v: [f32; 3], w: f32| put_f32s(b, &[v[0], v[1], v[2], w]);
     v4(&mut b, f.cam.eye, f.time.rem_euclid(laws::TIME_WRAP));
     v4(&mut b, fwd, t * f.cam.aspect);
@@ -51,8 +61,22 @@ pub(crate) fn bytes(
             n,
         ],
     );
-    let s = laws::CASCADES;
-    put_f32s(&mut b, &[s[0], s[1], s[2], laws::SHADOW_STRENGTH]);
+    // Where each cascade ends (past the last, its end again); each
+    // layer's bias and how far out along its normal it is looked up; the
+    // island's layer.
+    let ends = laws::CASCADES[(quality.cascades.clamp(1, 3) - 1) as usize];
+    let end = |c: usize| ends[c.min(ends.len() - 1)];
+    put_f32s(&mut b, &[end(0), end(1), end(2), laws::SHADOW_STRENGTH]);
+    let biases: Vec<(f32, f32)> = (0..3)
+        .map(|c| cascades.get(c).map_or((0.0, 0.0), Layer::bias))
+        .chain([sun.island.map_or((0.0, 0.0), |l| l.0.bias())])
+        .collect();
+    put_f32s(&mut b, &biases.iter().map(|b| b.0).collect::<Vec<_>>());
+    put_f32s(&mut b, &biases.iter().map(|b| b.1).collect::<Vec<_>>());
+    match sun.island {
+        Some((_, layer)) => put_f32s(&mut b, &[layer as f32, 1.0, 0.0, 0.0]),
+        None => put_f32s(&mut b, &[0.0; 4]),
+    }
     put_f32s(&mut b, &terrain);
     put_f32s(&mut b, &[l.wind[0], l.wind[1], l.wet, l.glow]);
     v4(&mut b, lin(l.water), l.waves);

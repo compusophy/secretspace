@@ -1,15 +1,17 @@
 //! What of the statics is drawn: in the view, only what lies within a
 //! cone a little wider than the eye's (laid again once the view turns
 //! past the slack, or the eye moves); and what throws the sun's shadow
-//! into each cascade. Of everything that
-//! never moves, a cascade draws only what could reach into its box, seen
-//! from the sun (its bounding sphere within the box, and not beyond its
-//! far side, with some slack), and all but the nearest draw the coarser
-//! meshes. Laid out again only when a box has
-//! moved more than the slack, the sun has turned, or the statics changed.
+//! into each cascade. Of everything that never moves, a cascade draws
+//! only what could reach into its box, seen from the sun (its bounding
+//! sphere within the box, and not beyond its far side, with some slack),
+//! all but the nearest the coarser meshes, and those past the second none
+//! at all when the island's own layer holds them (`shadows`). Laid out
+//! again only when a box has moved more than the slack, the sun has
+//! turned, or the statics changed.
 
 use crate::buffers::{lay, MeshBuf, Run};
 use crate::geo::{self, V3};
+use crate::shadow::Layer;
 use crate::{Camera, Item, M4};
 use gpu::wgpu;
 
@@ -33,8 +35,9 @@ pub(crate) struct Cull {
     /// What moves, the same way, laid out every frame.
     pub moving_bufs: Vec<Grow>,
     pub moving_runs: Vec<Vec<Run>>,
-    /// Each cascade's matrix when it was last laid out.
-    laid: Vec<Option<M4>>,
+    /// Each cascade's matrix when it was last laid out, and whether the
+    /// island's layer held its statics then.
+    laid: Vec<Option<(M4, bool)>>,
     /// The view's cone when it was last laid out: the eye, which way it
     /// looked, its half angle.
     seen: Option<(V3, V3, f32)>,
@@ -109,21 +112,28 @@ impl Cull {
         )
     }
 
-    /// Lay out what casts into each cascade whose box has moved on.
+    /// Lay out what casts into each cascade whose box has moved on (past
+    /// the second, nothing that stands still if the island's layer
+    /// holds it: `whole`).
     pub fn lay(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
-        cascades: &[M4],
+        cascades: &[Layer],
+        whole: bool,
         meshes: &[Option<MeshBuf>],
         bytes: &mut Vec<u8>,
     ) {
-        for (c, m) in cascades.iter().enumerate() {
-            if self.laid[c].is_some_and(|l| near_enough(&l, m)) {
+        for (c, l) in cascades.iter().enumerate() {
+            let (m, held) = (&l.m, whole && c >= 2);
+            if self.laid[c].is_some_and(|(l, h)| h == held && near_enough(&l, m)) {
                 continue;
             }
-            self.laid[c] = Some(*m);
+            self.laid[c] = Some((*m, held));
             let from = if c == 0 { &self.near } else { &self.coarse };
-            let mut items: Vec<&Item> = from.iter().filter(|i| reaches(i, m, meshes)).collect();
+            let mut items: Vec<&Item> = from
+                .iter()
+                .filter(|i| !held && reaches(i, m, meshes))
+                .collect();
             bytes.clear();
             self.runs[c] = lay(&mut items, bytes, 0);
             self.bufs[c].put(device, queue, bytes);
@@ -137,15 +147,15 @@ impl Cull {
     pub fn moving(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
-        cascades: &[M4],
+        cascades: &[Layer],
         items: &[&Item],
         meshes: &[Option<MeshBuf>],
         bytes: &mut Vec<u8>,
     ) {
-        for (c, m) in cascades.iter().enumerate() {
+        for (c, l) in cascades.iter().enumerate() {
             let mut list: Vec<Item> = items
                 .iter()
-                .filter(|i| reaches(i, m, meshes))
+                .filter(|i| reaches(i, &l.m, meshes))
                 .map(|i| Item {
                     mesh: i.far.map_or(i.mesh, |f| f.0),
                     ..**i
@@ -194,7 +204,7 @@ fn in_view(i: &Item, (eye, fwd, half): (V3, V3, f32), meshes: &[Option<MeshBuf>]
 }
 
 /// How far `i` reaches from its middle: its mesh's radius, scaled.
-fn radius(i: &Item, meshes: &[Option<MeshBuf>]) -> f32 {
+pub(crate) fn radius(i: &Item, meshes: &[Option<MeshBuf>]) -> f32 {
     let col =
         |k: usize| (i.model[k].powi(2) + i.model[k + 1].powi(2) + i.model[k + 2].powi(2)).sqrt();
     let scale = col(0).max(col(4)).max(col(8));
@@ -222,20 +232,20 @@ mod tests {
     #[test]
     fn a_box_moved_less_than_its_slack_is_not_laid_again() {
         let cam = Camera::default();
-        let a = shadow::fit(&cam, [0.4, 0.8, 0.2], &[14.0], 2048)[0];
+        let a = shadow::fit(&cam, [0.4, 0.8, 0.2], &[14.0], 2048)[0].m;
         let near = Camera {
             eye: [0.5, 0.0, 0.0],
             ..cam
         };
-        let b = shadow::fit(&near, [0.4, 0.8, 0.2], &[14.0], 2048)[0];
+        let b = shadow::fit(&near, [0.4, 0.8, 0.2], &[14.0], 2048)[0].m;
         assert!(near_enough(&a, &b), "half a metre: no");
         let far = Camera {
             eye: [10.0, 0.0, 0.0],
             ..cam
         };
-        let c = shadow::fit(&far, [0.4, 0.8, 0.2], &[14.0], 2048)[0];
+        let c = shadow::fit(&far, [0.4, 0.8, 0.2], &[14.0], 2048)[0].m;
         assert!(!near_enough(&a, &c), "ten metres: yes");
-        let d = shadow::fit(&cam, [0.5, 0.8, 0.2], &[14.0], 2048)[0];
+        let d = shadow::fit(&cam, [0.5, 0.8, 0.2], &[14.0], 2048)[0].m;
         assert!(!near_enough(&a, &d), "the sun turned: yes");
     }
 
@@ -257,7 +267,7 @@ mod tests {
     fn what_could_shadow_the_box_is_kept_and_what_could_not_is_left() {
         let cam = Camera::default();
         let sun = crate::geo::norm([0.4, 0.3, 0.2]);
-        let m = shadow::fit(&cam, sun, &[14.0], 2048)[0];
+        let m = shadow::fit(&cam, sun, &[14.0], 2048)[0].m;
         let mid = crate::geo::add(cam.eye, crate::geo::scale(cam.forward(), 7.0));
         let at = |p: crate::geo::V3| Item::new(crate::Mesh(0), crate::m4::place(p, 0.0, [1.0; 3]));
         let meshes: Vec<Option<MeshBuf>> = Vec::new();

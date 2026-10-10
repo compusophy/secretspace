@@ -11,8 +11,8 @@ pub mod post;
 pub mod shafts;
 pub mod world;
 
-/// Bytes of `Globals`: four mat4s and eighteen vec4s.
-pub const GLOBALS: u64 = 4 * 64 + 18 * 16;
+/// Bytes of `Globals`: five mat4s and twenty-one vec4s.
+pub const GLOBALS: u64 = 5 * 64 + 21 * 16;
 
 /// A number in 0..1 that shifts from pixel to pixel with little pattern
 /// (interleaved gradient noise, after Jimenez): what the passes that
@@ -39,13 +39,15 @@ pub fn depth_type(msaa: bool) -> &'static str {
 pub fn scene(msaa: bool, ssr: u32) -> String {
     let steps = ssr.max(2);
     let grow = (120.0f32 / 0.6).powf(1.0 / (steps - 1) as f32);
-    format!("{}{}{}", common::COMMON, world::WORLD, decal::DECAL)
+    format!("{}{IGN}{}{}", common::COMMON, world::WORLD, decal::DECAL)
         .replace("DEPTH_TYPE", depth_type(msaa))
         .replace("NEAR_PLANE", &format!("{:.4}", crate::laws::NEAR))
         .replace("SPARK_MAX_PX", &format!("{:.1}", crate::laws::SPARK_MAX_PX))
         .replace("PUFF_MAX", &format!("{:.3}", crate::laws::PUFF_MAX))
         .replace("SPARK_NEAR", &format!("{:.3}", crate::laws::SPARK_NEAR))
         .replace("GRASS_THIN", &format!("{:.3}", crate::laws::GRASS_THIN))
+        .replace("SHADOW_SOFT", &format!("{:.3}", crate::laws::SHADOW_SOFT))
+        .replace("SHADOW_BAND", &format!("{:.3}", crate::laws::SHADOW_BAND))
         .replace("SSR_STEPS", &format!("{steps}"))
         .replace("SSR_GROW", &format!("{grow:.5}"))
 }

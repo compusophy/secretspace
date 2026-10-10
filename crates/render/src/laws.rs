@@ -25,10 +25,27 @@ pub const SPARK_NEAR: f32 = 0.6;
 /// within half of it): the rest is drawn wider to cover as much.
 pub const GRASS_THIN: f32 = 0.6;
 
-/// Where each of the sun's shadow cascades ends (metres ahead of the eye).
-pub const CASCADES: [f32; 3] = [14.0, 48.0, 150.0];
+/// Where each of the sun's shadow cascades ends (metres ahead of the
+/// eye), for a tier that draws one, two or three; past the last, the
+/// island's own layer.
+pub const CASCADES: [&[f32]; 3] = [&[40.0], &[20.0, 85.0], &[14.0, 48.0, 150.0]];
 /// How dark the sun's shadow is (1 fully).
 pub const SHADOW_STRENGTH: f32 = 1.0;
+/// The sun's shadow: how much nearer the sun a point must be than what
+/// the map holds to be lit (metres, the same in every layer), and how
+/// far out along its normal it is looked up (texels of its layer); how
+/// wide its edge is softened (texels, a disc's radius); over how much of
+/// its end a cascade blends into the next (a share); how far behind a
+/// cascade's box what casts into it may stand (metres); the raster's own
+/// bias (a constant, and by slope); and how far the sun turns (radians)
+/// before the island's layer is drawn again.
+pub const SHADOW_BIAS: f32 = 0.04;
+pub const SHADOW_NORMAL: f32 = 1.5;
+pub const SHADOW_SOFT: f32 = 1.25;
+pub const SHADOW_BAND: f32 = 0.15;
+pub const SHADOW_BACK: f32 = 300.0;
+pub const SHADOW_RASTER: (i32, f32) = (2, 2.5);
+pub const SHADOW_TURN: f32 = 0.0087;
 /// The picture's own format before tone mapping.
 pub const HDR: &str = "rgba16float";
 /// Ambient occlusion: how far about a point it looks (metres), how much

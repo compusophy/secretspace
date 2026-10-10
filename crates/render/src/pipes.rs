@@ -297,7 +297,7 @@ pub(crate) fn scene_group(
     layout: &wgpu::BindGroupLayout,
     globals: &wgpu::Buffer,
     lists: &crate::grid::Lists,
-    shadows: &crate::shadow::Shadows,
+    shadows: &crate::shadows::Shadows,
     heights: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {

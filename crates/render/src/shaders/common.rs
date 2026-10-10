@@ -6,7 +6,7 @@
 pub const COMMON: &str = r#"
 struct Globals {
     vp: mat4x4<f32>,
-    shadow: array<mat4x4<f32>, 3>,
+    shadow: array<mat4x4<f32>, 4>, // the sun's cascades, then the island's layer
     eye: vec4<f32>,      // xyz, w: seconds
     fwd: vec4<f32>,      // xyz, w: tan of half the field of view across
     right: vec4<f32>,    // xyz, w: tan of half the field of view up
@@ -20,7 +20,10 @@ struct Globals {
     deep: vec4<f32>,     // rgb below the horizon, w: sea level
     grid: vec4<f32>,     // the lights' grid: origin x, z, cell, cells a side
     view: vec4<f32>,     // viewport width, height; shadow texel; cascades
-    splits: vec4<f32>,   // where each cascade ends (metres ahead)
+    splits: vec4<f32>,   // where each cascade ends (metres ahead), w how dark the shadow is
+    bias: vec4<f32>,     // each cascade's bias (its depth's units), w the island's
+    offset: vec4<f32>,   // how far out along its normal a point is looked up (metres), the same
+    island: vec4<f32>,   // x the island's layer in the map, y 1 if there is one
     terrain: vec4<f32>,  // heights: origin x, z, cell, samples a side
     wind: vec4<f32>,     // xy the wind (x, z), z how wet, w how bright glows are
     water: vec4<f32>,    // rgb deep water, w waves
@@ -114,9 +117,52 @@ fn ground(xz: vec2<f32>) -> f32 {
     return terrain_at(xz).x;
 }
 
-/// How much of the sun reaches `pos` (0 in shadow, 1 lit), softened.
+/// How much of the sun reaches `pos` in layer `c` of the shadow map
+/// (seen through `m`; looked up `off` out from it, its depth less `bias`),
+/// softened over a small disc of eight taps turned by `turn`; 1 outside
+/// the layer.
+fn shadow_in(m: mat4x4<f32>, c: i32, pos: vec3<f32>, off: vec3<f32>, bias: f32, turn: f32) -> f32 {
+    let p = m * vec4<f32>(pos + off, 1.0);
+    let uv = vec2<f32>(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 || p.z > 1.0) {
+        return 1.0;
+    }
+    let z = p.z - bias;
+    let spread = g.view.z * SHADOW_SOFT;
+    var sum = 0.0;
+    for (var k = 0; k < 8; k = k + 1) {
+        // A spiral out (Vogel's), evenly over the disc.
+        let r = sqrt((f32(k) + 0.5) / 8.0) * spread;
+        let a = f32(k) * 2.3999632 + turn;
+        sum = sum + textureSampleCompareLevel(shadow_map, shadow_cmp, uv + vec2<f32>(cos(a), sin(a)) * r, c, z);
+    }
+    return sum / 8.0;
+}
+
+/// The island's own layer at `pos` (`lean`: how far out along `n`).
+fn island_lit(pos: vec3<f32>, n: vec3<f32>, lean: f32, turn: f32) -> f32 {
+    return shadow_in(g.shadow[3], i32(g.island.x), pos, n * (g.offset.w * lean), g.bias.w, turn);
+}
+
+/// Cascade `c` at `pos`; past the second, what stands still there is in
+/// the island's layer (the cascade holds only what moves).
+fn cascade_lit(c: i32, pos: vec3<f32>, n: vec3<f32>, lean: f32, turn: f32) -> f32 {
+    var lit = shadow_in(g.shadow[c], c, pos, n * (g.offset[c] * lean), g.bias[c], turn);
+    if (c >= 2 && g.island.y > 0.5) {
+        lit = min(lit, island_lit(pos, n, lean, turn));
+    }
+    return lit;
+}
+
+/// How much of the sun reaches `pos` (0 in shadow, 1 lit): the cascade
+/// it is in, blending into the next over the last of it; past the last,
+/// the island's layer (or none).
 fn sunlit(pos: vec3<f32>, n: vec3<f32>) -> f32 {
     let count = i32(g.view.w);
+    let whole = g.island.y > 0.5;
+    if (count == 0 && !whole) {
+        return 1.0;
+    }
     let ahead = dot(pos - g.eye.xyz, g.fwd.xyz);
     var c = 0;
     if (ahead > g.splits.x) {
@@ -125,24 +171,34 @@ fn sunlit(pos: vec3<f32>, n: vec3<f32>) -> f32 {
     if (ahead > g.splits.y) {
         c = 2;
     }
-    if (count == 0 || c >= count || ahead > g.splits.z) {
-        return 1.0;
+    if (ahead > g.splits.z) {
+        c = 3;
     }
-    let off = n * (0.05 + 0.12 * f32(c));
-    let p = g.shadow[c] * vec4<f32>(pos + off, 1.0);
-    let uv = vec2<f32>(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
-    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0 || p.z > 1.0) {
-        return 1.0;
-    }
-    let z = p.z - 0.0008;
-    let texel = g.view.z;
-    var sum = 0.0;
-    for (var y = -1; y <= 1; y = y + 1) {
-        for (var x = -1; x <= 1; x = x + 1) {
-            sum = sum + textureSampleCompareLevel(shadow_map, shadow_cmp, uv + vec2<f32>(f32(x), f32(y)) * texel * 1.25, c, z);
+    c = min(c, count);
+    // The disc turned from pixel to pixel, so its few taps make a soft
+    // edge and not a pattern.
+    let s = g.vp * vec4<f32>(pos, 1.0);
+    let turn = ign((s.xy / s.w * vec2<f32>(0.5, -0.5) + 0.5) * g.view.xy) * 6.2831853;
+    // What faces the sun needs pushing out of its own shadow less.
+    let lean = 1.0 - 0.5 * max(dot(n, g.sun_dir.xyz), 0.0);
+    var lit = 1.0;
+    if (c < count) {
+        lit = cascade_lit(c, pos, n, lean, turn);
+        let end = g.splits[c];
+        let start = end * (1.0 - SHADOW_BAND);
+        if (ahead > start) {
+            var next = 1.0;
+            if (c + 1 < count) {
+                next = cascade_lit(c + 1, pos, n, lean, turn);
+            } else if (whole) {
+                next = island_lit(pos, n, lean, turn);
+            }
+            lit = mix(lit, next, smoothstep(start, end, ahead));
         }
+    } else if (whole) {
+        lit = island_lit(pos, n, lean, turn);
     }
-    return mix(1.0, sum / 9.0, g.splits.w);
+    return mix(1.0, lit, g.splits.w);
 }
 
 /// The sky looking along `d`: blue overhead, pale at the horizon, the

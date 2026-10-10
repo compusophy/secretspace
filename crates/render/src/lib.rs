@@ -24,6 +24,7 @@ mod fullscreen;
 mod globals;
 mod pipes;
 mod post;
+mod shadows;
 mod shafts;
 
 pub use draw::{Renderer, Stats};

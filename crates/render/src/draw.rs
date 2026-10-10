@@ -10,9 +10,9 @@ use crate::buffers::{lay, make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, 
 use crate::grid::{Grid, Lists};
 use crate::pipes::Pipes;
 use crate::post::{Ops, Post, HDR};
-use crate::shadow::Shadows;
+use crate::shadows::Shadows;
 use crate::terrain::Terrain;
-use crate::{geo, laws, m4, shaders, shadow, Frame, Item, Material, Mesh, Pass, Quality, M4};
+use crate::{geo, laws, m4, shaders, shadow, Frame, Item, Material, Mesh, Pass, Quality};
 use gpu::wgpu;
 
 /// How far the eye goes before the statics are laid again (near and far
@@ -118,7 +118,7 @@ impl Renderer {
             statics_dirty: false,
             still_eye: [0.0; 3],
             still_runs: Vec::new(),
-            cull: crate::cull::Cull::new(device, laws::CASCADES.len()),
+            cull: crate::cull::Cull::new(device, 3),
             grid: Grid::default(),
             bytes: Vec::new(),
             shadows: Shadows::new(device, quality),
@@ -268,9 +268,9 @@ impl Renderer {
         (2.0 * q.grass_reach / q.grass_spacing).ceil() as u32
     }
 
-    fn globals(&self, f: &Frame, fov: f32, size: (u32, u32), cascades: &[M4]) -> Vec<u8> {
+    fn globals(&self, f: &Frame, fov: f32, size: (u32, u32), sun: &crate::globals::Sun) -> Vec<u8> {
         let shared = (&self.grid, self.quality, self.terrain, self.grass_side());
-        crate::globals::bytes(f, fov, size, cascades, shared)
+        crate::globals::bytes(f, fov, size, sun, shared)
     }
 
     /// Draw a frame into `target` (`size` pixels): the scene at the
@@ -297,29 +297,39 @@ impl Renderer {
             .lists
             .put((&device, &queue), &self.grid, f.look.glow, &mut b);
 
-        // The sun's cascades (none when it is down).
+        // The sun's cascades, and the island's layer (none of them when
+        // the sun is down).
         let sun_up = geo::norm(f.look.sun_dir)[1] > 0.02;
+        let ends = laws::CASCADES[(self.quality.cascades.clamp(1, 3) - 1) as usize];
         let count = if sun_up {
-            self.quality.cascades as usize
+            (self.quality.cascades as usize).min(ends.len())
         } else {
             0
         };
         let cascades = shadow::fit(
             &f.cam,
             f.look.sun_dir,
-            &laws::CASCADES[..count],
+            &ends[..count],
             self.quality.shadow_size,
         );
         self.shadows.aim(&queue, &cascades);
-        queue.write_buffer(
-            &self.globals[0],
-            0,
-            &self.globals(f, f.cam.fov, size, &cascades),
-        );
+        if self.statics_dirty {
+            let still = (&self.statics, &self.meshes);
+            self.shadows
+                .statics((&device, &queue), still.0, still.1, &mut b);
+        }
+        let island = self
+            .shadows
+            .island(&queue, sun_up.then_some(f.look.sun_dir));
+        let sun = crate::globals::Sun {
+            cascades: &cascades,
+            island: island.map(|l| (l, self.shadows.island_layer())),
+        };
+        queue.write_buffer(&self.globals[0], 0, &self.globals(f, f.cam.fov, size, &sun));
         queue.write_buffer(
             &self.globals[1],
             0,
-            &self.globals(f, f.view_fov, size, &cascades),
+            &self.globals(f, f.view_fov, size, &sun),
         );
         if grew || self.groups.is_none() {
             let group = |globals: &wgpu::Buffer| {
@@ -353,8 +363,9 @@ impl Renderer {
             self.still_runs = lay(&mut items, &mut b, 0);
             self.still.put(&device, &queue, &b);
         }
+        let whole = island.is_some();
         self.cull
-            .lay((&device, &queue), &cascades, &self.meshes, &mut b);
+            .lay((&device, &queue), &cascades, whole, &self.meshes, &mut b);
 
         // What moves, by pass (the sea among the see-through): the
         // see-through farthest first.

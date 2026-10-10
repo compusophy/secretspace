@@ -68,6 +68,6 @@ fn globals_match_the_struct() {
     let body = &body[..body.find("};").unwrap()];
     let vec4s = body.matches("vec4<f32>,").count() as u64;
     let mats = body.matches("mat4x4<f32>").count() as u64;
-    assert_eq!(mats, 2, "vp, and the cascades' array of three");
-    assert_eq!(render::shaders::GLOBALS, 64 + 3 * 64 + vec4s * 16);
+    assert_eq!(mats, 2, "vp, and the shadow's array of four");
+    assert_eq!(render::shaders::GLOBALS, 64 + 4 * 64 + vec4s * 16);
 }
