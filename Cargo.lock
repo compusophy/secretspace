@@ -385,12 +385,22 @@ name = "secretspace-battlestation"
 version = "0.1.0"
 
 [[package]]
+name = "secretspace-battlestation-look"
+version = "0.1.0"
+dependencies = [
+ "naga",
+ "secretspace-battlestation",
+ "secretspace-pixels",
+ "secretspace-render",
+]
+
+[[package]]
 name = "secretspace-battlestation-web"
 version = "0.1.0"
 dependencies = [
  "js-sys",
- "naga",
  "secretspace-battlestation",
+ "secretspace-battlestation-look",
  "secretspace-engine",
  "secretspace-gpu",
  "secretspace-kit",
@@ -422,7 +432,9 @@ dependencies = [
 name = "secretspace-hub"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "secretspace-battlestation",
+ "secretspace-battlestation-look",
  "secretspace-engine",
  "secretspace-gpu",
  "secretspace-kit",

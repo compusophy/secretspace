@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 battlestation = { package = "secretspace-battlestation", path = "../battlestation" }
+look = { package = "secretspace-battlestation-look", path = "../battlestation-look" }
 engine = { package = "secretspace-engine", path = "../engine" }
 gpu = { package = "secretspace-gpu", path = "../gpu" }
 render = { package = "secretspace-render", path = "../render" }
@@ -23,5 +24,3 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["KeyboardEvent", "WheelEvent", "CssStyleDeclaration", "HtmlCanvasElement", "HtmlElement", "Window", "Document", "CanvasRenderingContext2d", "ImageData"] }
 
-[dev-dependencies]
-naga = { version = "30", features = ["wgsl-in"] }

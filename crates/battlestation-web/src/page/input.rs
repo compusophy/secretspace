@@ -19,6 +19,8 @@ use super::{Heard, KeyEv, Page, CAPTURE};
 
 /// The most one mouse move may move the arrow (pixels).
 const MOUSE_MOST: f64 = 250.0;
+/// How long a menu just opened ignores Esc (ms).
+const MENU_SETTLE: f64 = 400.0;
 
 /// Whether a key's own use in the browser is held back while seated: all
 /// but the function keys and the browser's own shortcuts (reload, a tab,
@@ -88,17 +90,22 @@ pub(super) fn clock() -> String {
 }
 
 pub(super) fn input(p: &mut Page, now: f64, dt: f32) {
+    let heard = std::mem::take(&mut *p.heard.borrow_mut());
     // The mouse let go while seated (the browser's own Esc, a switch
-    // away): the menu, as if Esc had come to the page.
+    // away): the menu, as if Esc had come to the page (once: an Esc that
+    // came too must not close it again).
     let locked = kit::input::locked();
     if locked != p.was_locked {
         p.skip = 2;
     }
-    if p.was_locked && !locked && p.seated && !p.touch && !p.meta.is_open() {
+    let esc = heard
+        .keys
+        .iter()
+        .any(|k| k.down && !k.repeat && k.code == "Escape");
+    if p.was_locked && !locked && p.seated && !p.touch && !p.meta.is_open() && !esc {
         p.open_menu();
     }
     p.was_locked = locked;
-    let heard = std::mem::take(&mut *p.heard.borrow_mut());
     if heard.blur {
         for k in keys::layout() {
             p.hands.key(k.code, false);
@@ -144,14 +151,17 @@ fn key(p: &mut Page, e: KeyEv, now: f64) {
     if e.down {
         p.sounds.audio.wake();
     }
+    // Esc: the menu, always (seated or not); Esc again, back. A menu that
+    // has only just opened (the mouse let go a moment before the key
+    // came) stays open.
     if e.code == "Escape" {
         if e.down && !e.repeat {
-            if p.meta.is_open() {
-                if p.meta.escape() == Some(kit::meta::Pick::Resume) {
-                    p.resume();
-                }
-            } else if p.seated {
+            if !p.meta.is_open() {
                 p.open_menu();
+            } else if now - p.menu_at > MENU_SETTLE
+                && p.meta.escape() == Some(kit::meta::Pick::Resume)
+            {
+                p.resume();
             }
         }
         return;

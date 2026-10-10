@@ -4,7 +4,7 @@
 # says the newest, so an open page can tell it is out of date.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-build=$(bash scripts/hash.sh crates/engine crates/pixels crates/kit crates/gpu crates/render crates/hub-web crates/wyrm crates/wyrm-look crates/wyrm-web crates/luciphon crates/luciphon-look crates/luciphon-web crates/showcase-web crates/wandfall crates/wandfall-look crates/wandfall-web crates/battlestation crates/battlestation-web web Cargo.toml Cargo.lock)
+build=$(bash scripts/hash.sh crates/engine crates/pixels crates/kit crates/gpu crates/render crates/hub-web crates/wyrm crates/wyrm-look crates/wyrm-web crates/luciphon crates/luciphon-look crates/luciphon-web crates/showcase-web crates/wandfall crates/wandfall-look crates/wandfall-web crates/battlestation crates/battlestation-look crates/battlestation-web web Cargo.toml Cargo.lock)
 SECRETSPACE_PAGE=$build cargo build -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web -p secretspace-wandfall-web -p secretspace-battlestation-web --release --target wasm32-unknown-unknown
 rm -rf dist && mkdir -p dist
 page() { # page <wasm lib name> <out name> <dir under dist> <html>

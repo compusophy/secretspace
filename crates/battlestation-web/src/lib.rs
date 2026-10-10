@@ -1,5 +1,5 @@
 //! Battlestation's page: a desk at night, seen from the chair, drawn by
-//! the engine on WebGPU. Your keyboard and mouse are the ones on the
+//! the engine on WebGPU (how it looks: `battlestation-look`). Your keyboard and mouse are the ones on the
 //! desk: each key you press is pressed there by the finger that types it,
 //! the mouse slides under the right hand, and the monitor runs a terminal
 //! that takes what you type. Before you sit down, the desk types by
@@ -14,12 +14,6 @@
 //! north), `?capture=1` draws off screen and shows it as an image (what
 //! a headless browser can photograph).
 
-pub mod body;
-pub mod gear;
-pub mod glass;
-pub mod light;
-pub mod monitor;
-pub mod scene;
 pub mod sound;
 
 #[cfg(target_arch = "wasm32")]
@@ -62,7 +56,7 @@ impl Hooks {
                 .map(|v| v.clamp(0.0, 1.0)),
             tone: param(query, "tone")
                 .and_then(|v| v.parse::<usize>().ok())
-                .map(|v| v.min(body::TONES.len() - 1)),
+                .map(|v| v.min(look::body::TONES.len() - 1)),
             shot: on("shot", false),
             perf: on("perf", false),
             windowed: on("windowed", false),
@@ -86,7 +80,7 @@ mod tests {
         let h = Hooks::read("?sit=1&lean=0.5&tone=9&shot=1&windowed");
         assert!(h.sit && h.shot && h.windowed && h.demo && !h.perf);
         assert_eq!(h.lean, Some(0.5));
-        assert_eq!(h.tone, Some(body::TONES.len() - 1));
+        assert_eq!(h.tone, Some(look::body::TONES.len() - 1));
         let d = Hooks::read("");
         assert!(!d.sit && d.demo && d.lean.is_none() && !d.windowed);
         assert!(!Hooks::read("?demo=0").demo);

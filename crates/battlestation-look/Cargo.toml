@@ -1,0 +1,19 @@
+[package]
+name = "secretspace-battlestation-look"
+description = "How Battlestation looks, for its page and the front page's card: the room, the desk and what stands on it, the hands, the monitor's picture and the glass it is shown on, the night's light; and the desk drawn as one frame."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "battlestation_look"
+
+[dependencies]
+battlestation = { package = "secretspace-battlestation", path = "../battlestation" }
+render = { package = "secretspace-render", path = "../render" }
+pixels = { package = "secretspace-pixels", path = "../pixels" }
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] }

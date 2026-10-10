@@ -2,19 +2,18 @@
 //! and glows, the lights; the engine draws the room, the glass the
 //! picture on the monitor, and the pixel layer what is said over it.
 
-use battlestation::keys::{self, Side};
 use battlestation::laws::{
-    BREATH, BREATH_HZ, EYE, FOLLOW_PITCH, FOLLOW_YAW, FOV, FOV_MOST, HEAD_OMEGA, LEAN, LEAN_OMEGA,
-    PITCH, SCREEN_AT, SCREEN_PX, WALL_N,
+    BREATH, BREATH_HZ, EYE, FOLLOW_PITCH, FOLLOW_YAW, HEAD_OMEGA, LEAN, LEAN_OMEGA, PITCH,
+    SCREEN_AT, SCREEN_PX,
 };
 use battlestation::{damp, V3};
 use pixels::Rgba;
 use render::geo;
-use render::{m4, Camera, Frame, Item, Pass};
+use render::Camera;
 
 use super::input::clock;
-use super::{ident, Page};
-use crate::{body, gear, light, scene, SHOT_AFTER};
+use super::Page;
+use crate::SHOT_AFTER;
 
 const INK: Rgba = Rgba::rgb(244, 241, 255);
 const GREEN: Rgba = Rgba::rgb(126, 232, 166);
@@ -40,7 +39,7 @@ fn camera(p: &mut Page, t: f32, dt: f32) -> Camera {
     let (css_w, css_h) = p.out.css();
     let aspect = (css_w / css_h.max(1.0)) as f32;
     // A narrow screen widens the view to keep the desk in it.
-    let fov = (2.0 * ((0.55f32).tan() / aspect.max(0.1)).atan()).clamp(FOV, FOV_MOST);
+    let fov = look::desk::fov(aspect);
     if let Some([x, y, z, yaw, pitch]) = p.hooks.eye {
         return Camera {
             eye: [x, y, z],
@@ -59,84 +58,6 @@ fn camera(p: &mut Page, t: f32, dt: f32) -> Camera {
     }
 }
 
-/// What moves and what glows this frame.
-fn items(p: &Page, t: f32) -> Vec<Item> {
-    let mut out = Vec::with_capacity(280);
-    for (i, k) in keys::layout().iter().enumerate() {
-        let at = gear::cap_at(k);
-        let hue = light::rainbow(at[0], t);
-        let heat = p.heat[i];
-        let tint = geo::mix(geo::mix([1.0; 3], hue, 0.8), [1.0; 3], heat * 0.8);
-        let down = [at[0], at[1] - p.hands.depth(i), at[2]];
-        out.push(
-            Item::new(p.m.keys[i], m4::place(down, 0.0, [1.0; 3]))
-                .tint(tint, 1.0)
-                .glow(heat * 0.25)
-                .rough(0.6),
-        );
-        out.push(
-            Item::new(
-                p.m.under,
-                m4::place([at[0], at[1] - 0.004, at[2]], 0.0, [k.w, 1.0, 1.0]),
-            )
-            .pass(Pass::Glow)
-            .tint(geo::mix(hue, [1.0; 3], heat * 0.5), 1.0)
-            .glow(0.2 + heat * 2.2),
-        );
-    }
-    let m = p.hands.mouse.at();
-    out.push(
-        Item::new(p.m.mouse, m4::place(m, 0.0, [1.0; 3]))
-            .tint(geo::mix([1.0; 3], light::rainbow(m[0], t), 0.9), 1.0)
-            .rough(0.45),
-    );
-    for side in [Side::Left, Side::Right] {
-        body::items(&p.hands.pose(side), side, &p.m.hands, &mut out);
-    }
-    let [x, y, z] = gear::screen_axes();
-    let mean = p.screen.mean();
-    out.push(
-        Item::new(p.m.pane, m4::basis(SCREEN_AT, x, y, z))
-            .tint(geo::add(mean, [0.04, 0.05, 0.08]), 1.0)
-            .glow(1.3),
-    );
-    for (k, c) in scene::FANS.iter().enumerate() {
-        out.push(
-            Item::new(p.m.fan, m4::place(*c, 0.0, [1.0; 3]))
-                .pass(Pass::Glow)
-                .tint(light::rainbow(0.5 + k as f32 * 0.12, t), 1.0)
-                .glow(2.2),
-        );
-    }
-    let (x0, x1, sy) = scene::STRIP;
-    let len = (x1 - x0) / scene::STRIP_PARTS as f32;
-    for k in 0..scene::STRIP_PARTS {
-        let sx = x0 + k as f32 * len;
-        out.push(
-            Item::new(
-                p.m.strip,
-                m4::place([sx, sy, WALL_N + 0.003], 0.0, [len, 1.0, 1.0]),
-            )
-            .pass(Pass::Glow)
-            .tint(light::rainbow(sx + len / 2.0, t), 1.0)
-            .glow(2.6),
-        );
-    }
-    out.push(
-        Item::new(p.m.tower, ident())
-            .pass(Pass::Glow)
-            .tint(light::rainbow(0.6, t), 1.0)
-            .glow(2.4),
-    );
-    out.push(
-        Item::new(p.m.neon, m4::place(scene::NEON_AT, 0.0, [1.0; 3]))
-            .pass(Pass::Glow)
-            .tint(light::NEON, 1.0)
-            .glow(light::neon_glow(t)),
-    );
-    out
-}
-
 pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
     let t = (now / 1000.0) as f32;
     p.hands.step(dt);
@@ -145,19 +66,6 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
     }
     p.screen.draw(&p.term, &clock(), t, dt);
     let cam = camera(p, t, dt);
-    let items = items(p, t);
-    let lights = light::lights(t, p.screen.mean());
-    let sparks = light::steam(t);
-    let frame = Frame {
-        cam,
-        look: light::look(),
-        time: t,
-        items: &items,
-        lights: &lights,
-        sparks: &sparks,
-        decals: &[],
-        view_fov: 0.9,
-    };
     hud(p, now);
     let size = p.out.size();
     let Some(mut target) = p.out.begin() else {
@@ -165,10 +73,15 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
         return;
     };
     let (view, encoder) = target.parts();
-    p.r.draw(encoder, view, size, &frame);
-    let (vp, _, _) = cam.matrices(cam.fov);
-    p.glass
-        .draw(p.out.queue(), encoder, view, &vp, &p.screen.c.data, 1.0);
+    p.desk.draw(
+        &mut p.r,
+        p.out.queue(),
+        (encoder, view, size),
+        cam,
+        (&p.hands, &p.heat),
+        &p.screen,
+        t,
+    );
     p.out.finish(target);
     p.frames += 1;
     let doc = kit::document();
@@ -199,7 +112,7 @@ fn hud(p: &mut Page, now: f64) {
         } else {
             "click to sit down"
         };
-        let line = format!("battlestation - {go}");
+        let line = format!("battlestation - {go} - esc menu");
         let k = pixels::fit_scale(&line, w - 24 * ui, 2 * ui);
         let bar = 8 * k + 10 * ui;
         hud.fill_rect(0, h - bar, w, bar, Rgba(6, 7, 14, 175));
@@ -211,6 +124,8 @@ fn hud(p: &mut Page, now: f64) {
         if (now / 600.0) as i64 % 2 == 0 {
             hud.text(x + lead, y, go, k, GREEN);
         }
+        let rest = pixels::text_width(go, k);
+        hud.text(x + lead + rest, y, " - esc menu", k, INK.fade(0.6));
     } else if p.seated && now < p.hint_until && !p.meta.is_open() {
         let fade = ((p.hint_until - now) / 1500.0).clamp(0.0, 1.0);
         let text = if p.touch {

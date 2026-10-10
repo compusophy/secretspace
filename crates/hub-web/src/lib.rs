@@ -2,8 +2,8 @@
 //! are in it right now, and along the bottom how many are online anywhere
 //! and how many visits there have ever been. The numbers come live from
 //! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`),
-//! Wandfall's its match while one is on (`wand`), and Battlestation's its
-//! desk typing by itself (`desk`). A card opens its
+//! Wandfall's its match while one is on (`wand`), and Battlestation's the
+//! real desk typing by itself (`desk`). A card opens its
 //! game over the page, full screen at once (`kit::shell`); the page rests
 //! till the game is left.
 //! Every pixel is drawn here, in Rust.
@@ -457,6 +457,10 @@ pub fn start() -> Result<(), JsValue> {
         wasm_bindgen_futures::spawn_local(async {
             if let Ok(off) = gpu::Offscreen::new().await {
                 with(|h| h.wand.give(off));
+            }
+            // Battlestation's desk, drawn the same way on its own device.
+            if let Ok(off) = gpu::Offscreen::new().await {
+                with(|h| h.desk.give(off));
             }
         });
     }

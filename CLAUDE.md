@@ -75,8 +75,8 @@ crates/wandfall   game #3's core: laws trig map places motion storm world bots
 crates/wandfall-look  its look (page + hub): look land basalt aura
                   rig/ fx/ state icon scene spectate camera sky
 crates/wandfall-web  its page: page/ bar hud menu sound ambience steps touch lessons
-crates/battlestation*  desk sim: laws keys hands demo term; -web: gear scene
-                  body glass monitor light sound page/ (?capture=1: shots)
+crates/battlestation*  desk sim: laws keys hands demo term; -look (page,
+                  hub): gear scene body glass monitor light desk; -web: page/
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM) feedback
 web/index.html    the hub page; web/<game>/index.html each game's page

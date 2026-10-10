@@ -7,15 +7,13 @@ use std::rc::Rc;
 use battlestation::demo::Demo;
 use battlestation::hands::Hands;
 use battlestation::keys;
-use battlestation::laws::SCREEN_PX;
 use battlestation::term::Term;
-use render::{m4, Item, Material, Mesh, Pass, Quality, Renderer};
+use look::desk::Desk;
+use look::monitor::Screen;
+use render::{Quality, Renderer};
 use wasm_bindgen::prelude::*;
 
-use crate::body::{self, HandMeshes};
-use crate::glass::Glass;
-use crate::monitor::Screen;
-use crate::{gear, scene, sound, Hooks};
+use crate::{sound, Hooks};
 
 mod input;
 mod out;
@@ -25,19 +23,6 @@ use out::Out;
 
 const MIN_SHORT: f64 = 352.0;
 const MAX_DPR: f64 = 1.5;
-
-/// The meshes of what moves or changes colour.
-struct Meshes {
-    keys: Vec<Mesh>,
-    under: Mesh,
-    mouse: Mesh,
-    hands: HandMeshes,
-    pane: Mesh,
-    fan: Mesh,
-    strip: Mesh,
-    neon: Mesh,
-    tower: Mesh,
-}
 
 /// A key as the page heard it.
 struct KeyEv {
@@ -115,8 +100,7 @@ impl Sounds {
 struct Page {
     out: Out,
     r: Renderer,
-    glass: Glass,
-    m: Meshes,
+    desk: Desk,
     hands: Hands,
     term: Term,
     screen: Screen,
@@ -128,7 +112,6 @@ struct Page {
     heard: Rc<RefCell<Heard>>,
     meta: kit::meta::Meta,
     sounds: Sounds,
-    tone: usize,
     /// Leaning in: where it is, how fast, where the wheel wants it.
     lean: (f32, f32),
     lean_to: f32,
@@ -145,6 +128,8 @@ struct Page {
     last_mouse: Option<(f64, f64)>,
     /// Mouse moves to pass over (see `input::pointer`).
     skip: u8,
+    /// When the menu last opened (ms).
+    menu_at: f64,
     was_locked: bool,
     touch: bool,
     hooks: Hooks,
@@ -161,10 +146,6 @@ thread_local! {
     static CAPTURE: Cell<bool> = const { Cell::new(false) };
 }
 
-fn ident() -> render::M4 {
-    m4::place([0.0; 3], 0.0, [1.0; 3])
-}
-
 impl Page {
     fn new(mut out: Out, hooks: Hooks, query: &str) -> Page {
         let touch = kit::touch();
@@ -175,27 +156,7 @@ impl Page {
             ..q
         };
         let mut r = Renderer::new(out.device(), out.queue(), out.format(), q);
-        statics(&mut r);
-        let tone = hooks.tone.unwrap_or(2);
-        let m = Meshes {
-            keys: keys::layout()
-                .iter()
-                .map(|k| r.mesh(&gear::key_mesh(k)))
-                .collect(),
-            under: r.mesh(&gear::underglow()),
-            mouse: r.mesh(&gear::mouse()),
-            hands: hand_meshes(&mut r, tone),
-            pane: r.mesh(&gear::pane()),
-            fan: r.mesh(&scene::fan_ring()),
-            strip: r.mesh(&scene::strip_part()),
-            neon: r.mesh(&scene::neon("secretspace")),
-            tower: r.mesh(&scene::tower_lights()),
-        };
-        let glass = Glass::new(
-            out.device(),
-            out.format(),
-            (SCREEN_PX.0 as u32, SCREEN_PX.1 as u32),
-        );
+        let desk = Desk::new(&mut r, out.device(), out.format(), hooks.tone.unwrap_or(2));
         out.fit(MIN_SHORT, MAX_DPR);
         let heard = Rc::new(RefCell::new(Heard::default()));
         input::listen(&heard, out.canvas());
@@ -204,8 +165,7 @@ impl Page {
         let lean = hooks.lean.unwrap_or(0.0);
         Page {
             r,
-            glass,
-            m,
+            desk,
             hands: Hands::new(),
             term: Term::new(),
             screen: Screen::new(),
@@ -216,7 +176,6 @@ impl Page {
             heard,
             meta: kit::meta::Meta::new("battlestation"),
             sounds: Sounds::new(),
-            tone,
             lean: (lean, 0.0),
             lean_to: lean,
             head: [0.0; 4],
@@ -226,6 +185,7 @@ impl Page {
             finger: None,
             last_mouse: None,
             skip: 0,
+            menu_at: 0.0,
             was_locked: false,
             touch,
             hooks,
@@ -249,64 +209,7 @@ impl Page {
     }
 }
 
-/// What never moves: the room, the desk and what stands on it.
-fn statics(r: &mut Renderer) {
-    let id = ident();
-    let mut items = Vec::new();
-    let mut put = |r: &mut Renderer, g: &render::geo::Geo, f: &dyn Fn(Item) -> Item| {
-        let mesh = r.mesh(g);
-        items.push(f(Item::new(mesh, id)));
-    };
-    put(r, &scene::room(), &|i| i.rough(0.92));
-    put(r, &scene::desk(), &|i| i.rough(0.45).detail(0.04));
-    put(r, &scene::mat(), &|i| {
-        i.material(Material::Cloth).rough(0.95)
-    });
-    put(r, &scene::lamp(), &|i| i.rough(0.4));
-    put(r, &scene::plant(), &|i| i.rough(0.7));
-    put(r, &scene::mug(), &|i| i.rough(0.25));
-    put(r, &scene::tower(), &|i| i.rough(0.35));
-    put(r, &gear::case(), &|i| i.rough(0.35));
-    put(r, &gear::stand(), &|i| i.rough(0.4));
-    put(r, &scene::city(), &|i| i.rough(0.9));
-    put(r, &scene::glass(), &|i| {
-        i.pass(Pass::Faint)
-            .tint([0.1, 0.12, 0.16], 0.12)
-            .rough(0.05)
-    });
-    let [x, y, z] = gear::screen_axes();
-    let monitor = r.mesh(&gear::monitor());
-    items.push(Item::new(monitor, m4::basis(battlestation::laws::SCREEN_AT, x, y, z)).rough(0.3));
-    r.statics(items);
-}
-
-fn hand_meshes(r: &mut Renderer, tone: usize) -> HandMeshes {
-    let g = body::hand_geo(body::TONES[tone % body::TONES.len()]);
-    let seg: Vec<Mesh> = g.seg.iter().map(|s| r.mesh(s)).collect();
-    HandMeshes {
-        palm: [r.mesh(&g.palm[0]), r.mesh(&g.palm[1])],
-        seg: std::array::from_fn(|k| seg[k]),
-        arm: r.mesh(&g.arm),
-        sleeve: r.mesh(&g.sleeve),
-    }
-}
-
 impl Page {
-    /// The hands in the next skin tone.
-    fn next_tone(&mut self) {
-        self.tone = (self.tone + 1) % body::TONES.len();
-        let old = self.m.hands;
-        self.m.hands = hand_meshes(&mut self.r, self.tone);
-        for m in old
-            .palm
-            .iter()
-            .chain(&old.seg)
-            .chain([&old.arm, &old.sleeve])
-        {
-            self.r.free(*m);
-        }
-    }
-
     /// Sit down: the demo stops (a clean terminal), the mouse is taken
     /// (`grab`, from a press) and the sound wakes.
     fn sit(&mut self, grab: bool) {
@@ -365,6 +268,7 @@ impl Page {
             self.term.ran()
         );
         self.meta.show();
+        self.menu_at = kit::now();
     }
 
     fn resume(&mut self) {
@@ -377,7 +281,7 @@ impl Page {
     fn picked(&mut self, pick: kit::meta::Pick) {
         match pick {
             kit::meta::Pick::Resume => self.resume(),
-            kit::meta::Pick::Game(0) => self.next_tone(),
+            kit::meta::Pick::Game(0) => self.desk.next_tone(&mut self.r),
             kit::meta::Pick::Game(1) => self.sounds.audio.muted = !self.sounds.audio.muted,
             kit::meta::Pick::Game(_) => {
                 self.meta.hide();
