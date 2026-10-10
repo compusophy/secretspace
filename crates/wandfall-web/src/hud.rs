@@ -3,9 +3,11 @@
 //! the island with the storm's circles, the feed, names over heads, and
 //! what to do next (click to play, you are out, who won).
 
+use std::collections::HashMap;
+
 use pixels::{Canvas, Rect, Rgba};
 use render::{m4, M4};
-use wandfall::laws::{MAP_HALF, MATCH_SIZE, SEA};
+use wandfall::laws::{CROUCH_HEIGHT, HEIGHT, MAP_HALF, MATCH_SIZE, SEA};
 use wandfall::loot::max_hp;
 use wandfall::map::Map;
 use wandfall::places::Place;
@@ -22,6 +24,10 @@ const STORM: Rgba = Rgba::rgb(190, 110, 255);
 const SHADE: Rgba = Rgba(8, 10, 20, 150);
 /// Pixels a side of the island map.
 const MINI: i32 = 96;
+/// Metres off that a name over a head still shows, and how long it
+/// fades once out of sight (ms).
+pub const NAMES: f32 = 45.0;
+const NAME_FADE: f64 = 400.0;
 
 /// The island seen from above, drawn once.
 pub fn island(map: &Map) -> Canvas {
@@ -70,17 +76,33 @@ pub fn island(map: &Map) -> Canvas {
     c
 }
 
+/// Whether the wizard `s` can be seen from `eye`: its head or its middle
+/// not behind the ground, a deck or anything standing.
+pub fn in_sight(map: &Map, eye: [f32; 3], s: &Seen) -> bool {
+    let tall = if s.flags & flag::CROUCH != 0 {
+        CROUCH_HEIGHT
+    } else {
+        HEIGHT
+    };
+    [tall * 0.9, tall * 0.5]
+        .iter()
+        .any(|&up| map.strikes(eye, [s.p[0], s.p[1] + up, s.p[2]]).is_none())
+}
+
 /// What the HUD shows this frame.
 pub struct View<'a> {
     pub st: &'a State,
-    pub frame: Option<&'a Frame>,
     pub others: &'a [Seen],
     pub vp: M4,
+    /// Where the camera is.
+    pub eye: [f32; 3],
     /// Where you are and which way you face, and your own state.
     pub me: Option<([f32; 3], f32)>,
     pub own: Option<&'a Own>,
+    /// When each wizard was last in sight (a name fades out after); none:
+    /// every one shows (you are out, watching).
+    pub sighted: Option<&'a HashMap<u16, f64>>,
     pub watching: Option<String>,
-    pub locked: bool,
     pub in_storm: bool,
     pub now: f64,
     pub ui: i32,
@@ -139,26 +161,32 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
     let ui = v.ui;
     let (w, h) = (c.w, c.h);
     let cx = w / 2;
-    let Some(f) = v.frame else {
+    let Some(f) = v.st.frame.as_ref() else {
         c.text_centred(cx, h / 2, "finding the island...", 2 * ui, INK);
         return;
     };
-    // Names over heads, near enough to read; nearest first, and one that
-    // would cover a nearer one's is left out.
-    if let Some((eye, _)) = v.me.or(Some(([0.0; 3], 0.0))) {
+    // Names over heads, near enough to read and in sight (a name never
+    // gives away a wizard behind a hill or a wall); nearest first, and one
+    // that would cover a nearer one's is left out.
+    {
+        let eye = v.eye;
         let mut near: Vec<_> = v
             .others
             .iter()
             .filter(|s| s.flags & flag::ALIVE != 0 && s.id != v.st.you)
-            .map(|s| {
+            .filter_map(|s| {
                 let d = (s.p[0] - eye[0]).powi(2) + (s.p[2] - eye[2]).powi(2);
-                (d, s)
+                let fade = v.sighted.map_or(1.0, |m| {
+                    m.get(&s.id)
+                        .map_or(0.0, |&t| 1.0 - ((v.now - t) / NAME_FADE) as f32)
+                });
+                let near = v.me.is_none() || d < NAMES * NAMES;
+                (fade > 0.0 && near).then_some((d, fade.min(1.0), s))
             })
-            .filter(|(d, _)| v.me.is_none() || *d < 45.0 * 45.0)
             .collect();
         near.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut placed: Vec<Rect> = Vec::new();
-        for (_, s) in near {
+        for (_, fade, s) in near {
             let (x, y, ww) = m4::project(&v.vp, [s.p[0], s.p[1] + 2.5, s.p[2]]);
             if ww <= 0.1 {
                 continue;
@@ -180,13 +208,13 @@ pub fn draw(c: &mut Canvas, mini: &Canvas, v: &View) {
                 continue;
             }
             placed.push(r);
-            c.text_centred(sx, sy - 9 * ui, &name, ui, INK.fade(0.9));
+            c.text_centred(sx, sy - 9 * ui, &name, ui, INK.fade(0.9 * fade));
             let bar = 24 * ui;
             let full = max_hp(s.level);
-            c.fill_rect(sx - bar / 2, sy, bar, 2 * ui, SHADE);
+            c.fill_rect(sx - bar / 2, sy, bar, 2 * ui, SHADE.fade(fade));
             let k = (s.hp as i32 * bar / full).min(bar);
             let col = if (s.hp as i32) * 3 < full { RED } else { INK };
-            c.fill_rect(sx - bar / 2, sy, k, 2 * ui, col);
+            c.fill_rect(sx - bar / 2, sy, k, 2 * ui, col.fade(fade));
         }
     }
     // The numbers your hits do, rising off whom they struck.
@@ -573,5 +601,29 @@ mod tests {
         let turned = bearing(at, std::f32::consts::FRAC_PI_2, [0.0, 0.0, 10.0]).unwrap();
         assert!(turned.abs() < 1e-4);
         assert!(bearing(at, 0.0, [0.1, 3.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn a_name_never_shows_through_the_spire() {
+        use wandfall::laws::{EYE, PLATEAU_TOP};
+        let map = Map::new(7);
+        let at = |x: f32, z: f32| Seen {
+            p: [x, PLATEAU_TOP, z],
+            flags: flag::ALIVE,
+            ..Seen::default()
+        };
+        let eye = [-12.0, PLATEAU_TOP + EYE, 0.0];
+        assert!(!in_sight(&map, eye, &at(12.0, 0.0)), "the tower between");
+        assert!(
+            in_sight(&map, eye, &at(-12.0, 5.0)),
+            "beside you on the plaza"
+        );
+        // Nor through the ground: one down the far side of the plateau.
+        let low = [-50.0, map.height(-50.0, 0.0), 0.0];
+        let under = Seen {
+            p: low,
+            ..at(0.0, 0.0)
+        };
+        assert!(!in_sight(&map, [-8.0, PLATEAU_TOP + 0.4, 0.0], &under));
     }
 }

@@ -225,15 +225,18 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             menu::title(&mut p.g.hud, &mut p.spots, ui, note);
         }
         (Some(i), _) => {
+            if p.alive {
+                sight(&mut p.sighted, &p.st, &i.map, &others, cam.eye, now);
+            }
             let view = hud::View {
                 st: &p.st,
-                frame: p.st.frame.as_ref(),
                 others: &others,
                 vp,
+                eye: cam.eye,
                 me,
                 own: p.st.frame.as_ref().and_then(|f| f.you.as_ref()),
+                sighted: p.alive.then_some(&p.sighted),
                 watching,
-                locked: kit::input::locked(),
                 in_storm,
                 now,
                 ui,
@@ -347,6 +350,30 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     if let Some(line) = perf {
         if (now as u64 / 500).is_multiple_of(2) {
             kit::document().set_title(&line);
+        }
+    }
+}
+
+/// Who is in sight of the camera at `eye` now (near enough to read a
+/// name), or was just struck by you (`st`): when, into `sighted`.
+fn sight(
+    sighted: &mut HashMap<u16, f64>,
+    st: &State,
+    map: &Map,
+    others: &[proto::Seen],
+    eye: [f32; 3],
+    now: f64,
+) {
+    sighted.retain(|_, t| now - *t < 1000.0);
+    let alive = |s: &&proto::Seen| s.id != st.you && s.flags & flag::ALIVE != 0;
+    for s in others.iter().filter(alive) {
+        let d2 = (s.p[0] - eye[0]).powi(2) + (s.p[2] - eye[2]).powi(2);
+        if d2 > hud::NAMES * hud::NAMES {
+            continue;
+        }
+        let struck = st.numbers.iter().any(|n| n.1 == s.id && now - n.0 < 1500.0);
+        if struck || hud::in_sight(map, eye, s) {
+            sighted.insert(s.id, now);
         }
     }
 }

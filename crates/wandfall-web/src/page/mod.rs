@@ -136,6 +136,9 @@ struct Page {
     thunder: (f64, Option<(f64, f32)>),
     /// How each wizard has been moving (for its stride).
     anims: HashMap<u16, rig::Anim>,
+    /// When each wizard was last in sight (its name shows till a moment
+    /// after).
+    sighted: HashMap<u16, f64>,
     /// `?orbit=ID`: the camera turns about that wizard (0: you).
     orbit: Option<u16>,
     orbit_at: Option<[f32; 3]>,
@@ -400,6 +403,7 @@ pub fn start() {
                 weather: query_value("weather").and_then(|w| Weather::named(&w)),
                 thunder: (0.0, None),
                 anims: HashMap::new(),
+                sighted: HashMap::new(),
                 orbit: query_value("orbit").and_then(|v| v.parse().ok()),
                 orbit_at: None,
                 set,
