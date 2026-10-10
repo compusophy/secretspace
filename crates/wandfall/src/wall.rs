@@ -6,7 +6,7 @@
 //! predicts it to the bit.
 
 use crate::laws::*;
-use crate::motion::Body;
+use crate::motion::{Body, Wish};
 
 /// Pushed out of something's side by `by` (x, z) in the air: touching
 /// it, for a moment.
@@ -23,9 +23,9 @@ pub fn can(b: &Body) -> bool {
     !b.ground && !b.glide && b.wall > 0 && b.walls < WALL_JUMPS && b.mantle == 0 && b.tether == 0
 }
 
-/// Whether steering `wish` (`len`: any held) pushes into the wall.
-pub fn into(b: &Body, (wx, wz): (f32, f32), len: f32) -> bool {
-    len > 1e-6 && wx * b.wall_n[0] + wz * b.wall_n[1] < -0.3
+/// Whether steering `w` pushes into the wall.
+pub fn into(b: &Body, w: &Wish) -> bool {
+    w.any && w.x * b.wall_n[0] + w.z * b.wall_n[1] < -0.3
 }
 
 /// Up and off the wall.
