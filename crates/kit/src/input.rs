@@ -16,7 +16,18 @@ thread_local! {
     static HELD: Cell<bool> = const { Cell::new(false) };
 }
 
-pub use crate::pointer::Kind;
+/// What a finger did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Down,
+    Move,
+    Up,
+    /// The browser took the pointer away (a system gesture, say).
+    Cancel,
+    /// A mouse or pen moving with nothing pressed (never sent by `Hands`,
+    /// whose mouse comes as `Hand::Mouse`).
+    Hover,
+}
 
 /// Something a hand did.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -213,11 +224,38 @@ pub fn lock(el: &web_sys::Element) {
     el.request_pointer_lock();
 }
 
-/// Take what playing needs (it must come from a press): the mouse, and
-/// with `whole`, the whole screen and the keyboard where the browser
-/// allows it (Chrome and Edge, full screen: then even Ctrl+W and Esc come
-/// to the game, so Esc can open its menu; a held Esc still leaves). A game
-/// gives them back with `release`.
+/// Take the mouse as `lock` does, its movement raw where the browser can
+/// give it (`unadjustedMovement`: Chrome and Edge): what the hand did,
+/// without the system's acceleration, so a flick turns as far each time.
+/// Where it cannot (it refuses), the plain lock instead.
+fn lock_raw(el: &web_sys::Element) {
+    let Ok(request) = js_sys::Reflect::get(el, &"requestPointerLock".into()) else {
+        return lock(el);
+    };
+    let Some(request) = request.dyn_ref::<js_sys::Function>() else {
+        return lock(el);
+    };
+    let opts = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(&opts, &"unadjustedMovement".into(), &JsValue::TRUE);
+    match request.call1(el, &opts) {
+        Ok(answer) => {
+            // Older browsers answer nothing (and ignore the option).
+            if let Ok(promise) = answer.dyn_into::<js_sys::Promise>() {
+                let el = el.clone();
+                let plain = Closure::once(move |_: JsValue| lock(&el));
+                let _ = promise.catch(&plain);
+                plain.forget();
+            }
+        }
+        Err(_) => lock(el),
+    }
+}
+
+/// Take what playing needs (it must come from a press): the mouse (raw,
+/// where it can be), and with `whole`, the whole screen and the keyboard
+/// where the browser allows it (Chrome and Edge, full screen: then even
+/// Ctrl+W and Esc come to the game, so Esc can open its menu; a held Esc
+/// still leaves). A game gives them back with `release`.
 pub fn play(el: &web_sys::Element, whole: bool) {
     if whole {
         if !full() {
@@ -227,7 +265,7 @@ pub fn play(el: &web_sys::Element, whole: bool) {
         }
         hold_keys();
     }
-    lock(el);
+    lock_raw(el);
 }
 
 /// Give everything back: the mouse, the keyboard and the whole screen.

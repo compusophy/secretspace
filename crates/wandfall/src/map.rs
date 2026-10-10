@@ -1,9 +1,10 @@
 //! The island, from its seed alone, the same on the server and the page:
 //! rolling hills falling to the sea at the shore, its places (`places`:
 //! the Spire at the centre, a stone circle, a demon rift, a crystal
-//! grove), and trees, rocks, giant mushrooms and ruined rings of pillars
-//! between them. Heights use arithmetic only (no library calls), so both
-//! ends agree to the bit.
+//! grove, a basalt causeway), and between them woods and open meadows
+//! (trees, giant mushrooms under them), rocks, and ruined rings of
+//! pillars. Heights use arithmetic only (no library calls), so both ends
+//! agree to the bit.
 
 use engine::rng::{splitmix, Rng};
 
@@ -37,13 +38,21 @@ impl Kind {
     pub fn standable(self) -> bool {
         matches!(
             self,
-            Kind::Rock | Kind::Pillar | Kind::Stone | Kind::Altar | Kind::Merlon | Kind::Column
+            Kind::Rock
+                | Kind::Pillar
+                | Kind::Stone
+                | Kind::Altar
+                | Kind::Merlon
+                | Kind::Column
+                | Kind::Shroom
         )
     }
 }
 
 /// One thing standing on the island. Its trunk, body or shaft blocks
-/// wizards and bolts: a cylinder `r` wide and `h` tall from `y`.
+/// wizards and bolts: a cylinder `r` wide and `h` tall from `y`. A giant
+/// mushroom's cap, wider than its stem, holds up wizards come down onto
+/// it (from below they pass through it) and stops bolts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Prop {
     pub kind: Kind,
@@ -58,16 +67,91 @@ pub struct Prop {
 }
 
 impl Prop {
-    /// Where feet stand on its top, if they can: a boulder's rounded top
-    /// stands a little over its trunk.
+    /// Where feet stand on its top (at its highest), if they can: a
+    /// boulder's rounded top stands a little over its trunk, a mushroom's
+    /// cap over its stem.
     pub fn top(&self) -> Option<f32> {
-        let h = if self.kind == Kind::Rock {
-            self.h * ROCK_TOP
-        } else {
-            self.h
+        let h = match self.kind {
+            Kind::Rock => self.h * ROCK_TOP,
+            Kind::Shroom => self.h * SHROOM_DOME[0].1,
+            _ => self.h,
         };
         self.kind.standable().then_some(self.y + h)
     }
+
+    /// Where feet stand on its top `d` out from its middle, if they can
+    /// there: on a mushroom's cap, lower toward its rim.
+    pub fn top_at(&self, d: f32) -> Option<f32> {
+        let t = self.top().filter(|_| d < self.stand_r())?;
+        Some(if self.kind == Kind::Shroom {
+            self.y + self.h * dome(d / self.h)
+        } else {
+            t
+        })
+    }
+
+    /// How far out from its middle it spreads, as drawn: a tree's crown,
+    /// a mushroom's cap to its rim, else its trunk or body.
+    pub fn spread(&self) -> f32 {
+        match self.kind {
+            Kind::Tree => CROWN * self.scale,
+            Kind::Shroom => self.h * RIM,
+            _ => self.r,
+        }
+    }
+
+    /// How far out from its middle its top holds you up.
+    pub fn stand_r(&self) -> f32 {
+        if self.kind == Kind::Shroom {
+            self.h * SHROOM_CAP
+        } else {
+            self.r
+        }
+    }
+
+    /// How high its trunk, body or shaft stands in the way: a mushroom's
+    /// stem up to its cap.
+    pub fn solid_top(&self) -> f32 {
+        if self.kind == Kind::Shroom {
+            self.y + self.h * SHROOM_UNDER
+        } else {
+            self.top().unwrap_or(self.y + self.h).max(self.y + self.h)
+        }
+    }
+
+    /// Its cap, if it has one, as rings stacked on its underside, each as
+    /// high as the dome is at its edge (so a bolt is stopped close under
+    /// the dome): how wide, from what height to what.
+    pub fn cap(&self) -> Option<impl Iterator<Item = (f32, f32, f32)> + '_> {
+        (self.kind == Kind::Shroom).then(|| {
+            let under = self.y + self.h * SHROOM_UNDER;
+            RINGS.iter().map(move |k| {
+                let r = self.stand_r() * k;
+                (r, under, self.y + self.h * dome(r / self.h))
+            })
+        })
+    }
+}
+
+/// A mushroom cap's rings, out from its middle (shares of how far its top
+/// holds you up): closer near the rim, where the dome falls fastest.
+const RINGS: [f32; 6] = [1.0, 0.95, 0.85, 0.7, 0.5, 0.25];
+
+/// How far a mushroom's cap spreads to its rim, for every metre it
+/// stands.
+const RIM: f32 = SHROOM_DOME[SHROOM_DOME.len() - 1].0;
+
+/// How high a mushroom's dome is `r` out from its middle (both for every
+/// metre the mushroom stands), between the points of `SHROOM_DOME`.
+fn dome(r: f32) -> f32 {
+    let mut was = SHROOM_DOME[0];
+    for &(x, y) in &SHROOM_DOME[1..] {
+        if r <= x {
+            return was.1 + (y - was.1) * (r - was.0) / (x - was.0);
+        }
+        was = (x, y);
+    }
+    was.1
 }
 
 /// Metres a cell of the props' grid.
@@ -86,6 +170,8 @@ pub struct Map {
     /// (each its middle, on the ground).
     pub pads: Vec<[f32; 3]>,
     grid: Vec<Vec<u16>>,
+    /// How much further than its trunk any prop's top reaches (a cap's).
+    reach: f32,
 }
 
 pub fn smooth(t: f32) -> f32 {
@@ -93,10 +179,19 @@ pub fn smooth(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// 0..1 from 64 random bits (their top 24).
+fn unit_of(h: u64) -> f32 {
+    (h >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// 0..1, the next from `rng`.
+pub fn unit(rng: &mut Rng) -> f32 {
+    unit_of(rng.next_u64())
+}
+
 /// 0..1 from a lattice point.
 fn lattice(seed: u64, x: i32, z: i32) -> f32 {
-    let h = splitmix(seed ^ ((x as u32 as u64) << 32 | z as u32 as u64));
-    (h >> 40) as f32 / (1u64 << 24) as f32
+    unit_of(splitmix(seed ^ ((x as u32 as u64) << 32 | z as u32 as u64)))
 }
 
 /// Smooth value noise, 0..1.
@@ -135,6 +230,7 @@ impl Map {
             decks: Vec::new(),
             pads: Vec::new(),
             grid: vec![Vec::new(); (CELLS * CELLS) as usize],
+            reach: 0.0,
         };
         places::set(&mut m);
         m.scatter();
@@ -146,7 +242,6 @@ impl Map {
     /// apart; from a stream of their own, so nothing else moves.
     fn launchers(&mut self) {
         let mut rng = Rng::new(self.seed ^ 0x1a0c_4e55);
-        let mut unit = move || (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
         let fits = |m: &Map, x: f32, z: f32| {
             m.land(x, z)
                 && m.height(x, z) > SEA + 1.0
@@ -158,7 +253,7 @@ impl Map {
         for k in 0..self.pois.len() {
             let p = self.pois[k];
             for _ in 0..16 {
-                let (s, c) = crate::trig::sin_cos((unit() * 65536.0) as u16);
+                let (s, c) = crate::trig::sin_cos((unit(&mut rng) * 65536.0) as u16);
                 let (x, z) = (p.x + c * p.r * 1.25, p.z + s * p.r * 1.25);
                 if fits(self, x, z) {
                     self.pads.push([x, self.height(x, z), z]);
@@ -170,8 +265,8 @@ impl Map {
         while n < PADS_WILD && tries < 600 {
             tries += 1;
             let (x, z) = (
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
             );
             if fits(self, x, z) && self.wild(x, z, 6.0) {
                 self.pads.push([x, self.height(x, z), z]);
@@ -207,8 +302,10 @@ impl Map {
                 f = f.max(h);
             }
         }
-        for q in self.near(x, z, 0.0) {
-            if let Some(t) = q.top().filter(|&t| t <= y + STEP) {
+        for q in self.near(x, z, self.reach) {
+            let (dx, dz) = (q.x - x, q.z - z);
+            let d = (dx * dx + dz * dz).sqrt();
+            if let Some(t) = q.top_at(d).filter(|&t| t <= y + STEP) {
                 f = f.max(t);
             }
         }
@@ -217,16 +314,22 @@ impl Map {
 
     /// A ledge to climb onto from feet at `p`, pushing along (`wx`, `wz`):
     /// the top of something that can be stood on, close ahead and within
-    /// reach above the feet; its top and middle.
-    pub fn ledge(&self, p: [f32; 3], (wx, wz): (f32, f32)) -> Option<(f32, [f32; 2])> {
-        self.near(p[0], p[2], RADIUS + MANTLE_NEAR)
+    /// reach above the feet (not a cap over the head); its top, its
+    /// middle, and how far its edge is from the body's side.
+    pub fn ledge(&self, p: [f32; 3], (wx, wz): (f32, f32)) -> Option<(f32, [f32; 2], f32)> {
+        self.near(p[0], p[2], RADIUS + MANTLE_NEAR + self.reach)
             .filter_map(|q| {
                 let t = q.top()?;
                 let (dx, dz) = (q.x - p[0], q.z - p[2]);
                 let d = (dx * dx + dz * dz).sqrt().max(1e-4);
+                let over = q.cap().is_some() && d < q.stand_r();
+                let gap = d - q.stand_r() - RADIUS;
+                if over || gap >= MANTLE_NEAR {
+                    return None;
+                }
                 let ahead = (dx * wx + dz * wz) / d;
                 (t > p[1] + MANTLE_LOW && t <= p[1] + MANTLE_REACH && ahead >= MANTLE_AHEAD)
-                    .then_some((t, [q.x, q.z]))
+                    .then_some((t, [q.x, q.z], gap))
             })
             .next()
     }
@@ -247,12 +350,34 @@ impl Map {
     pub fn put(&mut self, p: Prop) {
         let i = self.props.len() as u16;
         self.props.push(p);
+        self.reach = self.reach.max(p.stand_r() - p.r);
         let c = |v: f32| (((v + MAP_HALF) / CELL).floor() as i32).clamp(0, CELLS - 1);
         for cz in c(p.z - p.r)..=c(p.z + p.r) {
             for cx in c(p.x - p.r)..=c(p.x + p.r) {
                 self.grid[(cz * CELLS + cx) as usize].push(i);
             }
         }
+    }
+
+    /// How wooded (x, z) is, 0..1: woods where it is high, meadows low.
+    pub fn wood(&self, x: f32, z: f32) -> f32 {
+        let (x, z) = (x / WOODS, z / WOODS);
+        noise(self.seed ^ 0x3d, x, z) * 0.7 + noise(self.seed ^ 0x3e, x * 2.3, z * 2.3) * 0.3
+    }
+
+    /// How far something at (x, z) spreading `spread` out (a crown, a
+    /// cap) is from the spread of the nearest of the things `of` picks
+    /// (m; under nought, into it).
+    fn gap(&self, x: f32, z: f32, spread: f32, of: impl Fn(&Prop) -> bool) -> f32 {
+        // Nothing spreads further than the biggest tree's crown (its
+        // scale 1.4); and looking for a wood, this much further.
+        self.near(x, z, spread + CROWN * 1.4 + SHROOM_WOOD)
+            .filter(|q| of(q))
+            .map(|q| {
+                let (dx, dz) = (q.x - x, q.z - z);
+                (dx * dx + dz * dz).sqrt() - spread - q.spread()
+            })
+            .fold(f32::MAX, f32::min)
     }
 
     /// Whether a point is on land (not the sea, not past the edge).
@@ -262,24 +387,23 @@ impl Map {
 
     fn scatter(&mut self) {
         let mut rng = Rng::new(self.seed ^ 0x51ab);
-        let mut unit = move || (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
-        let put = |m: &mut Map, p: Prop| m.put(p);
         // Ruins first: rings of pillars, the island's landmarks.
-        let mut ruins = 0;
-        while ruins < RUINS {
+        let (mut ruins, mut tries) = (0, 0);
+        while ruins < RUINS && tries < RUINS * 200 {
+            tries += 1;
             let (x, z) = (
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
             );
             if !self.land(x, z) || !self.wild(x, z, 10.0) {
                 continue;
             }
             ruins += 1;
-            let ring = 5.0 + unit() * 4.0;
-            let n = 6 + (unit() * 5.0) as usize;
+            let ring = 5.0 + unit(&mut rng) * 4.0;
+            let n = 6 + (unit(&mut rng) * 5.0) as usize;
             for k in 0..n {
                 // Some pillars have fallen.
-                if unit() < 0.25 {
+                if unit(&mut rng) < 0.25 {
                     continue;
                 }
                 let turn = (k * 65536 / n) as u16;
@@ -289,67 +413,97 @@ impl Map {
                 if !self.land(px, pz) {
                     continue;
                 }
-                let h = 2.0 + unit() * 3.5;
+                let h = 2.0 + unit(&mut rng) * 3.5;
                 let y = self.height(px, pz) - 0.3;
-                put(
-                    self,
-                    Prop {
-                        kind: Kind::Pillar,
-                        x: px,
-                        z: pz,
-                        y,
-                        r: 0.55,
-                        h,
-                        yaw: a,
-                        scale: h,
-                    },
-                );
+                self.put(Prop {
+                    kind: Kind::Pillar,
+                    x: px,
+                    z: pz,
+                    y,
+                    r: 0.55,
+                    h,
+                    yaw: a,
+                    scale: h,
+                });
             }
         }
-        let place = |m: &mut Map, kind: Kind, count: usize, unit: &mut dyn FnMut() -> f32| {
+        let place = |m: &mut Map, kind: Kind, count: usize, rng: &mut Rng| {
             let mut n = 0;
             let mut tries = 0;
-            while n < count && tries < count * 20 {
+            while n < count && tries < count * 40 {
                 tries += 1;
-                let (x, z) = ((unit() * 2.0 - 1.0) * SHORE, (unit() * 2.0 - 1.0) * SHORE);
+                let (x, z) = (
+                    (unit(rng) * 2.0 - 1.0) * SHORE,
+                    (unit(rng) * 2.0 - 1.0) * SHORE,
+                );
                 if !m.land(x, z) || m.height(x, z) < SEA + 1.0 || !m.wild(x, z, 3.0) {
                     continue;
                 }
-                let s = 0.8 + unit() * 0.6;
+                // Trees in the woods (thinning at their edges), now and
+                // then one alone in a meadow.
+                if kind == Kind::Tree {
+                    let thick = smooth((m.wood(x, z) - WOOD_EDGE) / WOOD_SOFT);
+                    if unit(rng) >= thick.max(WOOD_LONE) {
+                        continue;
+                    }
+                }
+                let s = 0.8 + unit(rng) * 0.6;
                 let (r, h) = match kind {
-                    Kind::Rock => (1.1 * s, 1.3 * s),
+                    Kind::Rock => (ROCK_GIRTH * s, ROCK_TALL * s),
                     Kind::Shroom => (0.4 * s, 3.5 * s),
                     _ => (0.35 * s, 6.0 * s),
                 };
-                // Not inside another.
-                if m.near(x, z, r + 1.2).next().is_some() {
+                // Not inside another. A tree's crown not over a ruin's
+                // pillar or a mushroom's cap (the grove's): their tops
+                // stand up into it. A mushroom by a wood under open sky,
+                // its cap clear of every crown and of all else.
+                let fits = match kind {
+                    Kind::Tree => {
+                        let tall = |q: &Prop| matches!(q.kind, Kind::Pillar | Kind::Shroom);
+                        m.gap(x, z, CROWN * s, tall) >= 0.0
+                    }
+                    Kind::Shroom => {
+                        let cap = h * RIM;
+                        m.gap(x, z, cap, |_| true) >= 0.0
+                            && m.gap(x, z, cap, |q| q.kind == Kind::Tree) < SHROOM_WOOD
+                    }
+                    _ => true,
+                };
+                if !fits || m.near(x, z, r + 1.2).next().is_some() {
                     continue;
                 }
                 let y = m.height(x, z) - 0.2;
-                let yaw = unit() * std::f32::consts::TAU;
-                put(
-                    m,
-                    Prop {
-                        kind,
-                        x,
-                        z,
-                        y,
-                        r,
-                        h,
-                        yaw,
-                        scale: s,
-                    },
-                );
+                let yaw = unit(rng) * std::f32::consts::TAU;
+                m.put(Prop {
+                    kind,
+                    x,
+                    z,
+                    y,
+                    r,
+                    h,
+                    yaw,
+                    scale: s,
+                });
                 n += 1;
             }
         };
-        place(self, Kind::Tree, TREES, &mut unit);
-        place(self, Kind::Rock, ROCKS, &mut unit);
-        place(self, Kind::Shroom, SHROOMS, &mut unit);
+        place(self, Kind::Tree, TREES, &mut rng);
+        place(self, Kind::Rock, ROCKS, &mut rng);
+        place(self, Kind::Shroom, SHROOMS, &mut rng);
     }
 
     /// Props whose cylinder comes within `d` of (x, z) on the ground.
     pub fn near(&self, x: f32, z: f32, d: f32) -> impl Iterator<Item = &Prop> + '_ {
+        self.near_indexed(x, z, d).map(|(_, p)| p)
+    }
+
+    /// As `near`, each with its place in `props` (a look keyed by it).
+    pub fn near_indexed(
+        &self,
+        x: f32,
+        z: f32,
+        d: f32,
+    ) -> impl Iterator<Item = (usize, &Prop)> + '_ {
         let c = |v: f32| (((v + MAP_HALF) / CELL).floor() as i32).clamp(0, CELLS - 1);
         let (x0, x1, z0, z1) = (c(x - d), c(x + d), c(z - d), c(z + d));
         let mut seen: Vec<u16> = Vec::new();
@@ -364,8 +518,8 @@ impl Map {
         }
         seen.sort_unstable();
         seen.into_iter()
-            .map(move |i| &self.props[i as usize])
-            .filter(move |p| {
+            .map(move |i| (i as usize, &self.props[i as usize]))
+            .filter(move |(_, p)| {
                 let (dx, dz) = (p.x - x, p.z - z);
                 let reach = p.r + d;
                 dx * dx + dz * dz < reach * reach
@@ -373,13 +527,15 @@ impl Map {
     }
 
     /// Move a wizard at `p` (feet), `tall` metres tall, out of anything
-    /// standing there.
-    pub fn push_out(&self, p: &mut [f32; 3], tall: f32) {
+    /// standing there; not out of a top it can step up onto (`rise`
+    /// above its feet at most).
+    pub fn push_out(&self, p: &mut [f32; 3], tall: f32, rise: f32) {
         let hits: Vec<Prop> = self.near(p[0], p[2], RADIUS).copied().collect();
         for q in hits {
-            // Over its top (or standing on it), or under it: clear.
-            let top = q.top().unwrap_or(q.y + q.h).max(q.y + q.h);
-            if p[1] >= top - 0.02 || p[1] + tall < q.y {
+            // Over its top (or standing on it), a step below the feet, or
+            // over the head: clear.
+            let step = q.top().is_some_and(|t| t <= p[1] + rise);
+            if p[1] >= q.solid_top() - 0.02 || step || p[1] + tall < q.y {
                 continue;
             }
             let (dx, dz) = (p[0] - q.x, p[2] - q.z);
@@ -416,29 +572,18 @@ impl Map {
         let len = (d[0] * d[0] + d[2] * d[2]).sqrt();
         let mid = [a[0] + d[0] * 0.5, a[2] + d[2] * 0.5];
         for q in self
-            .near(mid[0], mid[1], len * 0.5 + BOLT_RADIUS)
+            .near(mid[0], mid[1], len * 0.5 + BOLT_RADIUS + self.reach)
             .filter(|q| solid(q))
         {
-            // Circle against the segment, on the ground's plane.
-            let (fx, fz) = (a[0] - q.x, a[2] - q.z);
-            let r = q.r + BOLT_RADIUS;
-            let aa = d[0] * d[0] + d[2] * d[2];
-            let bb = 2.0 * (fx * d[0] + fz * d[2]);
-            let cc = fx * fx + fz * fz - r * r;
-            let t = if cc <= 0.0 {
-                0.0
-            } else {
-                let disc = bb * bb - 4.0 * aa * cc;
-                if aa < 1e-9 || disc < 0.0 {
-                    continue;
-                }
-                (-bb - disc.sqrt()) / (2.0 * aa)
-            };
-            if !(0.0..=1.0).contains(&t) {
-                continue;
+            let mut hit = through(a, d, [q.x, q.z], q.r + BOLT_RADIUS, (q.y, q.solid_top()));
+            for (r, lo, hi) in q.cap().into_iter().flatten() {
+                let ring = through(a, d, [q.x, q.z], r + BOLT_RADIUS, (lo, hi));
+                hit = match (hit, ring) {
+                    (Some(s), Some(c)) => Some(s.min(c)),
+                    (s, c) => s.or(c),
+                };
             }
-            let y = a[1] + d[1] * t;
-            if y >= q.y && y <= q.y + q.h && first.is_none_or(|f| t < f) {
+            if let Some(t) = hit.filter(|&t| first.is_none_or(|f| t < f)) {
                 first = Some(t);
             }
         }
@@ -462,13 +607,12 @@ impl Map {
         first
     }
 
-    /// A random spot on land, from `r` (0..1 numbers).
+    /// A random spot on land with nothing standing near, from `rng`.
     pub fn spot(&self, rng: &mut Rng) -> [f32; 2] {
         for _ in 0..200 {
-            let u = |rng: &mut Rng| (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
             let (x, z) = (
-                (u(rng) * 2.0 - 1.0) * SHORE * 0.85,
-                (u(rng) * 2.0 - 1.0) * SHORE * 0.85,
+                (unit(rng) * 2.0 - 1.0) * SHORE * 0.85,
+                (unit(rng) * 2.0 - 1.0) * SHORE * 0.85,
             );
             if self.land(x, z) && self.near(x, z, 1.5).next().is_none() {
                 return [x, z];
@@ -476,6 +620,42 @@ impl Map {
         }
         [0.0, 0.0]
     }
+}
+
+/// Where along the segment from `a` (along `d`, 0..1) it first is inside
+/// an upright cylinder about `at`, `r` wide, from height `lo` to `hi`: in
+/// through its side, or down (or up) through its top (or bottom).
+fn through(a: [f32; 3], d: [f32; 3], at: [f32; 2], r: f32, (lo, hi): (f32, f32)) -> Option<f32> {
+    // Inside its circle, on the ground's plane...
+    let (fx, fz) = (a[0] - at[0], a[2] - at[1]);
+    let aa = d[0] * d[0] + d[2] * d[2];
+    let cc = fx * fx + fz * fz - r * r;
+    let (t0, t1) = if aa < 1e-9 {
+        if cc > 0.0 {
+            return None;
+        }
+        (0.0, 1.0)
+    } else {
+        let bb = 2.0 * (fx * d[0] + fz * d[2]);
+        let disc = bb * bb - 4.0 * aa * cc;
+        if disc < 0.0 {
+            return None;
+        }
+        let s = disc.sqrt();
+        ((-bb - s) / (2.0 * aa), (-bb + s) / (2.0 * aa))
+    };
+    // ...and inside its height, at once.
+    let (y0, y1) = if d[1].abs() < 1e-9 {
+        if a[1] < lo || a[1] > hi {
+            return None;
+        }
+        (0.0, 1.0)
+    } else {
+        let (u, w) = ((lo - a[1]) / d[1], (hi - a[1]) / d[1]);
+        (u.min(w), u.max(w))
+    };
+    let (enter, exit) = (t0.max(y0).max(0.0), t1.min(y1).min(1.0));
+    (enter <= exit).then_some(enter)
 }
 
 #[cfg(test)]
@@ -499,6 +679,62 @@ mod tests {
     }
 
     #[test]
+    fn trees_grow_in_woods_with_meadows_between() {
+        for seed in 0..8 {
+            let m = Map::new(seed);
+            let trees = m.props.iter().filter(|q| q.kind == Kind::Tree).count();
+            assert_eq!(trees, TREES, "seed {seed}: every tree finds a place");
+            // Land in the wild near a tree (in the woods), and not.
+            let (mut wild, mut wooded) = (0, 0);
+            for k in 0..900 {
+                let (x, z) = ((k % 30) as f32 * 9.0 - 135.0, (k / 30) as f32 * 9.0 - 135.0);
+                if m.land(x, z) && m.wild(x, z, 0.0) {
+                    wild += 1;
+                    wooded += m.near(x, z, 8.0).any(|q| q.kind == Kind::Tree) as i32;
+                }
+            }
+            let share = wooded as f32 / wild as f32;
+            assert!((0.45..0.85).contains(&share), "seed {seed}: {share} wooded");
+        }
+    }
+
+    #[test]
+    fn mushrooms_grow_by_the_woods_and_no_crown_hides_a_cap_or_a_pillar() {
+        for seed in 0..16 {
+            let m = Map::new(seed);
+            let gap = |a: &Prop, b: &Prop| (a.x - b.x).hypot(a.z - b.z) - a.spread() - b.spread();
+            let mut wild = 0;
+            for s in m.props.iter().filter(|q| q.kind == Kind::Pillar) {
+                // No crown over a ruin's pillar either.
+                for t in m.props.iter().filter(|q| q.kind == Kind::Tree) {
+                    assert!(gap(s, t) >= 0.0, "seed {seed}: {s:?} under {t:?}");
+                }
+            }
+            for s in m.props.iter().filter(|q| q.kind == Kind::Shroom) {
+                // No crown over any cap (the grove's, too).
+                for t in m.props.iter().filter(|q| q.kind == Kind::Tree) {
+                    assert!(gap(s, t) >= 0.0, "seed {seed}: {s:?} under {t:?}");
+                }
+                if !m.wild(s.x, s.z, 0.0) {
+                    continue;
+                }
+                // Out in the wild, by a wood, nothing else under its cap.
+                wild += 1;
+                let others = m.props.iter().filter(|q| !std::ptr::eq(*q, s));
+                assert!(
+                    others.clone().all(|q| gap(s, q) >= 0.0),
+                    "seed {seed}: {s:?}"
+                );
+                let by = others
+                    .filter(|q| q.kind == Kind::Tree)
+                    .any(|t| gap(s, t) < SHROOM_WOOD);
+                assert!(by, "seed {seed}: {s:?} by a wood");
+            }
+            assert!(wild >= SHROOMS * 9 / 10, "seed {seed}: {wild} mushrooms");
+        }
+    }
+
+    #[test]
     fn the_places_shape_the_island() {
         use crate::places::Place;
         for seed in 0..24 {
@@ -508,7 +744,7 @@ mod tests {
             assert_eq!(m.height(0.0, 0.0), PLATEAU_TOP);
             assert_eq!(m.height(PLATEAU - 1.0, 0.0), PLATEAU_TOP);
             let mut p = [0.5, PLATEAU_TOP, 0.0];
-            m.push_out(&mut p, HEIGHT);
+            m.push_out(&mut p, HEIGHT, 0.0);
             assert!(p[0] >= TOWER_RADIUS + RADIUS - 1e-3, "the tower blocks");
             for q in &m.pois {
                 assert!(m.land(q.x, q.z), "seed {seed}: {:?} on land", q.place);
@@ -529,6 +765,11 @@ mod tests {
                 assert!(m.props.iter().any(|p| p.kind == k), "seed {seed}: {k:?}");
             }
             assert!(m.caches.len() >= 8);
+            // Each cache lies clear, or on something to stand on.
+            for c in &m.caches {
+                let mut under = m.near(c[0], c[1], RADIUS);
+                assert!(under.all(|q| q.top().is_some()), "seed {seed}: {c:?}");
+            }
         }
     }
 
@@ -566,7 +807,7 @@ mod tests {
         let m = Map::new(3);
         let q = *m.props.iter().find(|p| p.kind == Kind::Rock).unwrap();
         let mut p = [q.x + 0.1, q.y + 0.2, q.z];
-        m.push_out(&mut p, HEIGHT);
+        m.push_out(&mut p, HEIGHT, 0.0);
         let d = ((p[0] - q.x).powi(2) + (p[2] - q.z).powi(2)).sqrt();
         assert!(d >= q.r + RADIUS - 1e-4);
         let a = [q.x - 3.0, q.y + q.h * 0.5, q.z];
@@ -575,5 +816,39 @@ mod tests {
         assert!(t > 0.2 && t < 0.6, "{t}");
         let up = [q.x - 3.0, q.y + q.h + 20.0, q.z];
         assert!(m.strikes(up, [q.x + 3.0, up[1], q.z]).is_none(), "over it");
+    }
+
+    #[test]
+    fn a_bolt_coming_down_onto_a_top_strikes_the_top() {
+        let m = Map::new(11);
+        let tops = m.props.iter().filter(|q| {
+            matches!(
+                q.kind,
+                Kind::Pillar | Kind::Rock | Kind::Column | Kind::Stone
+            )
+        });
+        let mut n = 0;
+        for q in tops {
+            let top = q.top().unwrap();
+            // Past its side over it and down in through its top; and
+            // straight down onto its middle.
+            let rays = [
+                (
+                    [q.x - q.r - 1.0, top + 1.0, q.z],
+                    [q.x + q.r * 0.5, top - 1.0, q.z],
+                ),
+                ([q.x, top + 4.0, q.z], [q.x, q.y, q.z]),
+            ];
+            for (a, b) in rays {
+                let t = m.strikes(a, b).expect("it strikes");
+                let y = a[1] + (b[1] - a[1]) * t;
+                // Unless something else stood in the way first.
+                if (y - top).abs() > 0.05 {
+                    assert!(y > top, "{q:?}: struck at {y}, under its top {top}");
+                }
+                n += 1;
+            }
+        }
+        assert!(n > 100, "{n}");
     }
 }

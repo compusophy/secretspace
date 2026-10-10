@@ -4,7 +4,9 @@
 //! flames, the circle's orb in its shell of light, the rift's gate
 //! burning and swirling, embers streaking up off its lava into smoke, the
 //! grove's glimmer and glints, the rune turning over the causeway's crown
-//! and the spray blowing across its columns.
+//! and the spray blowing across its columns. Spray, smoke and embers go
+//! the way the wind blows; a place's motes are left out when it is far
+//! from the eye (its light is not).
 
 use std::f32::consts::TAU;
 
@@ -18,14 +20,34 @@ use crate::land::{CYAN, EMBER, GOLDEN, VIOLET};
 const PAD: V3 = rgb(255, 200, 110);
 /// The causeway's: sea-green.
 const SPRAY: V3 = rgb(150, 255, 214);
+/// A place's motes, sparks and smoke are drawn within this of the eye.
+const MOTES: f32 = 120.0;
 use crate::look::Look;
-use wandfall::laws::RIFT_DEPTH;
+use wandfall::laws::{RIFT_DEPTH, TOWER_HEIGHT};
 use wandfall::places::Place;
 
+/// A flat thing laid at `at` with `up` as its upright, turned `turn`
+/// radians about it, sized `size` (across, up, across).
+fn laid(at: V3, up: V3, turn: f32, size: V3) -> render::M4 {
+    let x = geo::norm(geo::cross(up, [0.0, 0.0, 1.0]));
+    let z = geo::cross(x, up);
+    let (s, c) = turn.sin_cos();
+    let across = geo::add(geo::scale(x, c), geo::scale(z, s));
+    let along = geo::sub(geo::scale(z, c), geo::scale(x, s));
+    m4::basis(
+        at,
+        geo::scale(across, size[0]),
+        geo::scale(up, size[1]),
+        geo::scale(along, size[2]),
+    )
+}
+
 impl Look {
-    /// What moves at the places, and their light, `t` seconds in.
-    pub fn places(&self, d: &mut Draw, t: f32) {
+    /// What moves at the places, and their light, `t` seconds in, seen
+    /// from `eye`, the wind blowing `wind` (m/s across x and z).
+    pub fn places(&self, d: &mut Draw, t: f32, (eye, wind): (V3, [f32; 2])) {
         let l = &self.land;
+        let near = |x: f32, z: f32| (x - eye[0]).hypot(z - eye[2]) < MOTES;
         let glow = |d: &mut Draw, mesh: Mesh, m: render::M4, c: V3, a: f32| {
             d.items
                 .push(Item::new(mesh, m).tint(c, a).glow(1.0).pass(Pass::Glow));
@@ -52,32 +74,35 @@ impl Look {
         }
         // Launch runes: a circle of runes turning on the ground, a shaft
         // of light up out of it, motes rising; its light.
-        for (k, &p) in l.pads.iter().enumerate() {
+        for (k, &(p, up)) in l.pads.iter().enumerate() {
+            // Laid on the ground's slope, just over it.
+            let on = geo::add(p, geo::scale(up, 0.1));
             let floor = [p[0], p[1] + 0.25, p[2]];
             let pulse = 0.75 + 0.25 * (t * 2.6 + k as f32).sin();
             let r = wandfall::laws::PAD_R;
             glow(
                 d,
                 self.sigil,
-                m4::place(floor, t * 0.7, [r * 1.15, 1.0, r * 1.15]),
+                laid(on, up, t * 0.7, [r * 1.15, 1.0, r * 1.15]),
                 PAD,
                 0.9 * pulse,
             );
             glow(
                 d,
                 self.ring,
-                m4::place(floor, -t, [r * 1.5, 1.0, r * 1.5]),
+                laid(on, up, -t, [r * 1.5, 1.0, r * 1.5]),
                 PAD,
                 0.5,
             );
-            glow(
-                d,
-                self.beam,
-                m4::place(floor, 0.0, [r * 0.7, 9.0, r * 0.7]),
-                PAD,
-                0.12 * pulse,
+            // Its shaft of light, soft at its edge, fading as it rises.
+            d.items.push(
+                Item::new(self.shaft, m4::place(floor, 0.0, [r * 0.4, 9.0, r * 0.4]))
+                    .tint(PAD, 0.35 * pulse)
+                    .glow(1.0)
+                    .material(Material::Rim)
+                    .pass(Pass::Glow),
             );
-            for n in 0..10 {
+            for n in 0..if near(p[0], p[2]) { 10 } else { 0 } {
                 let u = |i: u32| unit(hash(k as i32, n, 61 + i));
                 let f = (t * (0.5 + 0.3 * u(0)) + u(1)).fract();
                 let a = u(2) * TAU + t * 1.5;
@@ -105,25 +130,28 @@ impl Look {
         }
         for p in &l.pois {
             let base = [p.x, p.level, p.z];
+            // How many motes to draw: all of them near, none far.
+            let motes = |n: i32| if near(p.x, p.z) { n } else { 0 };
             match p.place {
                 Place::Spire => {
                     // The beacon: a crystal turning over the hat, its
-                    // light up into the sky, runes wheeling about it.
-                    let foot = base[1] - 0.3;
-                    let top = [p.x, foot + 45.0 + (t * 1.3).sin() * 0.4, p.z];
+                    // light up into the sky, runes wheeling about it
+                    // (clear of the hat).
+                    let roof = base[1] - 0.3 + TOWER_HEIGHT;
+                    let top = [p.x, roof + 15.0 + (t * 1.3).sin() * 0.4, p.z];
                     let m = m4::place(top, t * 0.8, [1.3, 2.0, 1.3]);
                     d.items
                         .push(Item::new(l.gem, m).tint(VIOLET, 1.0).glow(2.2));
                     glow(
                         d,
-                        self.beam,
+                        self.shaft,
                         m4::place(top, 0.0, [0.5, 260.0, 0.5]),
                         VIOLET,
                         0.25,
                     );
                     glow(
                         d,
-                        self.beam,
+                        self.shaft,
                         m4::place(top, 0.0, [1.6, 260.0, 1.6]),
                         VIOLET,
                         0.06,
@@ -134,8 +162,8 @@ impl Look {
                         c: geo::scale(VIOLET, 4.0),
                     });
                     for (y, r, w) in [
-                        (foot + 31.4, 6.2, 0.35),
-                        (foot + 35.4, 4.4, -0.5),
+                        (roof + 2.0, 6.2, 0.35),
+                        (roof + 5.4, 4.4, -0.5),
                         (top[1], 2.4, 0.9),
                     ] {
                         glow(
@@ -255,16 +283,17 @@ impl Look {
                         r: 12.0,
                         c: geo::scale(EMBER, 2.0),
                     });
-                    for k in 0..48 {
+                    for k in 0..motes(48) {
                         let u = |i| unit(hash(k, i, 31));
                         let f = (t / (3.0 + 2.0 * u(0)) + u(1)).fract();
                         let a = u(2) * TAU;
                         let r = 1.0 + 9.0 * u(3) + f * 1.5;
+                        let blown = 2.0 * f;
                         d.sparks.push(Spark {
                             p: [
-                                p.x + a.cos() * r,
+                                p.x + a.cos() * r + wind[0] * blown,
                                 floor + 0.3 + f * (6.0 + 6.0 * u(4)),
-                                p.z + a.sin() * r,
+                                p.z + a.sin() * r + wind[1] * blown,
                             ],
                             size: 0.07 + 0.06 * u(5),
                             c: [
@@ -278,14 +307,19 @@ impl Look {
                         });
                     }
                     // Smoke rolling up off the lava, lit red from below.
-                    for k in 0..10 {
+                    for k in 0..motes(10) {
                         let u = |i| unit(hash(k, i, 33));
                         let f = (t / (7.0 + 3.0 * u(0)) + u(1)).fract();
                         let a = u(2) * TAU + f * 0.6;
                         let r = 2.0 + 7.0 * u(3) + f * 2.0;
                         let warm = mix(rgb(120, 40, 20), rgb(40, 34, 36), f);
                         d.sparks.push(Spark {
-                            p: [p.x + a.cos() * r, floor + 1.0 + f * 14.0, p.z + a.sin() * r],
+                            // Leaning with the wind the higher it rolls.
+                            p: [
+                                p.x + a.cos() * r + wind[0] * 8.0 * f * f,
+                                floor + 1.0 + f * 14.0,
+                                p.z + a.sin() * r + wind[1] * 8.0 * f * f,
+                            ],
                             size: 2.0 + 4.0 * f,
                             c: [
                                 warm[0],
@@ -300,7 +334,7 @@ impl Look {
                     }
                 }
                 Place::Grove => {
-                    for k in 0..36 {
+                    for k in 0..motes(36) {
                         let u = |i| unit(hash(k, i, 41));
                         let a = u(0) * TAU + t * 0.05 * (u(1) - 0.5);
                         let r = p.r * u(2).sqrt();
@@ -339,14 +373,14 @@ impl Look {
                         c: geo::scale(SPRAY, 1.6),
                     });
                     // Spray blowing over the columns, low and drifting.
-                    for k in 0..28 {
+                    for k in 0..motes(28) {
                         let u = |i| unit(hash(k, i, 43));
                         let life = 4.0 + 3.0 * u(0);
                         let age = (t / life + u(1)).fract();
                         let a = u(2) * TAU;
                         let r = p.r * 0.8 * u(3).sqrt();
-                        let x = p.x + a.cos() * r + (age - 0.5) * 6.0;
-                        let z = p.z + a.sin() * r + (age - 0.5) * 2.0;
+                        let x = p.x + a.cos() * r + (age - 0.5) * 6.0 * wind[0];
+                        let z = p.z + a.sin() * r + (age - 0.5) * 6.0 * wind[1];
                         let y = base[1] + 1.0 + 7.0 * u(4) + age * 1.5;
                         let fade = (age * (1.0 - age) * 4.0).min(1.0);
                         d.sparks.push(Spark {
@@ -360,5 +394,43 @@ impl Look {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wandfall::map::Map;
+
+    #[test]
+    fn a_launch_rune_lies_on_its_slope() {
+        // Round the ring's edge, how far the circle is off the ground:
+        // laid on the slope, never far; flat, part of it is buried or
+        // floats on a hillside.
+        let r = wandfall::laws::PAD_R * 1.5;
+        let (mut laid_worst, mut flat_worst) = (0.0f32, 0.0f32);
+        for seed in [1, 2, 3, 9] {
+            let map = Map::new(seed);
+            for &q in &map.pads {
+                let up = crate::land::slope(&map, q);
+                let m = laid(q, up, 0.3, [r, 1.0, r]);
+                for k in 0..24 {
+                    let a = k as f32 / 24.0 * TAU;
+                    let p = [
+                        m[0] * a.cos() + m[8] * a.sin() + m[12],
+                        m[1] * a.cos() + m[9] * a.sin() + m[13],
+                        m[2] * a.cos() + m[10] * a.sin() + m[14],
+                    ];
+                    laid_worst = laid_worst.max((p[1] - map.height(p[0], p[2])).abs());
+                    let flat = map.height(q[0] + a.cos() * r, q[2] + a.sin() * r);
+                    flat_worst = flat_worst.max((q[1] - flat).abs());
+                }
+            }
+        }
+        println!("laid {laid_worst}, flat {flat_worst}");
+        assert!(
+            laid_worst < 0.35 && laid_worst * 3.0 < flat_worst,
+            "laid {laid_worst}, flat {flat_worst}"
+        );
     }
 }

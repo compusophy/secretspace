@@ -56,6 +56,13 @@ pub trait Room: Send {
         let _ = bytes;
         Ok(())
     }
+    /// The same, told the schema the snapshot was written in (what
+    /// `schema()` said then), so a room whose format has moved on can
+    /// still read its old ones. The server boots rooms through this.
+    fn load_snap(&mut self, schema: u16, bytes: &[u8]) -> Result<(), &'static str> {
+        let _ = schema;
+        self.load(bytes)
+    }
     /// Its format version, written into each snapshot.
     fn schema(&self) -> u16 {
         0

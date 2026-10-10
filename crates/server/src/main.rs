@@ -5,15 +5,20 @@
 //! `/ws/<game>` (plain `/ws` and `/ws/arena` are wyrm, for pages from
 //! before) and says the platform Hello: the server knows its soul and name
 //! (`souls`) and the room takes it from there. Each connection has a reader
-//! thread and a writer thread, and a browser that cannot keep up is let go
-//! rather than allowed to hold its room back. `/ws/hub` is told once a
-//! second who is online where and how many visits there have been. A page
-//! counts as a visit when its first connection asks with `?v=1`. Pages
-//! send what players tell us, and their crashes, to `/feedback`.
+//! thread and a writer thread (`sockets`), and a browser that cannot keep
+//! up is let go rather than allowed to hold its room back. `/ws/hub` is
+//! told once a second who is online where and how many visits there have
+//! been. A page counts as a visit when its first connection asks with
+//! `?v=1`. Pages send what players tell us, and their crashes, to
+//! `/feedback`.
+//!
+//! Nothing a browser sends is trusted: a request's head is bounded and
+//! must come soon (`http`), and connections are counted, everyone's
+//! together and each address's, so no one can take all there are.
 //!
 //! What is kept, under `$DATA_DIR`: `visits`, `souls`, `rooms/<id>/`,
-//! `feedback`. A
-//! SIGTERM (a deploy) holds every room still and saves it first (`signal`).
+//! `feedback`. A SIGTERM (a deploy) holds every room still and saves it
+//! first (`signal`).
 //!
 //! Optionally serves the pages too (`--static dist`). std only.
 //!
@@ -21,26 +26,28 @@
 
 mod feedback;
 mod host;
+mod http;
 mod signal;
+mod sockets;
 mod souls;
 mod store;
 mod ws;
 
+use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::sync_channel;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use engine::hub::Stats;
-use engine::room::{Room, Who};
-use engine::who::{Hello, PLATFORM};
+use engine::room::Room;
 
-use host::{unix, Event, Game};
+use host::{unix, Game};
+use http::{respond, Head, Paced};
 use souls::Souls;
 use store::{Factory, Store};
 
@@ -64,13 +71,15 @@ const BUILD: &str = match option_env!("SECRETSPACE_BUILD") {
     Some(b) => b,
     None => "dev",
 };
-/// Messages a browser may send a second.
-const RATE: u32 = 90;
-/// A browser that says nothing for this long is gone (pages send a
-/// heartbeat every ten seconds).
-const IDLE: Duration = Duration::from_secs(45);
-/// A page that has not said Hello by now is a guest.
-const HELLO_WAIT: Duration = Duration::from_secs(1);
+/// Connections open at once, everyone's together, and WebSockets from one
+/// address (a classroom shares one, each page two or three); past these a
+/// new one is closed at once rather than let in to starve the rest.
+const MOST_OPEN: usize = 2000;
+const MOST_FROM_ONE: usize = 128;
+/// A request (its head, and a report's body) must all be here this soon
+/// after its connection, and an answer must be taken as patiently: a
+/// slow drip either way is let go.
+const REQUEST_WAIT: Duration = Duration::from_secs(10);
 
 /// What every connection thread can see.
 struct Shared {
@@ -79,6 +88,9 @@ struct Shared {
     visits: AtomicU64,
     souls: Mutex<Souls>,
     feedback: feedback::Feedback,
+    /// Connections open, and WebSockets open from each address.
+    open: AtomicUsize,
+    from: Mutex<HashMap<String, usize>>,
 }
 
 impl Shared {
@@ -100,6 +112,48 @@ impl Shared {
 
     fn souls(&self) -> MutexGuard<'_, Souls> {
         self.souls.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A WebSocket from `addr`, counted while it is open; None when that
+    /// address has `MOST_FROM_ONE` open already.
+    fn count_from(&self, addr: &str) -> Option<FromOne<'_>> {
+        let mut from = self.from.lock().unwrap_or_else(|e| e.into_inner());
+        let n = from.entry(addr.to_string()).or_default();
+        if *n >= MOST_FROM_ONE {
+            return None;
+        }
+        *n += 1;
+        Some(FromOne {
+            shared: self,
+            addr: addr.to_string(),
+        })
+    }
+}
+
+/// One connection counted open, until it is dropped.
+struct Open(Arc<Shared>);
+
+impl Drop for Open {
+    fn drop(&mut self) {
+        self.0.open.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// One WebSocket counted against its address, until it is dropped.
+struct FromOne<'a> {
+    shared: &'a Shared,
+    addr: String,
+}
+
+impl Drop for FromOne<'_> {
+    fn drop(&mut self) {
+        let mut from = self.shared.from.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = from.get_mut(&self.addr) {
+            *n -= 1;
+            if *n == 0 {
+                from.remove(&self.addr);
+            }
+        }
     }
 }
 
@@ -127,11 +181,9 @@ fn main() {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(1);
 
-    let visits = data
-        .as_ref()
-        .and_then(|d| fs::read_to_string(d.join("visits")).ok())
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
+    let (visits, visits_at) = data
+        .as_deref()
+        .map_or((0, None), |d| read_visits(d, unix()));
     let store = Store::new(data.as_deref());
     let games: Vec<Arc<Game>> = ROOMS
         .iter()
@@ -147,10 +199,12 @@ fn main() {
         visits: AtomicU64::new(visits),
         souls: Mutex::new(souls),
         feedback: feedback::Feedback::new(data.as_deref()),
+        open: AtomicUsize::new(0),
+        from: Mutex::new(HashMap::new()),
     });
     {
-        let (s, d) = (shared.clone(), data.clone());
-        thread::spawn(move || keep(d.as_deref(), &s));
+        let s = shared.clone();
+        thread::spawn(move || keep(visits_at.as_deref(), &s));
     }
 
     let listener = TcpListener::bind(("0.0.0.0", port)).expect("bind");
@@ -164,29 +218,71 @@ fn main() {
             .unwrap_or_default()
     );
     let mut next_conn = 0u32;
-    for stream in listener.incoming().flatten() {
+    loop {
+        let stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            // Out of file handles, most likely: a breath, not a spin.
+            Err(_) => {
+                thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+        };
+        if shared.open.fetch_add(1, Ordering::Relaxed) >= MOST_OPEN {
+            shared.open.fetch_sub(1, Ordering::Relaxed);
+            continue;
+        }
+        let open = Open(shared.clone());
         next_conn = next_conn.wrapping_add(1).max(1);
-        let (conn, shared, root) = (next_conn, shared.clone(), root.clone());
-        thread::spawn(move || {
-            let _ = serve(stream, conn, &shared, root.as_deref());
+        let (conn, root) = (next_conn, root.clone());
+        // A thread the system will not give closes the connection (the
+        // closure, and so the stream, is dropped), never the server.
+        let _ = thread::Builder::new().spawn(move || {
+            let _ = serve(stream, conn, &open.0, root.as_deref());
         });
     }
 }
 
+/// The visit count kept in `dir`, and where to keep it from now on. One
+/// that does not read is set aside, not written over, and counting starts
+/// again from nothing; one that cannot even be moved is left alone, and
+/// the count is not kept.
+fn read_visits(dir: &Path, now: u64) -> (u64, Option<PathBuf>) {
+    let path = dir.join("visits");
+    let count = |b: &[u8]| {
+        let text = std::str::from_utf8(b).map_err(|_| "not text")?;
+        text.trim().parse().map_err(|_| "not a number")
+    };
+    match store::read_kept(&path, now, count) {
+        store::Kept::Read(n) => (n, Some(path)),
+        store::Kept::Fresh => (0, Some(path)),
+        store::Kept::Stuck => (0, None),
+    }
+}
+
 /// Every five seconds: play time for souls, and the souls and the visit
-/// count written down when they changed. On a stop: wait for every room to
-/// hold still and save, write everything down, and leave.
-fn keep(dir: Option<&Path>, shared: &Shared) {
+/// count (at `visits`) written down when they changed (the writing done
+/// outside the souls' lock, so no Hello waits on a disk). On a stop: wait
+/// for every room to hold still and save, write everything down, and
+/// leave.
+fn keep(visits: Option<&Path>, shared: &Shared) {
     let mut saved = shared.visits.load(Ordering::Relaxed);
     let write_visits = |saved: &mut u64| {
         let now = shared.visits.load(Ordering::Relaxed);
-        let Some(dir) = dir.filter(|_| now != *saved) else {
+        let Some(path) = visits.filter(|_| now != *saved) else {
             return;
         };
-        let tmp = dir.join("visits.tmp");
-        if fs::write(&tmp, now.to_string()).is_ok() && fs::rename(&tmp, dir.join("visits")).is_ok()
-        {
-            *saved = now;
+        match store::write_atomic(path, now.to_string().as_bytes()) {
+            Ok(()) => *saved = now,
+            Err(e) => eprintln!("visits: not saved: {e}"),
+        }
+    };
+    let save_souls = |all: bool| {
+        let due = shared.souls().due(unix(), all);
+        if let Some((path, bytes)) = due {
+            if let Err(e) = store::write_atomic(&path, &bytes) {
+                eprintln!("souls: not saved: {e}");
+                shared.souls().unsaved();
+            }
         }
     };
     let mut last = Instant::now();
@@ -202,17 +298,15 @@ fn keep(dir: Option<&Path>, shared: &Shared) {
             }
             // Let the Stills reach the pages.
             thread::sleep(Duration::from_millis(300));
-            shared.souls().save(unix());
+            save_souls(true);
             write_visits(&mut saved);
             eprintln!("stopped after {} ms", t.elapsed().as_millis());
             std::process::exit(0);
         }
         if last.elapsed() >= Duration::from_secs(5) {
             last = Instant::now();
-            let mut souls = shared.souls();
-            souls.tick(5, unix());
-            souls.save(unix());
-            drop(souls);
+            shared.souls().tick(5, unix());
+            save_souls(false);
             write_visits(&mut saved);
         }
     }
@@ -224,51 +318,24 @@ fn serve(
     shared: &Shared,
     root: Option<&Path>,
 ) -> std::io::Result<()> {
-    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_nodelay(true)?;
-    let peer = stream
-        .peer_addr()
-        .map(|a| a.ip().to_string())
-        .unwrap_or_default();
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut head = Vec::new();
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 || head.len() > 64 {
-            return Ok(());
-        }
-        let line = line.trim_end().to_string();
-        if line.is_empty() {
-            break;
-        }
-        head.push(line);
-    }
-    let request = head.first().cloned().unwrap_or_default();
-    let target = request.split_whitespace().nth(1).unwrap_or("/").to_string();
-    let (path, query) = target.split_once('?').unwrap_or((&target, ""));
-    let header = |name: &str| {
-        head.iter().find_map(|h| {
-            let (k, v) = h.split_once(':')?;
-            k.trim()
-                .eq_ignore_ascii_case(name)
-                .then(|| v.trim().to_string())
-        })
+    stream.set_write_timeout(Some(REQUEST_WAIT))?;
+    let peer = stream.peer_addr().ok().map(|a| a.ip());
+    // One socket for reading and writing (its threads share it, so a
+    // connection is one file handle).
+    let stream = Arc::new(stream);
+    let mut reader = BufReader::new(Paced {
+        stream: &stream,
+        until: Some(Instant::now() + REQUEST_WAIT),
+    });
+    let Some(head) = http::read_head(&mut reader)? else {
+        return Ok(());
     };
-    let mut out = stream;
-    // Railway's edge says who is really asking.
-    let addr = header("X-Forwarded-For")
-        .and_then(|f| f.split(',').next().map(|a| a.trim().to_string()))
-        .unwrap_or(peer);
+    let (path, query) = head.target();
+    let addr = http::client(&head, peer);
+    let mut out: &TcpStream = &stream;
     if path == "/feedback" {
-        return feedback(
-            &mut out,
-            &mut reader,
-            &request,
-            query,
-            &addr,
-            shared,
-            header("Content-Length"),
-        );
+        return feedback(&mut out, &mut reader, &head, query, &addr, shared);
     }
     if let Some(room) = path.strip_prefix("/ws") {
         let room = room.trim_start_matches('/');
@@ -282,21 +349,29 @@ fn serve(
         if room != "hub" && game.is_none() {
             return respond(&mut out, "404 Not Found", "text/plain", b"no such game");
         }
-        let Some(key) = header("Sec-WebSocket-Key") else {
+        let Some(key) = head.header("Sec-WebSocket-Key") else {
             return respond(&mut out, "400 Bad Request", "text/plain", b"websocket only");
+        };
+        let Some(_counted) = shared.count_from(&addr) else {
+            return respond(&mut out, "429 Too Many Requests", "text/plain", b"later");
         };
         write!(
             out,
             "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
-            ws::accept_key(&key)
+            ws::accept_key(key)
         )?;
         if query.split('&').any(|kv| kv == "v=1") {
             shared.visits.fetch_add(1, Ordering::Relaxed);
         }
         let watch = query.split('&').any(|kv| kv == "watch=1");
+        // Open now: the socket's own timeouts, no deadline.
+        reader.get_mut().until = None;
         return match game {
-            Some(game) => play(reader, out, conn, watch, &addr, &game, shared),
-            None => hub(reader, out, shared),
+            Some(game) => {
+                let s = stream.clone();
+                sockets::play(reader, s, conn, watch, &addr, &game, shared)
+            }
+            None => sockets::hub(reader, &stream, shared),
         };
     }
     if path == "/health" {
@@ -313,7 +388,7 @@ fn serve(
         return respond(&mut out, "200 OK", "application/json", body.as_bytes());
     }
     match root {
-        Some(root) => file(&mut out, root, path),
+        Some(root) => http::file(&mut out, root, path, query),
         None => respond(&mut out, "200 OK", "text/plain", b"secretspace\n"),
     }
 }
@@ -321,15 +396,14 @@ fn serve(
 /// `POST /feedback`: a report from a page, kept (`feedback`). `GET
 /// /feedback?key=`: the newest kept, for whoever holds `$FEEDBACK_KEY`.
 fn feedback(
-    out: &mut TcpStream,
+    out: &mut impl Write,
     reader: &mut impl Read,
-    request: &str,
+    head: &Head,
     query: &str,
     addr: &str,
     shared: &Shared,
-    length: Option<String>,
 ) -> std::io::Result<()> {
-    if request.starts_with("GET ") {
+    if head.request.starts_with("GET ") {
         let key = query
             .split('&')
             .find_map(|kv| kv.strip_prefix("key="))
@@ -339,7 +413,7 @@ fn feedback(
             None => respond(out, "404 Not Found", "text/plain", b"no"),
         };
     }
-    if !request.starts_with("POST ") {
+    if !head.request.starts_with("POST ") {
         return respond(
             out,
             "405 Method Not Allowed",
@@ -347,7 +421,10 @@ fn feedback(
             b"POST a report",
         );
     }
-    let Some(n) = length.and_then(|l| l.parse::<usize>().ok()) else {
+    let Some(n) = head
+        .header("Content-Length")
+        .and_then(|l| l.parse::<usize>().ok())
+    else {
         return respond(out, "411 Length Required", "text/plain", b"how long?");
     };
     if n > feedback::MOST {
@@ -396,177 +473,56 @@ fn stats_json(shared: &Shared) -> String {
     )
 }
 
-/// Every answer isolates its page (COOP+COEP, as `web/vercel.json`): the
-/// desk's computer runs its programs only on an isolated page.
-fn respond(out: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> std::io::Result<()> {
-    write!(
-        out,
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nCross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Embedder-Policy: require-corp\r\nConnection: close\r\n\r\n",
-        body.len()
-    )?;
-    out.write_all(body)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn file(out: &mut TcpStream, root: &Path, path: &str) -> std::io::Result<()> {
-    if path.split('/').any(|seg| seg == "..") {
-        return respond(out, "400 Bad Request", "text/plain", b"no");
+    fn shared() -> Shared {
+        Shared {
+            games: Vec::new(),
+            hub: AtomicUsize::new(0),
+            visits: AtomicU64::new(0),
+            souls: Mutex::new(Souls::open(None, 0)),
+            feedback: feedback::Feedback::new(None),
+            open: AtomicUsize::new(0),
+            from: Mutex::new(HashMap::new()),
+        }
     }
-    // The game was called arena once; old links still land on it.
-    if path == "/arena" || path.starts_with("/arena/") {
-        return write!(
-            out,
-            "HTTP/1.1 302 Found\r\nLocation: /wyrm/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+    #[test]
+    fn one_address_opens_so_many_and_each_one_closed_is_room_again() {
+        let s = shared();
+        let mut held: Vec<FromOne> = (0..MOST_FROM_ONE)
+            .map(|_| s.count_from("a").expect("room"))
+            .collect();
+        assert!(s.count_from("a").is_none(), "one too many");
+        assert!(s.count_from("b").is_some(), "another address is not held");
+        held.pop();
+        assert!(s.count_from("a").is_some(), "one closed: room again");
+        drop(held);
+        assert!(
+            s.from.lock().unwrap().is_empty(),
+            "and nothing is kept for an address with none open"
         );
     }
-    let rel = path.trim_start_matches('/');
-    let mut p = root.join(rel);
-    if rel.is_empty() || rel.ends_with('/') || p.is_dir() {
-        p = p.join("index.html");
-    }
-    let kind = match p.extension().and_then(|e| e.to_str()) {
-        Some("html") => "text/html; charset=utf-8",
-        Some("js") => "text/javascript",
-        Some("wasm") => "application/wasm",
-        Some("css") => "text/css",
-        Some("svg") => "image/svg+xml",
-        Some("png") => "image/png",
-        Some("json") => "application/json",
-        _ => "application/octet-stream",
-    };
-    match fs::read(&p) {
-        Ok(body) => respond(out, "200 OK", kind, &body),
-        Err(_) => respond(out, "404 Not Found", "text/plain", b"not here"),
-    }
-}
 
-/// Read a browser's frames until it goes quiet, closes, or floods; hand
-/// each binary one to `said`.
-fn listen(mut reader: impl Read, mut said: impl FnMut(Vec<u8>)) -> std::io::Result<()> {
-    let (mut window, mut count) = (Instant::now(), 0u32);
-    loop {
-        let frame = ws::read(&mut reader)?;
-        if window.elapsed() > Duration::from_secs(1) {
-            window = Instant::now();
-            count = 0;
-        }
-        count += 1;
-        if count > RATE {
-            return Ok(());
-        }
-        match frame {
-            ws::Frame::Close => return Ok(()),
-            // Browsers do not ping, and these protocols have no text.
-            ws::Frame::Ping(p) => drop(p),
-            ws::Frame::Text(t) => drop(t),
-            ws::Frame::Binary(b) => said(b),
-        }
+    #[test]
+    fn a_visit_count_that_does_not_read_is_set_aside() {
+        let dir = std::env::temp_dir().join(format!("visits-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("visits");
+        assert_eq!(read_visits(&dir, 1), (0, Some(path.clone())), "none yet");
+        fs::write(&path, "1234\n").unwrap();
+        assert_eq!(read_visits(&dir, 2), (1234, Some(path.clone())));
+        // Bytes that are not text: set aside, and counting starts again.
+        fs::write(&path, b"12\xc334").unwrap();
+        assert_eq!(read_visits(&dir, 3), (0, Some(path.clone())));
+        assert_eq!(fs::read(dir.join("visits.bad-3")).unwrap(), b"12\xc334");
+        // One that cannot be moved aside is not written over.
+        fs::write(&path, "lots").unwrap();
+        fs::create_dir(dir.join("visits.bad-4")).unwrap();
+        assert_eq!(read_visits(&dir, 4), (0, None));
+        let _ = fs::remove_dir_all(&dir);
     }
-}
-
-/// A browser in a game: a writer thread drains what its room sends it;
-/// this thread reads what it says. Its first message is the platform Hello
-/// (anything else, or a second of silence, and it is a guest); platform
-/// messages go no further than here.
-fn play(
-    mut reader: impl Read,
-    writer: TcpStream,
-    conn: u32,
-    watch: bool,
-    addr: &str,
-    game: &Game,
-    shared: &Shared,
-) -> std::io::Result<()> {
-    if game.state() != "running" {
-        return Ok(());
-    }
-    let (tx, rx) = sync_channel::<Vec<u8>>(game.backlog);
-    let mut w = writer.try_clone()?;
-    let pump = thread::spawn(move || {
-        for msg in rx {
-            if ws::write(&mut w, 2, &msg).is_err() {
-                break;
-            }
-        }
-        let _ = ws::write(&mut w, 8, &[]);
-        let _ = w.shutdown(std::net::Shutdown::Both);
-    });
-    let mut who = Who::guest(watch);
-    let mut first = None;
-    if !watch {
-        writer.set_read_timeout(Some(HELLO_WAIT))?;
-        match ws::read(&mut reader) {
-            Ok(ws::Frame::Binary(b)) => match Hello::decode(&b) {
-                Some(h) => {
-                    let (w, seen) = shared.souls().hello(&h, addr, unix(), watch);
-                    who = w;
-                    let _ = tx.try_send(seen.encode());
-                }
-                None => first = Some(b),
-            },
-            Ok(ws::Frame::Close) => return Ok(()),
-            Ok(_) => {}
-            Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
-            Err(e) => return Err(e),
-        }
-    }
-    writer.set_read_timeout(Some(IDLE))?;
-    let soul = |w: &Who| if w.watch { 0 } else { w.soul };
-    let me = soul(&who);
-    let started = game.events.send(Event::Open(conn, tx, who)).is_ok();
-    if let (true, Some(b)) = (started, first) {
-        let _ = game.events.send(Event::Say(conn, b));
-    }
-    let result = if started {
-        shared.souls().enter(conn, me);
-        listen(reader, |b| {
-            if b.first() != Some(&PLATFORM) {
-                let _ = game.events.send(Event::Say(conn, b));
-            } else if let Some(h) = Hello::decode(&b) {
-                // Hello again: a new name, most likely.
-                let mut souls = shared.souls();
-                let (w, seen) = souls.hello(&h, addr, unix(), watch);
-                souls.enter(conn, soul(&w));
-                drop(souls);
-                let _ = game.events.send(Event::Who(conn, w, seen.encode()));
-            }
-        })
-    } else {
-        Ok(())
-    };
-    shared.souls().leave(conn);
-    let _ = game.events.send(Event::Close(conn));
-    let _ = writer.shutdown(std::net::Shutdown::Both);
-    let _ = pump.join();
-    result
-}
-
-/// A browser on the hub: told the numbers now and once a second after.
-fn hub(reader: impl Read, writer: TcpStream, shared: &Shared) -> std::io::Result<()> {
-    writer.set_read_timeout(Some(IDLE))?;
-    shared.hub.fetch_add(1, Ordering::Relaxed);
-    let done = Arc::new(AtomicBool::new(false));
-    let mut w = writer.try_clone()?;
-    let result = thread::scope(|scope| {
-        let stop = done.clone();
-        scope.spawn(move || {
-            while !stop.load(Ordering::Relaxed) {
-                if ws::write(&mut w, 2, &shared.stats().encode()).is_err() {
-                    break;
-                }
-                for _ in 0..10 {
-                    if stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(100));
-                }
-            }
-            let _ = w.shutdown(std::net::Shutdown::Both);
-        });
-        let r = listen(reader, drop);
-        done.store(true, Ordering::Relaxed);
-        r
-    });
-    let _ = writer.shutdown(std::net::Shutdown::Both);
-    shared.hub.fetch_sub(1, Ordering::Relaxed);
-    result
 }

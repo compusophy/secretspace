@@ -1,6 +1,6 @@
 [package]
 name = "secretspace-wyrm-look"
-description = "How wyrm looks: the ground, the food, the snakes, the bursts, drawn into pixels. Shared by its page and the hub's live preview."
+description = "How wyrm looks: the ground, the food, the snakes, the bursts, drawn into pixels, and what a page keeps of the arena between frames. Shared by its page and the hub's live preview."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -68,8 +68,9 @@ pub fn open(path: &str) {
     let _ = frame.set_attribute("title", path.trim_matches('/'));
     let _ = frame.set_attribute(
         "style",
-        "position:fixed;inset:0;width:100vw;height:100vh;border:0;margin:0;padding:0;z-index:10;background:#000",
+        "position:fixed;left:0;top:0;border:0;margin:0;padding:0;z-index:10;background:#000",
     );
+    fill(&frame);
     let Some(body) = doc.body() else {
         crate::go(path);
         return;
@@ -124,6 +125,20 @@ pub fn listen() {
             close();
         }
     });
+    crate::on_resize(|| {
+        FRAME.with(|f| {
+            if let Some(frame) = f.borrow().as_ref() {
+                fill(frame);
+            }
+        })
+    });
+}
+
+/// The frame over the whole window (as it shows: on a phone, between its
+/// toolbars).
+fn fill(frame: &HtmlIFrameElement) {
+    let (w, h) = crate::window_css();
+    crate::place(frame, w, h);
 }
 
 /// From a game: leave it. In the front page's frame, the front page takes

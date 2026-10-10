@@ -5,22 +5,21 @@ Read this first: the operating map. README.md is the pitch.
 ## What this is
 
 A hub of tiny multiplayer games, all Rust. The front page (`/`) shows a
-card per game with live player counts, and in its footer how many people
-are online anywhere and how many visits there have ever been. Each game is
+card per game with live player counts; its footer, who is online and all
+visits ever. Each game is
 its own page (`/wyrm/`, ...) talking to its own room on one server.
 
 The first game, **wyrm** (snakes: eat the glow, grow, make them run into
 you), is the template the next ones are cloned from: an authoritative
 world on the server, each browser sent only what changed in its view, and
-a page that draws every pixel itself into one buffer. Its card on the hub
-is the real game, live: the hub watches the room (`?watch=1`, never one of
-the people counted) and draws it with the game's own look.
+a page that draws every pixel itself into one buffer. Its hub card is the
+real game, live: the hub watches the room (`?watch=1`, never counted) and
+draws it in the game's own look.
 
-Game #2, **Luciphon** (`docs/luciphon.md`), is **legacy, frozen**: it stays
-as it is (live, its card hidden). **Now: the engine** (`docs/engine.md`,
-UE5-class rendering on WebGPU, generic for every game) and game #3, a
-wand battle royale in the spirit of Plunderstorm (`docs/plunder.md`), the
-engine's first consumer.
+Game #2, **Luciphon** (`docs/luciphon.md`), is **legacy, frozen** (live,
+card hidden). **Now: the engine** (`docs/engine.md`,
+UE5-class WebGPU rendering for every game) and game #3, a wand battle
+royale like Plunderstorm (`docs/plunder.md`), its first consumer.
 
 ## Rules
 
@@ -43,56 +42,58 @@ engine's first consumer.
    (`the_browser_rebuilds_every_body_exactly`). Never send a lossy update.
 6. **Caps:** a source file holds at most 1,000 lines; this file at most
    8,000 characters. At a cap: split, shrink, or delete. Never raise one.
-7. **wasm32 always green:** the wasm32 clippy in Commands, every page
-   crate in it. Every WGSL string has a naga test.
+7. **wasm32 always green:** the wasm clippy in Commands. Every WGSL
+   string has a naga test; Wandfall's predicted code calls `crate::trig`,
+   never platform floats (`caps.sh` checks both).
 
 ## Map
 
 ```
-crates/engine     wire rng room (the Room trait) hub (Stats) who (Hello, Seen,
-                  Still, names) words snap (save files) fixed (Q16.16) sha1
-                  synth (sounds from numbers)
-crates/pixels     Canvas (RGBA buffer, AA shapes, glow, blend), font (5x7),
-                  wrap, fit_scale; examples/sheet.rs (a test sheet)
-crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
-                  ui text scale), gl (WebGL2 + a pixel layer), input (keys,
-                  fingers, mouse, pointer lock), Link (reconnects, Hello
-                  first), Session (the key), Pointer, Version, Socket,
+crates/engine     wire rng room (Room trait) hub (Stats) who (Hello, Seen,
+                  names) words snap (save files) fixed sha1 synth (sounds)
+crates/pixels     Canvas (RGBA buffer, AA shapes, glow), font (5x7), wrap,
+                  fit_scale; examples/sheet.rs (a test sheet)
+crates/kit        the browser end: Screen, place/snap/on_resize (whole
+                  device pixels), gl (WebGL2), input (keys, fingers, pointer
+                  lock), Link (reconnects, Hello first), Session, Version,
                   TextField, storage, audio, meta (every game's Esc menu),
                   shell (games open over the hub, full screen), report
-crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
-crates/render     the engine: retained scene, geo, sculpt, terrain, shadows,
-                  HDR + AO + bloom + ACES, grass, sea, decals, light
-                  grid; its test page crates/showcase-web (/showcase/)
-crates/hub-web    the front page (cards, live counts, scroll, footer), watch
-                  (wyrm's card, live, as a watcher), wand, desk (cards)
+crates/gpu        WebGPU device (wgpu), Caps, Health, the pixel layer
+crates/render     the engine: retained scene, geo, sculpt, terrain, shadows
+                  (cascades + island layer), HDR + AO + bloom + ACES, grass,
+                  sea, decals, slots (bind tables), light grid; its test page
+                  crates/showcase-web (/showcase/)
+crates/hub-web    the front page: shelf (layout) backdrop tag; watch (wyrm's
+                  card, live), wand (Wandfall's), desk (Battlestation's)
 crates/wyrm       the game: laws world bots grid proto view mirror room
-crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
+crates/wyrm-look  how it looks: ground, food, snake, bursts, live (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
 crates/luciphon*  game #2, legacy: core, -look (2D), -web (WebGL2 3D)
-crates/wandfall   game #3's core: laws trig map places motion storm world bots
-                  predict proto view room (spec: docs/plunder.md)
-crates/wandfall-look  its look (page + hub): look land basalt aura
-                  rig/ fx/ state icon scene spectate camera sky
-crates/wandfall-web  its page: page/ bar hud menu sound ambience steps touch lessons
+crates/wandfall   game #3's core: laws trig map places motion/ (run jump
+                  ledge collide) storm world/ bots/ spells loot hall predict
+                  proto view room (spec: docs/plunder.md)
+crates/wandfall-look  its look (page + hub): look land/ flora basalt aura
+                  make rig/ fx/ state icon scene spectate camera sky
+crates/wandfall-web  its page: page/ hud/ menu/ bar sound ambience steps
+                  touch lessons reload settings
 crates/battlestation*  desk sim: laws keys hands term; -look: gear scene
-                  body glass monitor light desk; -web: page/ (os.rs: compusophyOS)
-crates/server     main (routes) host (a Room's thread; panics rebuild it)
-                  store (snapshots) souls (names) signal (SIGTERM) feedback
+                  body glass monitor light desk; -web: page/ (os.rs:
+                  compusophyOS, so pages send COOP+COEP)
+crates/server     main (routes) http sockets host (a Room's thread; panics
+                  rebuild it) store souls signal (SIGTERM) feedback
 web/index.html    the hub page; web/<game>/index.html each game's page
-scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
-                  ship.sh (ship/: image for Railway), caps.sh
+scripts/          build-web.sh (dist/: hub at /, games at /<id>/), ship.sh
+                  (ship/: image for Railway), caps.sh (+ shaders.awk)
 ```
 
 Server routes: `/ws/<room>` a game (`/ws` and `/ws/arena` are wyrm, for
 old pages; `?watch=1` only looks), `/ws/hub` the live Stats once a second,
 `/health` (`ok <build> ...`), `/stats` (JSON), `/feedback` (POST a report;
-GET `?key=$FEEDBACK_KEY` reads them); with `--static dist` the pages (`/arena`
-redirects to `/wyrm/`, as `web/vercel.json` does). A page's first connection carries
-`?v=1` and counts a visit; visits persist in `$DATA_DIR/visits` (the image
-sets `/data`, a volume: kept across deploys), as are `souls`
-and `rooms/<id>/snap-*.bin`. A deploy is a Stillness: SIGTERM, each room
-`still()`s and saves, pages keep their picture and resume on reconnect.
+GET `?key=$FEEDBACK_KEY` reads them); with `--static dist` the pages (`/arena` ->
+`/wyrm/`, as in `web/vercel.json`). A page's first connection carries
+`?v=1` and counts a visit. `$DATA_DIR` (`/data` in the image, a volume)
+keeps `visits`, `souls`, `feedback`, `rooms/<id>/snap-*.bin`. A deploy is
+a Stillness: SIGTERM, rooms `still()` and save, pages resume after.
 CI ships the server only when its build hash differs from live /health.
 
 Pixels: `kit::Screen` makes a buffer pixel `scale` CSS pixels (~960
@@ -117,23 +118,23 @@ cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-
 cargo fmt --all --check
 bash scripts/caps.sh
 bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen
-cargo run -p secretspace-server --release -- --static dist   # :8787, everything
+cargo run -p secretspace-server --profile server -- --static dist   # :8787
 ```
 
-Deploys are automatic (`.github/workflows/deploy.yml`) on every push to
-main or a `claude/` branch: tests, then the server to Railway (`railway
-up` of `ship/`, secret RAILWAY_TOKEN, variable RAILWAY_SERVICE) and the
-pages to Vercel (secrets VERCEL_*), pointed at the server by the variable
-RELAY (`wss://<railway domain>/ws`). No RELAY, no page deploy. Pages
-send COOP+COEP (the OS).
+A push to main or a `claude/` branch deploys (`deploy.yml`): tests, the
+server to Railway (`railway up` of `ship/`; RAILWAY_TOKEN, _SERVICE), the
+pages to Vercel (VERCEL_*) pointed at it by RELAY (`wss://<railway>/ws`;
+none, no page deploy). One production: merge live branches first.
 
-Browser checks: Playwright on the installed Chromium; each context a
-player; `hasTouch, isMobile, deviceScaleFactor: 3` at 390x844 a phone.
+Browser checks: Playwright on the installed Chromium; a context a player;
+`hasTouch, isMobile, deviceScaleFactor: 3` at 390x844 a phone.
 
 ## Gotchas
 
 - **`pkill -f server` kills your shell** when the command line holds
   the pattern. Track its PID.
+- Worktrees sharing a CARGO_TARGET_DIR run each other's code (path crates
+  are fingerprinted by relative path): one target dir per worktree.
 - New people are ghosts for `GHOST_TICKS` (else test players die in 8 s).
 - Bodies are rebuilt into the grid after deaths and before spawning; a
   stale grid indexes snakes that are gone.

@@ -309,8 +309,9 @@ uniform sampler2D t;
 out vec4 o;
 void main() { o = texture(t, uv); }";
 
-/// How a 3D screen fits the window: CSS pixels per layer pixel (as
-/// `Screen::fit_view` picks them, at least `min_short` on the short side),
+/// How a 3D screen fits the window: CSS pixels per layer pixel (about 960
+/// layer pixels across at most, and at least `min_short` on the short side
+/// whenever the window allows: a game that must show so much of its world),
 /// device pixels per CSS pixel drawn (up to `max_dpr`), the window in CSS
 /// pixels, the drawing buffer, and the pixel layer.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -324,16 +325,7 @@ pub struct Fit {
 
 pub fn measure(min_short: f64, max_dpr: f64) -> Fit {
     let w = crate::window();
-    let css = (
-        w.inner_width()
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(800.0),
-        w.inner_height()
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(600.0),
-    );
+    let css = crate::window_css();
     let s = (css.0 / 960.0)
         .ceil()
         .min((css.0.min(css.1) / min_short).floor());
@@ -408,15 +400,16 @@ impl Gl {
         Some(g)
     }
 
-    /// Match the window: the layer's pixels as `Screen::fit_view` picks
-    /// them (at least `min_short` on the short side), the picture at the
-    /// device's pixels up to `max_dpr` a CSS pixel.
+    /// Match the window: the layer's pixels as `measure` picks them (at
+    /// least `min_short` on the short side), the picture at the device's
+    /// pixels up to `max_dpr` a CSS pixel.
     pub fn fit(&mut self, min_short: f64, max_dpr: f64) {
         let f = measure(min_short, max_dpr);
         (self.scale, self.dpr, self.css) = (f.scale, f.dpr, f.css);
         self.size = (f.size.0 as i32, f.size.1 as i32);
         self.canvas.set_width(f.size.0);
         self.canvas.set_height(f.size.1);
+        crate::place(&self.canvas, f.css.0, f.css.1);
         self.hud.resize(f.hud.0, f.hud.1);
     }
 

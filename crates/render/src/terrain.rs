@@ -1,9 +1,11 @@
 //! The ground as the engine draws it: a heightfield (a game samples its
 //! own height function into one), meshed smooth for the world shader's
 //! terrain material, and uploaded as a texture so the GPU knows the
-//! ground too (grass grows on it, the sea sees its shallows).
+//! ground too (grass grows on it, the sea sees its shallows, light from
+//! the sky reaches down into its hollows only as far as they are open).
 
 use crate::geo::{self, Geo, V3};
+use crate::laws;
 
 pub struct Terrain {
     /// Where the first sample is (x, z), metres between samples, samples
@@ -56,6 +58,50 @@ impl Terrain {
                 self.lush[j * self.n + i] = lush(x, z).clamp(0.0, 1.0);
             }
         }
+    }
+
+    /// How open each sample is to the sky, row by row (1 on a crest or a
+    /// plain, less down in a hollow or at a cliff's foot): eight ways out
+    /// to `laws::OPEN_REACH` metres, the steepest the ground rises in
+    /// each, and the share of the sky's light that leaves (a horizon at
+    /// angle a lets cos² a of it in).
+    pub fn openness(&self) -> Vec<f32> {
+        // Along the grid and its diagonals, so every step lands on a
+        // sample; out in growing steps, as far as the reach.
+        let ways: [(i64, i64); 8] = [
+            (1, 0),
+            (1, 1),
+            (0, 1),
+            (-1, 1),
+            (-1, 0),
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+        ];
+        let steps = [1, 2, 3, 4, 6, 8, 11, 15, 20, 26, 32];
+        let n = self.n as i64;
+        let mut out = Vec::with_capacity(self.n * self.n);
+        for j in 0..n {
+            for i in 0..n {
+                let h = self.heights[(j * n + i) as usize];
+                let mut open = 0.0;
+                for (di, dj) in ways {
+                    let len = self.cell * ((di * di + dj * dj) as f32).sqrt();
+                    let mut rise: f32 = 0.0;
+                    for k in steps {
+                        let d = k as f32 * len;
+                        if d > laws::OPEN_REACH && k > 1 {
+                            break;
+                        }
+                        let (x, z) = ((i + di * k).clamp(0, n - 1), (j + dj * k).clamp(0, n - 1));
+                        rise = rise.max((self.heights[(z * n + x) as usize] - h) / d);
+                    }
+                    open += 1.0 / (1.0 + rise * rise);
+                }
+                out.push(open / ways.len() as f32);
+            }
+        }
+        out
     }
 
     fn at(&self, i: usize, j: usize) -> f32 {
@@ -156,6 +202,26 @@ impl Terrain {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hollow_is_less_open_to_the_sky_than_its_rim() {
+        // A bowl 8 m deep, 30 m across.
+        let t = Terrain::sample([-30.0, -30.0], 60.0, 1.0, |x, z| {
+            let r = x.hypot(z);
+            -8.0 * (1.0 - (r / 15.0).min(1.0)).powi(2)
+        });
+        let open = t.openness();
+        let at = |x: f32, z: f32| {
+            let (i, j) = (((x + 30.0) as usize), ((z + 30.0) as usize));
+            open[j * t.n + i]
+        };
+        let (floor, rim, plain) = (at(0.0, 0.0), at(15.0, 0.0), at(28.0, 28.0));
+        assert!(
+            floor < 0.9 && floor < rim && rim <= plain,
+            "{floor} {rim} {plain}"
+        );
+        assert!(plain > 0.99, "{plain}");
+    }
 
     #[test]
     fn heights_between_samples_and_a_mesh_that_faces_up() {

@@ -144,23 +144,74 @@ pub fn soul_of(key: &[u8; 16]) -> u64 {
     u64::from_le_bytes(b).max(1)
 }
 
-/// A name as it may be shown: no control characters, no runs of spaces,
-/// trimmed, at most `MAX_NAME` characters.
+/// A name as it may be shown: what the pages' font draws (printable
+/// ASCII; the common accented letters as their plain ones, so "Zoë" is
+/// "Zoe", never "Zo?"), no runs of spaces, trimmed, at most `MAX_NAME`
+/// characters. Anything else (controls, zero-width and direction marks,
+/// look-alikes from other alphabets) is dropped.
 pub fn clean_name(s: &str) -> String {
     let mut out = String::new();
-    for c in s.chars().filter(|c| !c.is_control()) {
+    for c in s.chars() {
         if c.is_whitespace() {
             if !out.is_empty() && !out.ends_with(' ') {
                 out.push(' ');
             }
-        } else {
+        } else if c.is_ascii_graphic() {
             out.push(c);
+        } else if let Some(plain) = plain(c) {
+            out.push_str(plain);
         }
-        if out.chars().count() >= MAX_NAME {
+        if out.len() >= MAX_NAME {
+            out.truncate(MAX_NAME);
             break;
         }
     }
     out.trim_end().to_string()
+}
+
+/// A Latin letter with an accent (or two joined) as the plain letters it
+/// is written with.
+fn plain(c: char) -> Option<&'static str> {
+    Some(match c {
+        'à'..='å' | 'ā' | 'ă' | 'ą' => "a",
+        'À'..='Å' | 'Ā' | 'Ă' | 'Ą' => "A",
+        'æ' => "ae",
+        'Æ' => "AE",
+        'ç' | 'ć' | 'č' => "c",
+        'Ç' | 'Ć' | 'Č' => "C",
+        'ð' | 'ď' | 'đ' => "d",
+        'Ð' | 'Ď' | 'Đ' => "D",
+        'è'..='ë' | 'ē' | 'ė' | 'ę' | 'ě' => "e",
+        'È'..='Ë' | 'Ē' | 'Ė' | 'Ę' | 'Ě' => "E",
+        'ğ' => "g",
+        'Ğ' => "G",
+        'ì'..='ï' | 'ī' | 'į' | 'ı' => "i",
+        'Ì'..='Ï' | 'Ī' | 'Į' | 'İ' => "I",
+        'ł' | 'ľ' => "l",
+        'Ł' | 'Ľ' => "L",
+        'ñ' | 'ń' | 'ň' => "n",
+        'Ñ' | 'Ń' | 'Ň' => "N",
+        'ò'..='ö' | 'ø' | 'ō' | 'ő' => "o",
+        'Ò'..='Ö' | 'Ø' | 'Ō' | 'Ő' => "O",
+        'œ' => "oe",
+        'Œ' => "OE",
+        'ř' => "r",
+        'Ř' => "R",
+        'ś' | 'š' | 'ş' => "s",
+        'Ś' | 'Š' | 'Ş' => "S",
+        'ß' => "ss",
+        'ť' | 'ţ' => "t",
+        'Ť' | 'Ţ' => "T",
+        'þ' => "th",
+        'Þ' => "Th",
+        'ù'..='ü' | 'ū' | 'ů' | 'ű' => "u",
+        'Ù'..='Ü' | 'Ū' | 'Ů' | 'Ű' => "U",
+        'ý' | 'ÿ' => "y",
+        'Ý' | 'Ÿ' => "Y",
+        'ź' | 'ż' | 'ž' => "z",
+        'Ź' | 'Ż' | 'Ž' => "Z",
+        _ => return None,
+    })
 }
 
 /// A name folded so look-alikes collide: case, 0/o, 1/l/i, 5/s, spaces.
@@ -177,6 +228,21 @@ pub fn fold(name: &str) -> String {
             c => c,
         })
         .collect()
+}
+
+/// What a guest who gave no name goes by in a game: "wizard 7".
+pub fn guest_name(n: u16) -> String {
+    format!("wizard {n}")
+}
+
+/// Whether a name reads as a guest's ("wizard 7", "W1zard 07"), which no
+/// soul may take, so no one passes for a guest or a guest for anyone.
+pub fn is_guest_name(name: &str) -> bool {
+    let digits = clean_name(name).chars().any(|c| c.is_ascii_digit());
+    let folded = fold(name);
+    // After "wizard", digits as they fold (0, 1 and 5 to o, l and s).
+    let number = |r: &str| !r.is_empty() && r.chars().all(|c| "ols2346789".contains(c));
+    digits && folded.strip_prefix(&fold("wizard")).is_some_and(number)
 }
 
 #[cfg(test)]
@@ -224,5 +290,31 @@ mod tests {
         assert_eq!(fold("5am"), fold("Sam"));
         assert_eq!(fold("big boss"), fold("bigboss"));
         assert_ne!(fold("noodle"), fold("noodles"));
+    }
+
+    #[test]
+    fn a_name_is_what_the_font_draws() {
+        assert_eq!(clean_name("Zoë"), "Zoe");
+        assert_eq!(clean_name("Ærøskøbing straße"), "AEroskobing stra");
+        assert_eq!(clean_name("Łukasz"), "Lukasz");
+        // Marks you cannot see, and look-alikes from other alphabets, go.
+        assert_eq!(clean_name("A\u{200b}sh\u{202e}"), "Ash");
+        assert_eq!(clean_name("Ash\u{430}"), "Ash", "a Cyrillic a");
+        assert_eq!(clean_name("🐍 Sly\u{a0}\u{a0}one"), "Sly one");
+        assert_eq!(fold("Zoë"), fold("zoe"));
+        let long = clean_name("ßßßßßßßßßß");
+        assert_eq!(long.len(), MAX_NAME);
+        assert!(long.bytes().all(|b| b.is_ascii_graphic() || b == b' '));
+    }
+
+    #[test]
+    fn guests_names_are_theirs() {
+        assert!(is_guest_name(&guest_name(7)));
+        assert!(is_guest_name("W1zard 07"));
+        assert!(is_guest_name("wizard 15"));
+        assert!(!is_guest_name("wizard"));
+        assert!(!is_guest_name("Wizards"));
+        assert!(!is_guest_name("wizard 7a"));
+        assert!(!is_guest_name("the wizard 7"));
     }
 }

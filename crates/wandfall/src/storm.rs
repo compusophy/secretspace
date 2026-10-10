@@ -4,7 +4,7 @@
 
 use engine::rng::Rng;
 
-use crate::laws::{STORM, STORM_DRIFT, STORM_START, TICK_HZ};
+use crate::laws::{STORM, STORM_DRIFT, STORM_END_DPS, STORM_START, TICK_HZ};
 use crate::map::Map;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -91,7 +91,7 @@ impl Storm {
             phase: STORM.len(),
             shrinking: false,
             secs: 0,
-            dps: STORM[STORM.len() - 1].3 * 2,
+            dps: STORM_END_DPS,
         }
     }
 }

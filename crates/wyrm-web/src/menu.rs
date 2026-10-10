@@ -30,7 +30,9 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
     let (w, h) = (c.w as f32, c.h as f32);
     c.fill_rect(0, 0, c.w, c.h, Rgba(7, 10, 18, 150));
     let narrow = w / uf < 420.0;
-    let t = (now / 1000.0) as f32;
+    // Seconds, wrapped to the title's colour cycle so it stays smooth on a
+    // page left open for days.
+    let t = ((now / 1000.0) % 9.0) as f32;
 
     // The shared menu (Esc; on a phone, this button, here between lives
     // only): feedback, leaving the game.
@@ -114,6 +116,14 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
             u,
             DIM,
         );
+        y += 11.0 * uf;
+        let ate = match d.kills {
+            0 => "ate nobody".to_string(),
+            1 => "ate 1 snake".to_string(),
+            n => format!("ate {n} snakes"),
+        };
+        let lived = format!("{ate} in {}:{:02}", d.secs / 60, d.secs % 60);
+        c.text_centred(w as i32 / 2, y as i32, &lived, u, DIM);
         y += 18.0 * uf;
     }
 

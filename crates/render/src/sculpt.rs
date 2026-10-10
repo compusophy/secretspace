@@ -213,27 +213,33 @@ pub fn mesh(
         }
     }
     // A quad across each grid edge the surface crosses, joining the four
-    // cells about it, turned to face out.
-    for k in 1..cells[2] {
-        for j in 1..cells[1] {
-            for i in 1..cells[0] {
+    // cells about it, turned to face out. An edge along one axis needs
+    // the cells below it on the other two, so it may start at the first
+    // sample of its own (else the first layer is left open).
+    for k in 0..cells[2] {
+        for j in 0..cells[1] {
+            for i in 0..cells[0] {
                 let here = d[idx(i, j, k)] < 0.0;
+                let (i1, j1, k1) = (i.max(1) - 1, j.max(1) - 1, k.max(1) - 1);
                 let steps = [
                     (
+                        j > 0 && k > 0,
                         d[idx(i + 1, j, k)] < 0.0,
-                        [(i, j - 1, k - 1), (i, j, k - 1), (i, j, k), (i, j - 1, k)],
+                        [(i, j1, k1), (i, j, k1), (i, j, k), (i, j1, k)],
                     ),
                     (
+                        i > 0 && k > 0,
                         d[idx(i, j + 1, k)] < 0.0,
-                        [(i - 1, j, k - 1), (i, j, k - 1), (i, j, k), (i - 1, j, k)],
+                        [(i1, j, k1), (i, j, k1), (i, j, k), (i1, j, k)],
                     ),
                     (
+                        i > 0 && j > 0,
                         d[idx(i, j, k + 1)] < 0.0,
-                        [(i - 1, j - 1, k), (i, j - 1, k), (i, j, k), (i - 1, j, k)],
+                        [(i1, j1, k), (i, j1, k), (i, j, k), (i1, j, k)],
                     ),
                 ];
-                for (axis, (there, quad)) in steps.into_iter().enumerate() {
-                    if here == there {
+                for (axis, (inside, there, quad)) in steps.into_iter().enumerate() {
+                    if !inside || here == there {
                         continue;
                     }
                     let q = quad.map(|(a, b, c)| vert[cid(a, b, c)]);
@@ -358,6 +364,30 @@ mod tests {
             assert!(out > 0.99, "its normal points out: {out}");
         }
         assert!(faces_out(&g, c) > 0.999, "{}", faces_out(&g, c));
+    }
+
+    #[test]
+    fn a_ball_at_the_box_s_low_corner_is_closed() {
+        // Its surface between the first samples and the second on each
+        // axis: every edge of the mesh is shared by two triangles.
+        let (cell, r) = (0.05, 0.3);
+        let c = [r + cell * 0.5; 3];
+        let f = |p: V3| sphere(p, c, r);
+        let g = mesh(
+            &f,
+            ([0.0; 3], [0.8; 3]),
+            cell,
+            &|_, _| ([1.0; 3], 0.0),
+            (0.0, 0.1),
+        );
+        let mut edges = std::collections::HashMap::new();
+        for t in g.i.chunks(3) {
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                *edges.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+            }
+        }
+        let open = edges.values().filter(|n| **n != 2).count();
+        assert!(g.triangles() > 500 && open == 0, "{open} open edges");
     }
 
     #[test]

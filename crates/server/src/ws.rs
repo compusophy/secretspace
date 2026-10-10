@@ -41,6 +41,8 @@ pub enum Frame {
     Text(String),
     Binary(Vec<u8>),
     Ping(Vec<u8>),
+    /// The page answering our Ping: it is there.
+    Pong,
     Close,
 }
 
@@ -84,7 +86,7 @@ pub fn read(r: &mut impl Read) -> io::Result<Frame> {
         match opcode {
             0x8 => return Ok(Frame::Close),
             0x9 => return Ok(Frame::Ping(payload)),
-            0xA => continue,
+            0xA => return Ok(Frame::Pong),
             0x0 => whole.extend_from_slice(&payload),
             1 | 2 => {
                 kind = opcode;
@@ -105,20 +107,32 @@ pub fn read(r: &mut impl Read) -> io::Result<Frame> {
     }
 }
 
-pub fn write(w: &mut impl Write, opcode: u8, payload: &[u8]) -> io::Result<()> {
-    let mut head = vec![0x80 | opcode];
+/// Opcodes the server sends.
+pub const BINARY: u8 = 2;
+pub const CLOSE: u8 = 8;
+pub const PING: u8 = 9;
+
+/// One frame, put on the end of `out`: several go out in one write (each
+/// write is a segment on the wire, the socket sending at once).
+pub fn frame(out: &mut Vec<u8>, opcode: u8, payload: &[u8]) {
+    out.push(0x80 | opcode);
     let n = payload.len();
     if n < 126 {
-        head.push(n as u8);
+        out.push(n as u8);
     } else if n <= u16::MAX as usize {
-        head.push(126);
-        head.extend_from_slice(&(n as u16).to_be_bytes());
+        out.push(126);
+        out.extend_from_slice(&(n as u16).to_be_bytes());
     } else {
-        head.push(127);
-        head.extend_from_slice(&(n as u64).to_be_bytes());
+        out.push(127);
+        out.extend_from_slice(&(n as u64).to_be_bytes());
     }
-    w.write_all(&head)?;
-    w.write_all(payload)?;
+    out.extend_from_slice(payload);
+}
+
+pub fn write(w: &mut impl Write, opcode: u8, payload: &[u8]) -> io::Result<()> {
+    let mut out = Vec::with_capacity(payload.len() + 10);
+    frame(&mut out, opcode, payload);
+    w.write_all(&out)?;
     w.flush()
 }
 
@@ -149,6 +163,28 @@ mod tests {
         match read(&mut masked.as_slice()).unwrap() {
             Frame::Text(s) => assert_eq!(s, "hello"),
             _ => panic!("expected text"),
+        }
+    }
+
+    #[test]
+    fn a_frame_is_one_write_whatever_its_length() {
+        for n in [0, 125, 126, 65_535, 65_536] {
+            let payload = vec![7u8; n];
+            let mut buf = Vec::new();
+            write(&mut buf, BINARY, &payload).unwrap();
+            let head = match n {
+                0..=125 => 2,
+                126..=65_535 => 4,
+                _ => 10,
+            };
+            assert_eq!(buf.len(), head + n);
+            assert_eq!(buf[0], 0x80 | BINARY);
+            if n <= MAX_FRAME as usize {
+                match read(&mut buf.as_slice()).unwrap() {
+                    Frame::Binary(b) => assert_eq!(b, payload),
+                    _ => panic!("expected binary"),
+                }
+            }
         }
     }
 }

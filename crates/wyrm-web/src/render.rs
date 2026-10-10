@@ -1,8 +1,8 @@
 //! The picture: the world as `look` draws it, around your snake (or the
 //! one the server shows), and the boards around the edge.
 
-use look::{hue, View};
-use pixels::{text_width, Canvas, Rect, Rgba};
+use look::{ease, hue, View, CAMERA_MS, ZOOM_MS};
+use pixels::{fit_scale, text_width, Canvas, Rect, Rgba};
 use wyrm::laws::{radius, view_scale};
 
 use crate::state::State;
@@ -19,11 +19,20 @@ pub struct Hud {
     pub steer: Option<f32>,
     /// The phone's boost button, if there is one, and whether it is held.
     pub boost: Option<(Rect, bool)>,
+    /// Play was pressed and your snake is on its way: the camera waits
+    /// where it is, not drifting toward whoever the server shows meanwhile.
+    pub hold: bool,
 }
 
 pub fn frame(c: &mut Canvas, st: &mut State, css: (f64, f64), scale: f64, now: f64, hud: &Hud) {
-    let alpha = st.alpha(now);
-    let m = &st.mirror;
+    let alpha = st.live.alpha(now);
+    let dt = if st.drawn_at > 0.0 {
+        now - st.drawn_at
+    } else {
+        0.0
+    };
+    st.drawn_at = now;
+    let m = &st.live.mirror;
     let you = m.snakes.get(&m.you);
 
     // Where to look: your head, or near what the server centres on.
@@ -37,12 +46,13 @@ pub fn frame(c: &mut Canvas, st: &mut State, css: (f64, f64), scale: f64, now: f
         st.zoom = want;
         st.camera = target;
     }
-    st.zoom += (want - st.zoom) * 0.05;
+    st.zoom += (want - st.zoom) * ease(dt, ZOOM_MS);
     if you.is_some() {
         st.camera = target;
-    } else {
-        st.camera.0 += (target.0 - st.camera.0) * 0.12;
-        st.camera.1 += (target.1 - st.camera.1) * 0.12;
+    } else if !hud.hold && !m.snakes.is_empty() {
+        let k = ease(dt, CAMERA_MS);
+        st.camera.0 += (target.0 - st.camera.0) * k;
+        st.camera.1 += (target.1 - st.camera.1) * k;
     }
     let v = View {
         w: c.w as f32,
@@ -51,19 +61,10 @@ pub fn frame(c: &mut Canvas, st: &mut State, css: (f64, f64), scale: f64, now: f
         cx: st.camera.0,
         cy: st.camera.1,
     };
-    let scene = look::Scene {
-        mirror: &st.mirror,
-        alpha,
-        arena: st.arena,
-        gulps: &st.gulps,
-        bursts: &st.bursts,
-        steer: hud.steer,
-        names: Some(hud.u),
-    };
-    look::world(c, &v, &scene, now);
+    look::world(c, &v, &st.live.scene(now, hud.steer, Some(hud.u)), now);
     board(c, st, hud, now);
     // The server is holding still (a deploy): the last picture, dimmed.
-    if !st.connected && !st.mirror.snakes.is_empty() {
+    if !st.connected && !st.live.mirror.snakes.is_empty() {
         c.fill_rect(0, 0, c.w, c.h, Rgba(7, 10, 18, 120));
         let u = hud.u;
         let line = "holding still - back in a moment";
@@ -128,11 +129,8 @@ fn board(c: &mut Canvas, st: &State, hud: &Hud, now: f64) {
         Rgba(10, 14, 26, 150),
     );
     c.text(lx, pad, head, u, Rgba(244, 241, 255, 200));
-    let you_name = st
-        .mirror
-        .snakes
-        .get(&st.mirror.you)
-        .map(|s| s.name.as_str());
+    let m = &st.live.mirror;
+    let you_name = m.snakes.get(&m.you).map(|s| s.name.as_str());
     for (i, l) in st.board.top.iter().take(rows).enumerate() {
         let y = pad + (13 + 11 * i as i32) * u;
         let me = st.board.rank as usize == i + 1 && you_name == Some(l.name.as_str());
@@ -149,16 +147,22 @@ fn board(c: &mut Canvas, st: &State, hud: &Hud, now: f64) {
         c.text(lx + lw - text_width(&sc, u), y, &sc, u, ink);
     }
 
-    // The feed: who ate whom.
+    // The feed: who ate whom, smaller if a line would run off a phone.
     let feed_y =
         h - pad - (11 * st.feed.len() as i32 + if hud.boost.is_some() { 80 } else { 0 }) * u;
+    let fs = st
+        .feed
+        .iter()
+        .map(|(_, line)| fit_scale(line, w - 2 * pad, u))
+        .min()
+        .unwrap_or(u);
     for (i, (at, line)) in st.feed.iter().enumerate() {
         let a = (1.0 - (now - at - 5000.0) / 2000.0).clamp(0.0, 1.0) as f32;
         c.text_shadowed(
             pad,
             feed_y + 11 * i as i32 * u,
             line,
-            u,
+            fs,
             Rgba(255, 210, 150, 220).fade(a),
         );
     }
@@ -179,8 +183,8 @@ fn board(c: &mut Canvas, st: &State, hud: &Hud, now: f64) {
     }
     if st.playing() {
         let (cx, cy) = (
-            mx + st.camera.0 / st.arena * mr,
-            my + st.camera.1 / st.arena * mr,
+            mx + st.camera.0 / st.live.arena * mr,
+            my + st.camera.1 / st.live.arena * mr,
         );
         c.circle(cx, cy, 2.6 * uf, Rgba::rgb(125, 255, 176));
     }

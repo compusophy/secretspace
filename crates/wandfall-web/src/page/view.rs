@@ -11,22 +11,28 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     pace(p, dt);
     net(p, now, dt);
     hands(p);
-    inputs(p, dt);
-    p.version.poll(now, false);
-    if p.version.newer() && (!p.alive || p.st.frame.as_ref().is_some_and(|f| f.phase != 1)) {
-        kit::version::reload();
-    }
-    let mut others = p.st.others(now);
     let (w, h) = p.g.css;
     let aspect = (w / h.max(1.0)) as f32;
-    // Your feet, between the last tick predicted and this one.
-    let k = (p.acc / MS_A_TICK) as f32;
-    let (a, b) = (p.prev.p, p.pred.body.p);
-    let feet = [
-        a[0] + (b[0] - a[0]) * k,
-        a[1] + (b[1] - a[1]) * k,
-        a[2] + (b[2] - a[2]) * k,
-    ];
+    // Your feet glide off where a correction left them.
+    p.pred.settle(dt);
+    // Where you aim, from the view as the mouse just turned it: the inputs
+    // about to go carry it, not the frame before's.
+    let mut others = p.st.others(now);
+    let aimed = aim(p, &others, aspect);
+    inputs(p, dt);
+    p.version.poll(now, false);
+    if p.version.newer() && now >= p.next_try && calm(p) {
+        // Back online after it, if it was (or was on its way: the title
+        // saying why not).
+        if matches!(p.mode, Mode::Online(_)) || p.notice.is_some() {
+            kit::save(RESUME, "online");
+        }
+        if !reload(crate::reload::BUILD) {
+            kit::save(RESUME, "");
+            p.next_try = now + crate::reload::RETRY;
+        }
+    }
+    let feet = feet(p);
     // Your own wizard as you predict it, not as the room last said (a
     // tenth of a second behind).
     if p.alive {
@@ -55,8 +61,6 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             id: p.st.you,
             at: feet,
             alive: p.alive,
-            first: false,
-            tip: None,
         };
         let show = scene::Show {
             hold: p.hold,
@@ -124,7 +128,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             }),
             rain: p.sky.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32),
         };
-        p.sounds.ambience.tune(&p.sounds.audio, &here, false);
+        p.sounds.ambience.tune(&p.sounds.audio, &here);
     }
     // Music under the title, the lobby and the result; none in a match.
     let music = match (&p.mode, p.st.frame.as_ref().map(|f| f.phase)) {
@@ -133,14 +137,10 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         _ => 0.0,
     };
     p.sounds.music.tune(&p.sounds.audio, music);
-    // What the crosshair is on: you aim there from your own eyes (the
-    // camera's place over your shoulder taken out); where Lightning would
-    // strike, aiming with it ready.
+    // What the crosshair is on (a wizard in the Lance's reach turns it
+    // red); where Lightning would strike, aiming with it ready.
     let mut on_target = false;
-    if let (Some(i), true) = (&p.island, p.alive && orbit.is_none()) {
-        let eye = [feet[0], feet[1] + p.pred.body.eye(), feet[2]];
-        let (at, who) = camera::crosshair(&i.map, &others, p.st.you, &cam, eye, 400.0);
-        p.aim = camera::toward(eye, at, &cam);
+    if let (Some(i), Some((at, who, eye))) = (&p.island, aimed.filter(|_| orbit.is_none())) {
         let d2 = render::geo::sub(at, eye);
         on_target = who.is_some() && render::geo::dot(d2, d2) <= LANCE_RANGE * LANCE_RANGE;
         let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
@@ -219,21 +219,48 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     p.g.hud.wipe();
     p.spots = Spots::default();
     let practice = matches!(p.mode, Mode::Practice(_));
-    match (&p.island, &p.mode) {
+    let held_up = upright(p);
+    let under_menu = in_menu(p);
+    match (&mut p.island, &p.mode) {
         (Some(_), Mode::Title) => {
-            let note = "the island is drawn by the secretspace engine, on WebGPU";
-            menu::title(&mut p.g.hud, &mut p.spots, ui, note);
+            let name = p.name.value();
+            let t = menu::Title {
+                name: &name,
+                typing: p.name.focused(),
+                taken: p.taken,
+                notice: p.notice,
+                note: "the island is drawn by the secretspace engine, on WebGPU",
+                now,
+            };
+            let field = menu::title(&mut p.g.hud, &mut p.spots, ui, &t);
+            // The field lies over the box (not under the shared menu).
+            let s = p.g.scale;
+            let css = (
+                field.x as f64 * s,
+                field.y as f64 * s,
+                field.w as f64 * s,
+                field.h as f64 * s,
+            );
+            p.name.place((!p.meta.is_open()).then_some(css));
         }
         (Some(i), _) => {
+            if p.alive {
+                sight(&mut p.sighted, &p.st, &i.map, &others, cam.eye, now);
+            }
+            // The range's lessons, while you play (not under a menu).
+            let lesson = practice && p.alive && p.orbit.is_none() && !under_menu && !held_up;
+            // Lost a moment (a blip passes unsaid).
+            let lost = p.lost.is_some_and(|t| now - t > 400.0);
             let view = hud::View {
                 st: &p.st,
-                frame: p.st.frame.as_ref(),
                 others: &others,
                 vp,
+                eye: cam.eye,
                 me,
                 own: p.st.frame.as_ref().and_then(|f| f.you.as_ref()),
+                body: p.alive.then_some(&p.pred.body),
+                sighted: p.alive.then_some(&p.sighted),
                 watching,
-                locked: kit::input::locked(),
                 in_storm,
                 now,
                 ui,
@@ -242,12 +269,17 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                 practice,
                 on_target,
                 book: p.book,
+                lesson: lesson && p.lessons.showing(),
+                lost,
             };
-            if p.orbit.is_none() {
-                hud::draw(&mut p.g.hud, &i.mini, &view);
-            }
-            // The range's lessons, while you play.
-            p.lesson_panel = None;
+            let (w, h) = (p.g.hud.w, p.g.hud.h);
+            let mini = i.mini.at(&i.map, hud::map_spot(w, h, ui).2);
+            let lay = if p.orbit.is_none() {
+                hud::draw(&mut p.g.hud, mini, &view)
+            } else {
+                hud::layout(w, h, ui, p.touch, 8 * ui)
+            };
+            p.lesson_skip = None;
             if practice && p.alive && p.orbit.is_none() {
                 let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
                 let you = p.st.you;
@@ -267,14 +299,21 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                     cast_at,
                     book: p.book,
                 });
-                let menu = p.book || p.meta.is_open() || (!p.touch && !kit::input::locked());
-                if !menu {
-                    p.lesson_panel = p.lessons.draw(&mut p.g.hud, ui, p.touch, now);
+                if lesson {
+                    let drawn = p.lessons.draw(&mut p.g.hud, lay.band, ui, p.touch, now);
+                    p.lesson_skip = drawn.and_then(|d| d.1);
                 }
             }
             let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
-            if p.touch && p.alive && !p.book && !p.meta.is_open() {
-                p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);
+            if p.touch && !p.book && !p.meta.is_open() {
+                if p.alive && !held_up {
+                    p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale, ui);
+                } else {
+                    Touch::draw_menu(&mut p.g.hud, p.g.scale);
+                }
+                if held_up {
+                    turn_sideways(&mut p.g.hud, ui);
+                }
             }
             // The online lobby: who is waiting.
             if !practice && p.st.frame.as_ref().is_some_and(|f| f.phase == 0) {
@@ -284,7 +323,13 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                         .filter(|n| !n.1)
                         .map(|n| n.0.clone())
                         .collect();
-                menu::lobby(&mut p.g.hud, ui, &names, &p.st.hall);
+                // On a touch screen, the hall down the left: under your
+                // health, and under the feed's lines there.
+                let feed = hud::feed_lines(&p.st, now) * hud::FEED_LINE;
+                let hall_at = p
+                    .touch
+                    .then_some((hud::column::X * ui, (hud::column::FEED + feed) * ui));
+                menu::lobby(&mut p.g.hud, ui, &names, &p.st.hall, lay.band, hall_at);
             }
             if p.book {
                 // The range's tools (ranks, levels, rules) only there.
@@ -302,12 +347,13 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             } else if p.meta.in_game_panel() {
                 menu::settings_panel(&mut p.g.hud, &mut p.spots, ui, &p.set);
             } else if !p.touch && !p.meta.is_open() && !kit::input::locked() && p.orbit.is_none() {
-                // The mouse is free: a word on how to get back to it.
+                // The mouse is free: a word on how to get back to it,
+                // over the crosshair (the cards under it stay clear).
                 let c = &mut p.g.hud;
                 let k = pixels::fit_scale("click to play", c.w - 16 * ui, 2 * ui);
                 c.text_shadowed(
                     (c.w - pixels::text_width("click to play", k)) / 2,
-                    c.h / 2 + 30 * ui,
+                    c.h / 2 - 24 * ui - 7 * k,
                     "click to play",
                     k,
                     pixels::Rgba::rgb(250, 246, 236),
@@ -332,7 +378,8 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         } else {
             menu::keys_help((210 * ui).min(p.g.hud.w - 32 * ui), ui)
         };
-        let labels: Vec<&str> = items(p).iter().map(|i| i.0).collect();
+        p.shown = items(p);
+        let labels: Vec<&str> = p.shown.iter().map(|i| i.0).collect();
         let s = p.g.scale;
         p.meta.draw(&mut p.g.hud, ui, &labels, &help, now, |r| {
             (
@@ -347,6 +394,108 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     if let Some(line) = perf {
         if (now as u64 / 500).is_multiple_of(2) {
             kit::document().set_title(&line);
+        }
+    }
+}
+
+/// Your feet, between the last tick predicted and the next.
+fn feet(p: &Page) -> [f32; 3] {
+    let k = (p.acc / MS_A_TICK) as f32;
+    let (a, b) = (p.prev.p, p.pred.body.p);
+    // And gliding off where a correction left them.
+    let o = p.pred.offset;
+    [
+        a[0] + (b[0] - a[0]) * k + o[0],
+        a[1] + (b[1] - a[1]) * k + o[1],
+        a[2] + (b[2] - a[2]) * k + o[2],
+    ]
+}
+
+/// Where you aim (into `p.aim`): from your own eyes to what the crosshair
+/// is on, the camera's place over your shoulder taken out. Seen through
+/// the view as it stands now, the mouse's last turn in it (a copy of the
+/// camera, not stepped on: the one drawn eases on after the inputs).
+/// The point, the wizard there if one, and your eyes.
+fn aim(
+    p: &mut Page,
+    others: &[proto::Seen],
+    aspect: f32,
+) -> Option<([f32; 3], Option<u16>, [f32; 3])> {
+    let i = p.island.as_ref().filter(|_| p.alive && p.orbit.is_none())?;
+    let feet = feet(p);
+    let b = &p.pred.body;
+    let stance = camera::Stance {
+        aiming: p.aiming,
+        crouch: b.crouch,
+        glide: b.glide,
+        fast: b.sprint || b.slide,
+    };
+    let mut chase = p.chase;
+    let cam = chase.view(&i.map, feet, (p.yaw, p.pitch), stance, aspect, 0.0);
+    let eye = [feet[0], feet[1] + b.eye(), feet[2]];
+    let (at, who) = camera::crosshair(&i.map, others, p.st.you, &cam, eye, 400.0);
+    p.aim = camera::toward(eye, at, &cam);
+    Some((at, who, eye))
+}
+
+/// Whether a newer page may load now, at a moment that costs nothing:
+/// on the title, or online between matches (the result shown, or
+/// waiting for the next while one is on). Never in the lobby (the match
+/// may start), nor on the range (the title is soon enough).
+fn calm(p: &Page) -> bool {
+    let phase = p.st.frame.as_ref().map(|f| f.phase);
+    match p.mode {
+        Mode::Title => !p.name.focused(),
+        Mode::Online(_) => phase == Some(2) || (phase == Some(1) && !p.alive && p.st.out.is_none()),
+        Mode::Practice(_) => false,
+    }
+}
+
+/// A phone held upright: a word to turn it (the stick and the buttons
+/// are laid out for it sideways, and wait till it is).
+fn turn_sideways(c: &mut pixels::Canvas, ui: i32) {
+    let (w, h) = (c.w, c.h);
+    let u = ui as f32;
+    let (cw, ch) = ((w - 24 * ui).min(240 * ui), 52 * ui);
+    let b = pixels::Rect::new(
+        ((w - cw) / 2) as f32,
+        ((h - ch) / 2) as f32,
+        cw as f32,
+        ch as f32,
+    );
+    c.round_rect(b, 8.0 * u, pixels::Rgba(8, 10, 22, 225));
+    c.round_rect_line(b, 8.0 * u, u, pixels::Rgba::rgb(255, 214, 128).fade(0.5));
+    let mut y = b.y as i32 + 10 * ui;
+    let head = "turn your phone sideways";
+    let k = pixels::fit_scale(head, cw - 16 * ui, 2 * ui);
+    c.text_centred(w / 2, y, head, k, pixels::Rgba::rgb(255, 214, 128));
+    y += 9 * k + 6 * ui;
+    for l in pixels::wrap("the stick and the spells wait for it", cw - 16 * ui, ui) {
+        c.text_centred(w / 2, y, &l, ui, pixels::Rgba::rgb(200, 206, 220));
+        y += 10 * ui;
+    }
+}
+
+/// Who is in sight of the camera at `eye` now (near enough to read a
+/// name), or was just struck by you (`st`): when, into `sighted`.
+fn sight(
+    sighted: &mut HashMap<u16, f64>,
+    st: &State,
+    map: &Map,
+    others: &[proto::Seen],
+    eye: [f32; 3],
+    now: f64,
+) {
+    sighted.retain(|_, t| now - *t < 1000.0);
+    let alive = |s: &&proto::Seen| s.id != st.you && s.flags & flag::ALIVE != 0;
+    for s in others.iter().filter(alive) {
+        let d2 = (s.p[0] - eye[0]).powi(2) + (s.p[2] - eye[2]).powi(2);
+        if d2 > hud::NAMES * hud::NAMES {
+            continue;
+        }
+        let struck = st.numbers.iter().any(|n| n.1 == s.id && now - n.0 < 1500.0);
+        if struck || hud::in_sight(map, eye, s) {
+            sighted.insert(s.id, now);
         }
     }
 }

@@ -1,10 +1,11 @@
 //! The range's first lessons, a step at a time under the top line, each
-//! ticked off as you do it: move, jump, hop as you land, jump again in the
+//! ticked off as you do it. What a match needs first: move, jump, hit a
+//! dummy with your wand, cast a spell, pick up a spell cube, open the
+//! spellbook; then moving like a wizard: sprint, slide, jump again in the
 //! air, climb onto a rock, kick off a wall, take a launch rune, ride a
-//! Tether, sprint,
-//! slide, hit a dummy with your wand, cast a spell, pick up a spell cube,
-//! open the spellbook. Shown once (remembered); Enter (or a tap on it)
-//! skips a step; the range's menu starts them again.
+//! Tether, and last the hardest, a hop timed as you land. Shown once
+//! (remembered); Enter (or a tap on its skip chip) skips a step; the
+//! range's menu starts them again.
 
 use pixels::{wrap, Canvas, Rect, Rgba};
 use wandfall::laws::HOP_WINDOW;
@@ -17,6 +18,7 @@ const DIM: Rgba = Rgba::rgb(190, 196, 214);
 const GOLD: Rgba = Rgba::rgb(255, 214, 128);
 const GREEN: Rgba = Rgba::rgb(140, 230, 120);
 const PANEL: Rgba = Rgba(10, 12, 26, 200);
+const CHIP: Rgba = Rgba(34, 38, 66, 235);
 /// How long a step shows ticked before the next (ms); how long the last
 /// word stays.
 const TICKED: f64 = 900.0;
@@ -43,18 +45,18 @@ enum Step {
 const STEPS: [Step; 14] = [
     Step::Move,
     Step::Jump,
-    Step::Hop,
+    Step::Wand,
+    Step::Cast,
+    Step::Cube,
+    Step::Book,
+    Step::Sprint,
+    Step::Slide,
     Step::Air,
     Step::Climb,
     Step::Wall,
     Step::Launch,
     Step::Tether,
-    Step::Sprint,
-    Step::Slide,
-    Step::Wand,
-    Step::Cast,
-    Step::Cube,
-    Step::Book,
+    Step::Hop,
 ];
 
 impl Step {
@@ -207,6 +209,7 @@ impl Lessons {
         self.since = 0.0;
     }
 
+    /// Whether a lesson (or the last word) is up.
     pub fn showing(&self) -> bool {
         self.at.is_some()
     }
@@ -303,11 +306,21 @@ impl Lessons {
         self.base = (w.hit_at, w.cast_at, learned(w.own));
     }
 
-    /// Drawn under the top line; its panel (to tap, to skip) if any.
-    pub fn draw(&self, c: &mut Canvas, ui: i32, touch: bool, now: f64) -> Option<Rect> {
+    /// Drawn in `band` (under the top line, over the crosshair, clear of
+    /// the map and your health), as large as it fits there: the heading
+    /// big if there is room, the word on why if there is room. Its panel,
+    /// and on a touch screen the chip a tap skips the step with.
+    pub fn draw(
+        &self,
+        c: &mut Canvas,
+        band: Rect,
+        ui: i32,
+        touch: bool,
+        now: f64,
+    ) -> Option<(Rect, Option<Rect>)> {
         let k = self.at?;
-        let w = c.w;
-        let width = (300 * ui).min(w - 16 * ui);
+        let (bx, bw) = (band.x as i32, band.w as i32);
+        let width = (300 * ui).min(bw);
         let (head, why, top) = match STEPS.get(k) {
             Some(s) => {
                 let (head, why) = s.say(touch);
@@ -324,44 +337,46 @@ impl Lessons {
                 "lessons done".to_string(),
             ),
         };
-        let big = if pixels::text_width(&head, 2 * ui) <= width - 12 * ui {
-            2 * ui
+        let inner = width - 12 * ui;
+        let fit = Fit::best(&head, &why, inner, ui, band.h as i32);
+        let heads = wrap(&head, inner, fit.big);
+        let whys = if fit.why {
+            wrap(&why, inner, ui)
         } else {
-            ui
+            Vec::new()
         };
-        let heads = wrap(&head, width - 12 * ui, big);
-        let whys = wrap(&why, width - 12 * ui, ui);
-        let tall = 12 * ui
-            + 10 * ui
-            + heads.len() as i32 * 9 * big
-            + whys.len() as i32 * 10 * ui
-            + 12 * ui;
-        // Under the top line; below the map if it would cover it (and the
-        // buttons by it, on a phone).
-        let map = (96 * ui).min(w / 4).min(c.h / 4);
-        let y0 = if (w + width) / 2 > w - map - 14 * ui {
-            24 * ui + map + 18 * ui
-        } else {
-            16 * ui
-        };
-        let panel = Rect::new(
-            ((w - width) / 2) as f32,
-            y0 as f32,
-            width as f32,
-            tall as f32,
-        );
+        let tall = Fit::tall(heads.len(), whys.len(), fit.big, ui);
+        // Over the middle of the screen if the band reaches it, else as
+        // near it as the band allows.
+        let x = (c.w / 2 - width / 2).clamp(bx, bx + bw - width);
+        let panel = Rect::new(x as f32, band.y, width as f32, tall as f32);
         c.round_rect(panel, 5.0 * ui as f32, PANEL);
-        let cx = w / 2;
-        let mut y = panel.y as i32 + 6 * ui;
+        let cx = x + width / 2;
+        let mut y = panel.y as i32 + 5 * ui;
         let ticked = self.ticked.is_some();
-        let skip = if touch { "tap to skip" } else { "enter: skip" };
-        let line = if k < STEPS.len() {
-            format!("{top}  -  {skip}")
+        // The head row: which lesson, and how to skip it (a chip to tap,
+        // on a touch screen).
+        let mut chip = None;
+        if k < STEPS.len() && touch {
+            let cw = pixels::text_width("skip", ui) + 12 * ui;
+            let b = Rect::new(
+                (x + width - 6 * ui - cw) as f32,
+                (y - 3 * ui) as f32,
+                cw as f32,
+                (13 * ui) as f32,
+            );
+            c.round_rect(b, 3.0 * ui as f32, CHIP);
+            c.round_rect_line(b, 3.0 * ui as f32, 1.0, DIM.fade(0.5));
+            c.text_centred((b.x + b.w / 2.0) as i32, y, "skip", ui, INK);
+            c.text_shadowed(x + 6 * ui, y, &top, ui, DIM);
+            // A thumb is wider than the chip: a little round it counts.
+            chip = Some(b.grow(4.0 * ui as f32));
+        } else if k < STEPS.len() {
+            c.text_centred(cx, y, &format!("{top}  -  enter: skip"), ui, DIM);
         } else {
-            top
-        };
-        c.text_centred(cx, y, &line, ui, DIM);
-        y += 12 * ui;
+            c.text_centred(cx, y, &top, ui, DIM);
+        }
+        y += 14 * ui;
         let col = if ticked { GREEN } else { GOLD };
         for (n, l) in heads.iter().enumerate() {
             let text = if ticked && n == 0 {
@@ -369,8 +384,8 @@ impl Lessons {
             } else {
                 l.clone()
             };
-            c.text_centred(cx, y, &text, big, col);
-            y += 9 * big;
+            c.text_centred(cx, y, &text, fit.big, col);
+            y += 9 * fit.big;
         }
         y += 2 * ui;
         for l in &whys {
@@ -382,7 +397,7 @@ impl Lessons {
         let gap = 2 * ui;
         let seg = ((width - 24 * ui) - gap * (n - 1)) / n;
         let x0 = cx - (seg * n + gap * (n - 1)) / 2;
-        let by = panel.y as i32 + tall - 6 * ui;
+        let by = panel.y as i32 + tall - 7 * ui;
         for s in 0..n {
             let on = (s as usize) < k || (s as usize == k && ticked);
             let pulse = if s as usize == k && !ticked {
@@ -397,12 +412,81 @@ impl Lessons {
             };
             c.fill_rect(x0 + s * (seg + gap), by, seg, 2 * ui, col);
         }
-        Some(panel)
+        Some((panel, chip))
+    }
+}
+
+/// How a lesson is laid out to fit its band: the heading's scale, and
+/// whether the word on why is shown.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fit {
+    big: i32,
+    why: bool,
+}
+
+impl Fit {
+    /// How tall the panel is with this many heading and why lines.
+    fn tall(heads: usize, whys: usize, big: i32, ui: i32) -> i32 {
+        5 * ui + 14 * ui + heads as i32 * 9 * big + 2 * ui + whys as i32 * 10 * ui + 12 * ui
+    }
+
+    /// The first that fits `room` pixels down (`inner` across): a big
+    /// heading (on one line) with its why, a small one with it, a big
+    /// one alone, a small one alone (the smallest even if it does not).
+    fn best(head: &str, why: &str, inner: i32, ui: i32, room: i32) -> Fit {
+        let one_line = pixels::text_width(head, 2 * ui) <= inner;
+        let tries = [(2 * ui, true), (ui, true), (2 * ui, false), (ui, false)];
+        tries
+            .into_iter()
+            .filter(|&(big, _)| big == ui || one_line)
+            .map(|(big, why)| Fit { big, why })
+            .find(|f| {
+                let heads = wrap(head, inner, f.big).len();
+                let whys = if f.why { wrap(why, inner, ui).len() } else { 0 };
+                Fit::tall(heads, whys, f.big, ui) <= room
+            })
+            .unwrap_or(Fit {
+                big: ui,
+                why: false,
+            })
     }
 }
 
 impl Default for Lessons {
     fn default() -> Self {
         Lessons::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every lesson fits the band a phone held sideways has for it, and
+    /// one with room shows it whole.
+    #[test]
+    fn every_lesson_fits_its_band() {
+        for (w, h, ui, touch) in [
+            (844, 390, 2, true),
+            (740, 360, 2, true),
+            (960, 540, 1, false),
+        ] {
+            let band = crate::hud::layout(w, h, ui, touch, 8 * ui + 9 * ui).band;
+            let inner = (300 * ui).min(band.w as i32) - 12 * ui;
+            for step in STEPS {
+                let (head, why) = step.say(touch);
+                let f = Fit::best(head, why, inner, ui, band.h as i32);
+                let heads = wrap(head, inner, f.big).len();
+                let whys = if f.why { wrap(why, inner, ui).len() } else { 0 };
+                let tall = Fit::tall(heads, whys, f.big, ui);
+                assert!(
+                    tall <= band.h as i32,
+                    "{w}x{h} {step:?}: {tall} in {}",
+                    band.h
+                );
+                // A desktop has the room for the word on why.
+                assert!(touch || f.why, "{step:?}");
+            }
+        }
     }
 }

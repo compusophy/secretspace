@@ -1,6 +1,6 @@
 //! The device on a browser canvas.
 
-use crate::{layer, wanted, Caps};
+use crate::{layer, wanted, Caps, Health};
 use wasm_bindgen::JsCast;
 use web_sys::HtmlCanvasElement;
 
@@ -20,6 +20,8 @@ pub struct Gpu {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     pub caps: Caps,
+    /// Whether the device is lost (no frame is given then).
+    pub health: Health,
     /// The pixel layer, wiped and drawn each frame, shown over the picture.
     pub hud: pixels::Canvas,
     /// CSS pixels per layer pixel; device pixels per CSS pixel drawn; the
@@ -84,6 +86,7 @@ impl Gpu {
         let layer = layer::Layer::new(&device, config.format);
         let mut g = Gpu {
             canvas,
+            health: Health::watch(&device),
             device,
             queue,
             surface,
@@ -106,6 +109,7 @@ impl Gpu {
         (self.scale, self.dpr, self.css, self.size) = (f.scale, f.dpr, f.css, f.size);
         self.canvas.set_width(f.size.0);
         self.canvas.set_height(f.size.1);
+        kit::place(&self.canvas, f.css.0, f.css.1);
         self.hud.resize(f.hud.0, f.hud.1);
         self.config.width = f.size.0;
         self.config.height = f.size.1;
@@ -136,8 +140,11 @@ impl Gpu {
     }
 
     /// Start a frame, or None if the surface cannot give one now (it is
-    /// configured again for the next).
+    /// configured again for the next) or the device is lost (`health`).
     pub fn frame(&mut self) -> Option<Frame> {
+        if self.health.lost() {
+            return None;
+        }
         let texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,

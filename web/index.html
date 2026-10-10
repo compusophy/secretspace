@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>secretspace</title>
 <meta name="description" content="Tiny games, everyone in them. Pick one and play with whoever is here.">
 <meta name="theme-color" content="#070a12">
@@ -12,14 +12,18 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' shape-rendering='crispEdges'%3E%3Crect width='32' height='32' fill='%23070a12'/%3E%3Crect x='6' y='6' width='8' height='8' fill='%2357e389'/%3E%3Crect x='18' y='6' width='8' height='8' fill='%2362a0ea'/%3E%3Crect x='6' y='18' width='8' height='8' fill='%23c061cb'/%3E%3Crect x='18' y='18' width='8' height='8' fill='%23ffbe6f'/%3E%3C/svg%3E">
 <!-- The game server. Empty: this page's own origin. The deploy sets it. -->
 <meta name="server" content="">
+<!-- The page's code and its wasm, fetched at once rather than one after the other. -->
+<link rel="modulepreload" href="/pkg/hub.js">
+<link rel="preload" href="/pkg/hub_bg.wasm" as="fetch" type="application/wasm" crossorigin>
 <style>
   html, body { margin: 0; height: 100%; background: #070a12; overflow: hidden; }
-  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; image-rendering: pixelated; touch-action: none; }
+  /* kit sizes the canvas in CSS pixels: on a phone 100vh is taller than what shows. */
+  canvas { position: fixed; left: 0; top: 0; display: block; image-rendering: pixelated; touch-action: none; }
 </style>
 </head>
 <body>
 <canvas id="screen" aria-label="secretspace: the games"></canvas>
 <noscript>secretspace is drawn by WebAssembly; it needs a browser that runs it.</noscript>
-<script type="module">import init from "./pkg/hub.js"; init();</script>
+<script type="module">import init from "/pkg/hub.js"; init();</script>
 </body>
 </html>

@@ -11,7 +11,7 @@ use gpu::wgpu;
 /// seed; its colour.
 const FLOATS: usize = 12;
 /// The most drawn a frame (the first so many).
-const MOST: usize = 256;
+const MOST: usize = crate::laws::DECALS;
 
 pub(crate) struct Decals {
     pipe: wgpu::RenderPipeline,

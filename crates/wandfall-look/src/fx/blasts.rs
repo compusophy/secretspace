@@ -8,17 +8,23 @@ use wandfall::laws::{
 };
 
 use super::{
-    beam, colour, dir, energy, glint, glow, light, puffs, ring, rnd, sigil, spray, Draw, Ray,
-    Spray, WHITE,
+    beam, colour, dir, energy, glint, glow, light, puffs, rim, ring, rnd, runes, shaft, spray,
+    wave, Draw, Ray, Spray, WHITE,
 };
 use crate::look::Look;
 
-const UP: V3 = [0.0, 1.0, 0.0];
+/// Where sparks thrown from `at` come down: the ground under it, if it
+/// is near the ground (a burst up a tree throws them into the air).
+fn floor_under(look: &Look, at: V3) -> Option<f32> {
+    let g = look.ground.at(at[0], at[2]);
+    (at[1] - g < 1.5).then_some(g + 0.05)
+}
 
 /// A fireball bursting at `at`, `t` seconds ago: a white flash, a core
-/// of rolling fire, tongues of flame billowing out and up and burning
-/// down to red, a shockwave along the ground, debris and embers flung
-/// out, then a pall of smoke rolling up.
+/// of rolling fire burning out fast, tongues of flame billowing out and
+/// up and burning down to red, a shockwave along the ground out to where
+/// it hurts, debris and embers flung out, then a pall of smoke rolling
+/// up.
 pub fn explosion(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
     let c = colour(spell::FIREBALL);
     let r = FIREBALL_RADIUS;
@@ -27,6 +33,7 @@ pub fn explosion(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
     }
     let swell = 1.0 - (-t / 0.1).exp();
     let burn = (1.0 - t / 0.8).max(0.0);
+    let core = (1.0 - t / 0.35).max(0.0);
     let lift = [at[0], at[1] + t * 0.8, at[2]];
     if t < 0.12 {
         let k = 1.0 - t / 0.12;
@@ -39,18 +46,21 @@ pub fn explosion(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
         );
         glint(d, at, r * 1.2 * k, rgb(255, 220, 160), k);
     }
+    // Its heart, fine-grained so it tears rather than reads as a ball,
+    // and gone before the flames are.
     energy(
         look,
         d,
         lift,
         [r * (0.15 + 0.3 * swell); 3],
-        (rgb(255, 140, 40), burn * 0.85),
-        2.4 / r,
-        0.2 + 0.5 * burn,
+        (rgb(255, 140, 40), core * 0.85),
+        6.0 / r,
+        0.2 + 0.5 * core,
     );
     // The fireball itself: tongues of flame thrown out over a ball and
-    // rising, each burning down from yellow-white to deep red.
-    for k in 0..22 {
+    // rising, each burning down from yellow-white to deep red (they make
+    // its edge).
+    for k in 0..30 {
         let w = dir(seed, k, false);
         let out = r * (0.15 + 0.55 * rnd(seed, k, 71)) * swell;
         let life = 0.55 + 0.45 * rnd(seed, k, 72);
@@ -66,23 +76,25 @@ pub fn explosion(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
                 at[2] + w[2] * out,
             ],
             size: r * (0.35 + 0.3 * rnd(seed, k, 74)) * (0.6 + 0.4 * swell),
-            c: [col[0], col[1], col[2], f.min(1.0) * 0.5],
+            c: [col[0], col[1], col[2], f.min(1.0) * 0.85],
             shape: Shape::Flame,
             seed: rnd(seed, k, 75),
             ..Default::default()
         });
     }
-    let wave = (1.0 - t / 0.45).max(0.0);
-    ring(
+    // The shockwave, out to where it hurts.
+    let rush = (1.0 - t / 0.45).max(0.0);
+    let reach = r * (t / 0.35).min(1.0).sqrt();
+    wave(
         look,
         d,
         [at[0], at[1] - 0.3, at[2]],
-        r * 1.8 * (t / 0.35).min(1.0).sqrt(),
+        reach,
         rgb(255, 160, 80),
-        wave,
-        0.0,
+        rush,
     );
-    // Debris, streaking out and falling; embers drifting up after.
+    // Debris, streaking out and falling (onto the ground, cooling there,
+    // if it burst on the ground); embers drifting up after.
     spray(
         d,
         at,
@@ -91,6 +103,7 @@ pub fn explosion(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
         Spray {
             fall: 12.0,
             streak: 0.05,
+            floor: floor_under(look, at),
             ..Spray::new(28, 14.0, 0.9, (rgb(255, 230, 160), rgb(200, 40, 10)), 0.14)
         },
     );
@@ -135,17 +148,15 @@ pub fn mark(look: &Look, d: &mut Draw, at: V3, age: f32, seed: i32) {
     let c = colour(spell::LIGHTNING);
     let k = age / wait;
     let r = LIGHTNING_RADIUS;
-    let floor = [at[0], at[1] + 0.08, at[2]];
     let pulse = 0.6 + 0.4 * (age / 50.0).sin();
-    sigil(look, d, floor, UP, r, (c, 0.9 * pulse), age / 400.0);
-    ring(
+    runes(look, d, at, r, (c, 0.9 * pulse), age / 400.0);
+    rim(
         look,
         d,
-        floor,
+        at,
         r * (1.0 - k).max(0.08) * 1.05,
         mix(c, WHITE, 0.4),
         0.9,
-        0.0,
     );
     let flick = (age / 60.0) as i32;
     for n in 0..14 {
@@ -163,7 +174,7 @@ pub fn mark(look: &Look, d: &mut Draw, at: V3, age: f32, seed: i32) {
             ..Default::default()
         });
     }
-    beam(
+    shaft(
         look,
         d,
         (at, [at[0], at[1] + 30.0, at[2]]),
@@ -263,25 +274,13 @@ pub fn strike(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
             k,
         );
     }
+    // The circle burning out, and a blast of light out to where it
+    // hurts.
+    let r = LIGHTNING_RADIUS;
+    runes(look, d, at, r, (mix(c, WHITE, 0.3), f * f), t);
+    let reach = r * (0.4 + 0.6 * (t / 0.25).min(1.0).sqrt());
+    rim(look, d, at, reach, mix(c, WHITE, 0.3), f);
     let floor = [at[0], at[1] + 0.08, at[2]];
-    sigil(
-        look,
-        d,
-        floor,
-        UP,
-        LIGHTNING_RADIUS,
-        (mix(c, WHITE, 0.3), f * f),
-        t,
-    );
-    ring(
-        look,
-        d,
-        floor,
-        LIGHTNING_RADIUS * (0.4 + t * 3.0),
-        mix(c, WHITE, 0.3),
-        f,
-        0.0,
-    );
     spray(
         d,
         floor,
@@ -290,6 +289,7 @@ pub fn strike(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
         Spray {
             fall: 14.0,
             streak: 0.04,
+            floor: Some(floor[1]),
             ..Spray::new(26, 10.0, 0.6, (WHITE, c), 0.12)
         },
     );
@@ -335,8 +335,8 @@ pub fn blink(look: &Look, d: &mut Draw, feet: V3, t: f32, seed: i32, out: bool) 
     }
     // A shaft of light, thinning to nothing.
     let col = (1.0 - t / 0.3).max(0.0);
-    let top = [feet[0], feet[1] + 2.6, feet[2]];
-    beam(
+    let top = [feet[0], feet[1] + 4.0, feet[2]];
+    shaft(
         look,
         d,
         (feet, top),
@@ -344,7 +344,7 @@ pub fn blink(look: &Look, d: &mut Draw, feet: V3, t: f32, seed: i32, out: bool) 
         (c, col * 0.6),
         Ray::Flow(4.0),
     );
-    beam(
+    shaft(
         look,
         d,
         (feet, top),
@@ -353,15 +353,7 @@ pub fn blink(look: &Look, d: &mut Draw, feet: V3, t: f32, seed: i32, out: bool) 
         Ray::Core,
     );
     if !out {
-        ring(
-            look,
-            d,
-            [feet[0], feet[1] + 0.05, feet[2]],
-            0.4 + t * 3.0,
-            c,
-            f,
-            0.0,
-        );
+        wave(look, d, feet, 0.4 + t * 3.0, c, f);
     }
     for n in 0..3 {
         let y = feet[1] + 0.5 + rnd(seed, n, 43) * 1.4;
@@ -387,7 +379,7 @@ pub fn gust(look: &Look, d: &mut Draw, feet: V3, (t, seed): (f32, i32)) {
     }
     let grow = 1.0 - (-t / 0.12).exp();
     let r = GUST_RADIUS * grow;
-    ring(look, d, [feet[0], feet[1] + 0.1, feet[2]], r, c, f, t * 3.0);
+    wave(look, d, feet, r, c, f);
     ring(
         look,
         d,

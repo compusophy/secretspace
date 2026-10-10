@@ -1,16 +1,23 @@
 //! After the scene: its targets (an HDR picture, multisampled and
-//! resolved, and its depth), ambient occlusion (`ao`), bloom (halve it,
-//! again and again, then back up, each step a little wider, added
-//! together), and the finish into the screen (exposure, tone mapping, a
+//! resolved, and its depth), ambient occlusion (`ao`), bloom (what of the
+//! picture is past white, halved again and again, then back up, each step
+//! a little wider, added together, the finer weighing more, and averaged:
+//! a glow about what is bright, not a veil over all of it), and the
+//! finish into the screen (the glow added, exposure, tone mapping, a
 //! vignette, sRGB, the grade).
 
 use gpu::wgpu;
 
 use crate::ao::Ao;
+use crate::buffers::bytes;
+use crate::fullscreen;
 use crate::shafts::{Shafts, SHAFT};
-use crate::{shaders, Camera, Look};
+use crate::{laws, shaders, Camera, Look, Quality};
 
 pub const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// Bloom's chain, where the device can draw into it: half the bytes of
+/// `HDR` (no alpha, which bloom never reads).
+const BLOOM_SMALL: wgpu::TextureFormat = wgpu::TextureFormat::Rg11b10Ufloat;
 pub const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Where the scene draws: the colour (multisampled, or the picture
@@ -21,19 +28,35 @@ pub struct Targets {
     pub depth: wgpu::TextureView,
 }
 
+/// What a pass drawing the scene does with its targets.
+#[derive(Clone, Copy, Default)]
+pub struct Ops {
+    /// The colour cleared to this, or kept.
+    pub clear: Option<[f32; 3]>,
+    /// The depth cleared (to infinity) or kept, and stored after it or
+    /// not (neither: only read, so the pass's shaders may read it too).
+    pub depth: (bool, bool),
+    /// The picture resolved (its samples to one) at its end.
+    pub resolve: bool,
+    /// The many-sampled colour let go at its end (it was resolved, and
+    /// nothing reads it again): never when the colour is the picture.
+    pub done: bool,
+}
+
 impl Targets {
-    /// A pass drawing the scene: its colour cleared or kept, its depth
-    /// cleared (to infinity) or kept, and kept after it or not (neither:
-    /// only read, so its shaders may read it too), the picture resolved at
-    /// its end or not.
+    /// A pass drawing the scene, its targets treated as `ops` says.
     pub fn pass<'a>(
         &self,
         encoder: &'a mut wgpu::CommandEncoder,
         label: &str,
-        clear: Option<[f32; 3]>,
-        depth: (bool, bool),
-        resolve: bool,
+        ops: Ops,
     ) -> wgpu::RenderPass<'a> {
+        let Ops {
+            clear,
+            depth,
+            resolve,
+            done,
+        } = ops;
         let load = match clear {
             Some(c) => wgpu::LoadOp::Clear(wgpu::Color {
                 r: c[0] as f64,
@@ -52,7 +75,11 @@ impl Targets {
                 resolve_target: if resolve { self.resolve.as_ref() } else { None },
                 ops: wgpu::Operations {
                     load,
-                    store: wgpu::StoreOp::Store,
+                    store: if done && resolve && self.resolve.is_some() {
+                        wgpu::StoreOp::Discard
+                    } else {
+                        wgpu::StoreOp::Store
+                    },
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -87,6 +114,10 @@ struct Pass {
 pub struct Post {
     msaa: u32,
     levels: u32,
+    /// Bloom's chain's format.
+    bloom: wgpu::TextureFormat,
+    /// Whether the scene's depth is read once what is solid is drawn.
+    reads: bool,
     layout: wgpu::BindGroupLayout,
     finish_layout: wgpu::BindGroupLayout,
     down: wgpu::RenderPipeline,
@@ -97,6 +128,9 @@ pub struct Post {
     pub targets: Option<Targets>,
     chain: Vec<wgpu::TextureView>,
     passes: Vec<Pass>,
+    /// The first halving's numbers (its exposure is the frame's), and
+    /// one texel of what it halves.
+    first: Option<(wgpu::Buffer, [f32; 2])>,
     finish_group: Option<wgpu::BindGroup>,
     finish_buf: wgpu::Buffer,
     grade_buf: wgpu::Buffer,
@@ -143,100 +177,37 @@ fn uniform(device: &wgpu::Device, queue: &wgpu::Queue, v: [f32; 8]) -> wgpu::Buf
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
-    queue.write_buffer(&buf, 0, &bytes);
+    queue.write_buffer(&buf, 0, &bytes(&v));
     buf
 }
 
 impl Post {
-    /// Post-processing into targets of `out` format, with occlusion
-    /// looking `ao` ways out from a pixel (none at 0).
-    pub fn new(
-        device: &wgpu::Device,
-        out: wgpu::TextureFormat,
-        msaa: u32,
-        levels: u32,
-        (ao, shafts): (u32, bool),
-    ) -> Post {
-        let tex = |binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
+    /// Post-processing into targets of `out` format, doing as much as
+    /// `quality` says (occlusion, shafts, bloom's depth).
+    pub fn new(device: &wgpu::Device, out: wgpu::TextureFormat, quality: Quality) -> Post {
+        let (msaa, levels) = (quality.msaa, quality.bloom_levels);
+        let (ao, shafts) = (quality.ao, quality.shafts);
+        let small = wgpu::Features::RG11B10UFLOAT_RENDERABLE;
+        let bloom = if device.features().contains(small) {
+            BLOOM_SMALL
+        } else {
+            HDR
         };
-        let common = [
-            tex(0),
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ];
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("post"),
-            entries: &common,
-        });
-        let mut with_bloom = common.to_vec();
-        with_bloom.push(tex(3));
-        with_bloom.push(wgpu::BindGroupLayoutEntry {
-            binding: 4,
-            ..common[2]
-        });
-        with_bloom.push(tex(5));
-        let finish_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("finish"),
-            entries: &with_bloom,
-        });
+        let layout = crate::slots::layout(device, "post", &crate::slots::POST);
+        let finish_layout = crate::slots::layout(device, "finish", &crate::slots::FINISH);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("post"),
             source: wgpu::ShaderSource::Wgsl(shaders::post().into()),
         });
         let pipe = |layout: &wgpu::BindGroupLayout, entry: &str, format, blend| {
-            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(entry),
-                bind_group_layouts: &[Some(layout)],
-                immediate_size: 0,
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(entry),
-                layout: Some(&pl),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("post_vs"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(entry),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
+            fullscreen::pipeline(
+                device,
+                &[layout],
+                &module,
+                ("post_vs", entry),
+                format,
+                blend,
+            )
         };
         let add = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -249,8 +220,10 @@ impl Post {
         Post {
             msaa,
             levels: levels.max(1),
-            down: pipe(&layout, "down_fs", HDR, None),
-            up: pipe(&layout, "up_fs", HDR, Some(add)),
+            reads: ao > 0 || shafts || quality.ssr > 0 || quality.decals,
+            down: pipe(&layout, "down_fs", bloom, None),
+            up: pipe(&layout, "up_fs", bloom, Some(add)),
+            bloom,
             finish: pipe(&finish_layout, "finish_fs", out, None),
             layout,
             finish_layout,
@@ -264,6 +237,7 @@ impl Post {
             targets: None,
             chain: Vec::new(),
             passes: Vec::new(),
+            first: None,
             finish_group: None,
             finish_buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("finish"),
@@ -283,26 +257,36 @@ impl Post {
         }
     }
 
-    /// Whether the scene's depth is read (`occlude`) once what is solid
-    /// is drawn, before what glows.
-    pub fn occludes(&self) -> bool {
-        self.ao.is_some() || self.shafts.is_some()
+    /// Whether the scene's depth is read once what is solid is drawn
+    /// (occlusion, shafts, the sea's reflections, decals), before what
+    /// glows: the scene is then drawn in passes that may read it.
+    pub fn reads_depth(&self) -> bool {
+        self.reads
     }
 
-    /// Ambient occlusion over the picture drawn so far, and the sun's
-    /// shafts from its depth.
+    /// From the depth of what is solid: ambient occlusion (laid over the
+    /// picture by `apply`), and the sun's shafts; whether they show (for
+    /// the finish: `run`).
     pub fn occlude(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         cam: &Camera,
         look: &Look,
-    ) {
-        if let (Some(ao), Some(t)) = (&self.ao, &self.targets) {
-            ao.run(encoder, queue, &t.color, cam);
+    ) -> bool {
+        if let Some(ao) = &self.ao {
+            ao.run(encoder, queue, cam, look);
         }
-        if let Some(sh) = &self.shafts {
-            sh.run(encoder, queue, cam, look);
+        self.shafts
+            .as_ref()
+            .is_some_and(|sh| sh.run(encoder, queue, cam, look) > 0.0)
+    }
+
+    /// The occlusion laid over the picture, first in a scene pass that
+    /// only reads the depth (its group 0 left as the occlusion's).
+    pub fn apply(&self, pass: &mut wgpu::RenderPass) {
+        if let Some(ao) = &self.ao {
+            ao.apply(pass);
         }
     }
 
@@ -313,17 +297,17 @@ impl Post {
         }
         self.size = size;
         let hdr = texture(device, "hdr", size, HDR, 1, true);
-        let read = self.occludes();
+        let read = self.reads;
         let depth = texture(device, "depth", size, DEPTH, self.msaa, read);
-        if let Some(ao) = &mut self.ao {
-            ao.fit(device, &depth, size);
-        }
         if let Some(sh) = &mut self.shafts {
             sh.fit(device, &depth, size);
         }
+        // The many-sampled picture is read only by the occlusion (how much
+        // of its light is direct).
         let targets = if self.msaa > 1 {
+            let read = self.ao.is_some();
             Targets {
-                color: texture(device, "hdr (msaa)", size, HDR, self.msaa, false),
+                color: texture(device, "hdr (msaa)", size, HDR, self.msaa, read),
                 resolve: Some(hdr.clone()),
                 depth,
             }
@@ -334,12 +318,15 @@ impl Post {
                 depth,
             }
         };
+        if let Some(ao) = &mut self.ao {
+            ao.fit(device, (&targets.depth, &targets.color), size);
+        }
         let sizes: Vec<(u32, u32)> = (1..=self.levels)
             .map(|l| ((size.0 >> l).max(1), (size.1 >> l).max(1)))
             .collect();
         self.chain = sizes
             .iter()
-            .map(|&s| texture(device, "bloom", s, HDR, 1, true))
+            .map(|&s| texture(device, "bloom", s, self.bloom, 1, true))
             .collect();
         let group = |src: &wgpu::TextureView, buf: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -368,6 +355,10 @@ impl Post {
             } else {
                 (&self.chain[l - 1], sizes[l - 1])
             };
+            // The first halving weighs bright specks down (so a spark
+            // crossing a pixel does not make the bloom pulse) and keeps
+            // only what is past white (its exposure written each frame).
+            let first = if l == 0 { 1.0 } else { 0.0 };
             let buf = uniform(
                 device,
                 queue,
@@ -376,12 +367,15 @@ impl Post {
                     1.0 / s.1 as f32,
                     0.0,
                     0.0,
-                    0.0,
-                    0.0,
+                    first,
+                    1.0,
                     0.0,
                     1.0,
                 ],
             );
+            if l == 0 {
+                self.first = Some((buf.clone(), [1.0 / s.0 as f32, 1.0 / s.1 as f32]));
+            }
             passes.push(Pass {
                 group: group(src, &buf),
                 target: l,
@@ -390,6 +384,7 @@ impl Post {
         }
         for l in (0..self.levels as usize - 1).rev() {
             let s = sizes[l + 1];
+            // Each wider level added at a share of the finer one.
             let buf = uniform(
                 device,
                 queue,
@@ -398,7 +393,7 @@ impl Post {
                     1.0 / s.1 as f32,
                     0.0,
                     0.0,
-                    0.0,
+                    laws::BLOOM_FALLOFF,
                     0.0,
                     0.0,
                     1.0,
@@ -451,19 +446,22 @@ impl Post {
         self.targets = Some(targets);
     }
 
-    /// Bloom, then the finish into `out`.
+    /// Bloom, then the finish into `out` (the sun's shafts added if they
+    /// were drawn this frame).
     pub fn run(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         out: &wgpu::TextureView,
         look: &Look,
+        shafts: bool,
     ) {
-        let sun = if self.shafts.is_some() {
-            look.sun
-        } else {
-            [0.0; 3]
-        };
+        let sun = if shafts { look.sun } else { [0.0; 3] };
+        // The levels added (each a share of the one before) come to this
+        // many pictures: the finish divides by it.
+        let all: f32 = (0..self.levels)
+            .map(|l| laws::BLOOM_FALLOFF.powi(l as i32))
+            .sum();
         let k = [
             sun[0],
             sun[1],
@@ -472,10 +470,14 @@ impl Post {
             look.bloom,
             look.exposure,
             look.vignette,
-            1.0,
+            1.0 / all,
         ];
-        let bytes: Vec<u8> = k.iter().flat_map(|f| f.to_le_bytes()).collect();
-        queue.write_buffer(&self.finish_buf, 0, &bytes);
+        queue.write_buffer(&self.finish_buf, 0, &bytes(&k));
+        // What is past white is judged as the picture will be exposed.
+        if let Some((buf, texel)) = &self.first {
+            let first = [texel[0], texel[1], 0.0, 0.0, 1.0, look.exposure, 0.0, 1.0];
+            queue.write_buffer(buf, 0, &bytes(&first));
+        }
         let g = &look.grade;
         let grade = [
             g.lift[0],
@@ -491,48 +493,28 @@ impl Post {
             g.gain[2],
             0.0,
         ];
-        let bytes: Vec<u8> = grade.iter().flat_map(|f| f.to_le_bytes()).collect();
-        queue.write_buffer(&self.grade_buf, 0, &bytes);
+        queue.write_buffer(&self.grade_buf, 0, &bytes(&grade));
         for p in &self.passes {
             let load = if p.up {
                 wgpu::LoadOp::Load
             } else {
                 wgpu::LoadOp::Clear(wgpu::Color::BLACK)
             };
-            let mut rp = begin(encoder, &self.chain[p.target], load);
+            let mut rp = fullscreen::pass(encoder, "bloom", &self.chain[p.target], load);
             rp.set_pipeline(if p.up { &self.up } else { &self.down });
             rp.set_bind_group(0, &p.group, &[]);
             rp.draw(0..3, 0..1);
         }
         if let Some(group) = &self.finish_group {
-            let mut rp = begin(encoder, out, wgpu::LoadOp::Clear(wgpu::Color::BLACK));
+            let mut rp = fullscreen::pass(
+                encoder,
+                "finish",
+                out,
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            );
             rp.set_pipeline(&self.finish);
             rp.set_bind_group(0, group, &[]);
             rp.draw(0..3, 0..1);
         }
     }
-}
-
-/// A pass drawing into one view.
-fn begin<'a>(
-    encoder: &'a mut wgpu::CommandEncoder,
-    view: &wgpu::TextureView,
-    load: wgpu::LoadOp<wgpu::Color>,
-) -> wgpu::RenderPass<'a> {
-    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("post"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load,
-                store: wgpu::StoreOp::Store,
-            },
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        multiview_mask: None,
-    })
 }

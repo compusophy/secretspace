@@ -1,14 +1,14 @@
 //! The shapes spells are drawn with, white (each tinted as it is drawn):
 //! a soft ring (bright a little inside its edge, fading both ways), an
 //! arcane circle (rings, ticks, runes and a six-pointed star), a cut ice
-//! crystal, and a smooth beam.
+//! crystal, a smooth beam (in lengths, joined), a ray drawn to a point at
+//! each end, a shaft of light fading up, and a pillar fading at its top.
 
 use std::f32::consts::{PI, TAU};
 
 use render::geo::{add, hash, norm, sub, Geo, V3};
 
-const WHITE: V3 = [1.0; 3];
-const UP: V3 = [0.0, 1.0, 0.0];
+use super::{UP, WHITE};
 
 fn at(a: f32, r: f32) -> V3 {
     [a.cos() * r, 0.0, a.sin() * r]
@@ -138,6 +138,61 @@ pub fn beam() -> Geo {
     g
 }
 
+/// A ray a metre up y, a unit across: drawn to a point at each end, so a
+/// lone beam of light has no flat cap to it.
+pub fn ray() -> Geo {
+    rings(&[
+        (0.2, 0.0, 1.0),
+        (1.0, 0.05, 1.0),
+        (1.0, 0.95, 1.0),
+        (0.3, 1.0, 1.0),
+    ])
+}
+
+/// A shaft of light a metre up y, a unit across: brightest at its foot,
+/// fading to nothing at its top (added light: dark is clear).
+pub fn shaft() -> Geo {
+    rings(&[
+        (1.0, 0.0, 1.0),
+        (1.0, 0.08, 0.85),
+        (1.0, 0.35, 0.3),
+        (1.0, 1.0, 0.0),
+    ])
+}
+
+/// A pillar of light a metre up y, a unit across: bright most of its
+/// height, fading to nothing over its top third (so a cube's pillar
+/// has no flat end).
+pub fn pillar() -> Geo {
+    rings(&[(1.0, 0.0, 1.0), (1.0, 0.7, 1.0), (1.0, 1.0, 0.0)])
+}
+
+/// Rings up y, each (radius, height, brightness), joined round, open at
+/// the ends.
+fn rings(list: &[(f32, f32, f32)]) -> Geo {
+    let mut g = Geo::default();
+    let n = 16;
+    for &(r, y, b) in list {
+        for k in 0..n {
+            let a = k as f32 / n as f32 * TAU;
+            g.vertex(
+                [a.cos() * r, y, a.sin() * r],
+                [a.cos(), 0.0, a.sin()],
+                [b; 3],
+                b,
+            );
+        }
+    }
+    let at = |j: usize, k: usize| (j * n + k % n) as u32;
+    for j in 0..list.len() - 1 {
+        for k in 0..n {
+            g.index(at(j, k), at(j + 1, k), at(j, k + 1));
+            g.index(at(j, k + 1), at(j + 1, k), at(j + 1, k + 1));
+        }
+    }
+    g
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,9 +204,37 @@ mod tests {
             ("sigil", sigil()),
             ("crystal", crystal()),
             ("beam", beam()),
+            ("ray", ray()),
+            ("shaft", shaft()),
+            ("pillar", pillar()),
         ] {
             assert!(!g.is_empty(), "{name}");
             assert!(g.triangles() < 4_000, "{name}: {}", g.triangles());
+        }
+    }
+
+    #[test]
+    fn a_shaft_fades_to_nothing_at_its_top_and_a_ray_comes_to_points() {
+        // Each vertex: place (3), facing (3), colour (3), glow.
+        let verts = |g: &Geo| g.v.chunks(10).map(|v| v.to_vec()).collect::<Vec<_>>();
+        for v in verts(&shaft()).into_iter().chain(verts(&pillar())) {
+            if v[1] > 0.99 {
+                assert_eq!((v[6], v[9]), (0.0, 0.0));
+            }
+        }
+        // A cube's pillar is bright most of its height.
+        let lit = |g: &Geo, y: f32| {
+            verts(g)
+                .iter()
+                .filter(|v| (v[1] - y).abs() < 1e-3)
+                .map(|v| v[9])
+                .fold(0.0, f32::max)
+        };
+        assert!(lit(&pillar(), 0.7) > 0.95 && lit(&shaft(), 0.35) < 0.5);
+        for v in verts(&ray()) {
+            if v[1] < 0.01 || v[1] > 0.99 {
+                assert!(v[0].hypot(v[2]) < 0.35);
+            }
         }
     }
 }

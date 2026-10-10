@@ -438,8 +438,6 @@ dependencies = [
  "secretspace-engine",
  "secretspace-gpu",
  "secretspace-kit",
- "secretspace-luciphon",
- "secretspace-luciphon-look",
  "secretspace-pixels",
  "secretspace-render",
  "secretspace-wandfall",
@@ -518,7 +516,6 @@ dependencies = [
 name = "secretspace-showcase-web"
 version = "0.1.0"
 dependencies = [
- "naga",
  "secretspace-gpu",
  "secretspace-kit",
  "secretspace-pixels",
