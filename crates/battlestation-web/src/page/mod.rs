@@ -165,8 +165,13 @@ impl Page {
         let desk = Desk::new(&mut r, out.device(), out.format(), hooks.tone.unwrap_or(2));
         out.fit(MIN_SHORT, MAX_DPR);
         let heard = Rc::new(RefCell::new(Heard::default()));
-        input::listen(&heard, out.canvas());
-        let pointer = kit::input::Hands::attach(out.canvas());
+        let pointer = match out.canvas() {
+            Some(c) => {
+                input::listen(&heard, c);
+                kit::input::Hands::attach(c)
+            }
+            None => kit::input::Hands::detached(),
+        };
         let now = kit::now();
         let lean = hooks.lean.unwrap_or(0.0);
         Page {
@@ -216,7 +221,9 @@ impl Page {
         // monitor, where yours points); over the menu it shows.
         let cursor = if playing { "none" } else { "default" };
         if cursor != self.cursor {
-            let _ = self.out.canvas().style().set_property("cursor", cursor);
+            if let Some(c) = self.out.canvas() {
+                let _ = c.style().set_property("cursor", cursor);
+            }
             self.cursor = cursor;
         }
         view::frame(self, now, dt);

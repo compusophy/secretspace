@@ -4,14 +4,17 @@
 //! it) composited sharp over the picture before it is shown. Generic: no
 //! game knowledge. The adapter is asked for before the canvas is touched,
 //! so a browser without WebGPU leaves the canvas free for the WebGL2
-//! fallback. Off the web only the shaders and the tables build (the tests
-//! check every WGSL string).
+//! fallback. A page run inside another (`kit::host`) draws off screen
+//! instead (`Gpu::hosted`), each picture read back for its host (`read`).
+//! Off the web only the shaders and the tables build (the tests check
+//! every WGSL string).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 pub mod layer;
 mod offscreen;
+mod readback;
 
 pub use offscreen::Offscreen;
 

@@ -321,7 +321,7 @@ fn grab(p: &Page) {
             sideways();
         }
     } else {
-        kit::input::play(p.g.canvas(), !query("windowed"));
+        kit::input::play(p.g.canvas().map(|c| c.as_ref()), !query("windowed"));
     }
 }
 
@@ -487,7 +487,10 @@ pub fn page() {
         let q = set.quality(&search, g.caps.software, kit::touch());
         let r = Renderer::new(&g.device, &g.queue, g.format(), q);
         let session = kit::Session::load();
-        let hands = Hands::attach(g.canvas());
+        let hands = match g.canvas() {
+            Some(c) => Hands::attach(c),
+            None => Hands::detached(),
+        };
         PAGE.with(|p| {
             *p.borrow_mut() = Some(Page {
                 g,
