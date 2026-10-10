@@ -137,6 +137,14 @@ pub(super) fn hands(p: &mut Page) {
     }
     for code in p.hands.pressed() {
         p.sounds.audio.wake();
+        // Writing your name on the title: the keys are the field's (Enter
+        // or Esc puts it down).
+        if p.name.focused() {
+            if matches!(code.as_str(), "Enter" | "Escape") {
+                p.name.blur();
+            }
+            continue;
+        }
         // Esc: the shared menu (with the keyboard held, full screen, it
         // comes to the page; a held Esc still leaves full screen).
         if code == "Escape" {
@@ -246,7 +254,9 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
     }
     while p.acc >= MS_A_TICK {
         p.acc -= MS_A_TICK;
-        if !p.alive {
+        // Out, or the room not there to hear (your wizard holds still
+        // till it is back, not running on alone).
+        if !p.alive || p.lost.is_some() {
             continue;
         }
         p.seq = p.seq.wrapping_add(1);

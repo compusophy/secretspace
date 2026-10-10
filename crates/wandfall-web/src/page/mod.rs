@@ -30,7 +30,7 @@ use crate::scene;
 use crate::settings::Settings;
 use crate::sky::{self, Hour, Sky, Weather};
 use crate::sound::Sounds;
-use crate::state::State;
+use crate::state::{Line, State};
 use crate::touch::{self, Touch};
 
 mod input;
@@ -52,6 +52,10 @@ const VERSION_EVERY: f64 = 5.0 * 60_000.0;
 const PRACTICE_SEED: u64 = 0x5eed_0007;
 /// The page's own connection to its practice world.
 const ME: u32 = 1;
+/// Kept across a reload: the build that reloaded (so it reloads once, not
+/// in a loop), and where it was (back online after it).
+const RELOADED: &str = "wandfall.reloaded";
+const RESUME: &str = "wandfall.resume";
 
 /// Where the page is: the title, a match online, or its own practice range.
 enum Mode {
@@ -100,7 +104,7 @@ struct Page {
     /// Time not yet ticked in the practice world (ms).
     local: f64,
     spots: Spots,
-    /// The spellbook is open, at this slot; the pause menu is (touch).
+    /// The spellbook is open (at `book_slot`).
     book: bool,
     /// The mouse was locked last frame; mouse moves to pass over (the
     /// first after a lock can carry the whole way the cursor jumped).
@@ -152,6 +156,14 @@ struct Page {
     cycle: i32,
     /// Where sound is heard from (the camera) and which way it faces.
     ear: ([f32; 3], f32),
+    /// Your name as you write it on the title (a field laid over its
+    /// box), and whether the room said the one asked for is taken.
+    name: kit::TextField,
+    taken: bool,
+    /// Since when the link to the room has been lost, if it is.
+    lost: Option<f64>,
+    /// A word for the title in place of how to play (why you are back).
+    notice: Option<&'static str>,
 }
 
 thread_local! {
@@ -223,32 +235,76 @@ fn repaint(p: &mut Page, q: render::Quality) {
 
 /// Start over in a new place: nothing known, nobody you.
 fn fresh(p: &mut Page) {
+    forget(p);
+    p.meta.hide();
+    p.inbox.clear();
+    p.lost = None;
+}
+
+/// Nothing of you or the match kept, only the island: somewhere new, or
+/// the room found again after the link was lost (it let your wizard go,
+/// and a new one joins).
+fn forget(p: &mut Page) {
     let seed = p.st.seed;
     p.st = State::default();
     p.st.seed = seed;
     p.alive = false;
     p.book = false;
-    p.meta.hide();
-    p.inbox.clear();
     p.pred.reset(Body::default());
+    p.prev = p.pred.body;
+    p.outbox.clear();
     p.pad.reset();
+    p.sighted.clear();
 }
 
+/// Off the title for somewhere (the title puts your name's field back).
 fn leave(p: &mut Page) {
     if let Mode::Online(link) = &p.mode {
         link.close();
     }
+    p.name.blur();
+    p.name.place(None);
     p.mode = Mode::Title;
     fresh(p);
     island(p, PRACTICE_SEED);
     kit::input::unlock();
 }
 
+/// The name written on the title, cleaned as the room would (empty if
+/// none): else the one last used here.
+fn wanted(p: &Page) -> String {
+    let typed = engine::who::clean_name(&p.name.value());
+    if typed.is_empty() {
+        p.session.name()
+    } else {
+        typed
+    }
+}
+
 fn online(p: &mut Page) {
     leave(p);
-    let link = kit::Link::open("wandfall", p.session.hello(&p.session.name(), false), false);
+    // A name written that is not this soul's yet: asked for (the room
+    // says whether it is someone else's).
+    let name = wanted(p);
+    let rename = !name.is_empty() && name != p.session.name();
+    p.taken = false;
+    p.notice = None;
+    let link = kit::Link::open("wandfall", p.session.hello(&name, rename), false);
     p.mode = Mode::Online(link);
     grab(p);
+}
+
+/// Load the page again (a newer build or protocol is out), unless this
+/// very build already did: then the newer one is not here yet, and
+/// another reload would only loop. Whether it reloads.
+fn reload() -> bool {
+    let from = format!("from {}", kit::version::PAGE);
+    if kit::load(RELOADED).as_deref() == Some(from.as_str()) {
+        return false;
+    }
+    kit::save(RELOADED, &from);
+    kit::version::reload();
+    true
 }
 
 /// Take the screen, keys and mouse to play (`?windowed`: the mouse only);
@@ -484,15 +540,27 @@ pub fn start() {
                 watch: None,
                 cycle: 0,
                 ear: ([0.0; 3], 0.0),
+                name: kit::TextField::new(engine::who::MAX_NAME as u32, "your name"),
+                taken: false,
+                lost: None,
+                notice: None,
             })
         });
         PAGE.with(|p| {
             if let Some(p) = p.borrow_mut().as_mut() {
                 p.sounds.audio.set_volume(p.set.volume);
+                p.name.set_value(&p.session.name());
                 island(p, PRACTICE_SEED);
-                // `?practice` goes straight to the range.
+                // `?practice` goes straight to the range; a page reloaded
+                // for a newer build back to the match it was in.
+                let resume = kit::load(RESUME).is_some_and(|v| v == "online");
+                if resume {
+                    kit::save(RESUME, "");
+                }
                 if query("practice") {
                     practise(p);
+                } else if resume {
+                    online(p);
                 }
             }
         });

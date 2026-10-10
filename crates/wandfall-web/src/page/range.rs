@@ -2,19 +2,21 @@
 //! address's hooks for looking at it), and what each menu button does.
 
 use engine::room::{Outbox, Room, Who};
+use wandfall::laws::MAX_LEVEL;
 use wandfall::practice;
 use wandfall::proto::{Up, PROTO};
 use wandfall::room::Wandfall;
 
 use super::{
-    grab, leave, online, query, query_value, repaint, resume, send, Mode, Page, ME, PRACTICE_SEED,
+    grab, leave, online, query, query_value, repaint, resume, send, wanted, Mode, Page, ME,
+    PRACTICE_SEED,
 };
 use crate::menu::Act;
 
 pub(super) fn practise(p: &mut Page) {
     leave(p);
     let mut room = Box::new(Wandfall::practice(PRACTICE_SEED));
-    let name = Some(p.session.name())
+    let name = Some(wanted(p))
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "you".to_string());
     let who = Who {
@@ -140,13 +142,10 @@ pub(super) fn act(p: &mut Page, a: Act) {
                 }
                 Act::Level(d) => {
                     let level = own.map_or(1, |o| o.level) as i8;
-                    let to = if d == 20 {
-                        20
-                    } else {
-                        (level + d).clamp(1, 20)
-                    };
+                    let to = (level + d).clamp(1, MAX_LEVEL as i8);
                     practice::set_level(w, you, to as u8);
                 }
+                Act::MaxLevel => practice::set_level(w, you, MAX_LEVEL),
                 Act::NoCooldowns => {
                     if let Some(r) = w.practice.as_mut() {
                         r.no_cooldowns = !r.no_cooldowns;

@@ -13,8 +13,14 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     hands(p);
     inputs(p, dt);
     p.version.poll(now, false);
-    if p.version.newer() && (!p.alive || p.st.frame.as_ref().is_some_and(|f| f.phase != 1)) {
-        kit::version::reload();
+    if p.version.newer() && calm(p) {
+        // Back online after it, if it was.
+        if matches!(p.mode, Mode::Online(_)) {
+            kit::save(RESUME, "online");
+        }
+        if !reload() {
+            kit::save(RESUME, "");
+        }
     }
     let mut others = p.st.others(now);
     let (w, h) = p.g.css;
@@ -124,7 +130,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             }),
             rain: p.sky.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32),
         };
-        p.sounds.ambience.tune(&p.sounds.audio, &here, false);
+        p.sounds.ambience.tune(&p.sounds.audio, &here);
     }
     // Music under the title, the lobby and the result; none in a match.
     let music = match (&p.mode, p.st.frame.as_ref().map(|f| f.phase)) {
@@ -220,19 +226,37 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     p.spots = Spots::default();
     let practice = matches!(p.mode, Mode::Practice(_));
     let held_up = upright(p);
+    let under_menu = in_menu(p);
     match (&mut p.island, &p.mode) {
         (Some(_), Mode::Title) => {
-            let note = "the island is drawn by the secretspace engine, on WebGPU";
-            menu::title(&mut p.g.hud, &mut p.spots, ui, note);
+            let name = p.name.value();
+            let t = menu::Title {
+                name: &name,
+                typing: p.name.focused(),
+                taken: p.taken,
+                notice: p.notice,
+                note: "the island is drawn by the secretspace engine, on WebGPU",
+                now,
+            };
+            let field = menu::title(&mut p.g.hud, &mut p.spots, ui, &t);
+            // The field lies over the box (not under the shared menu).
+            let s = p.g.scale;
+            let css = (
+                field.x as f64 * s,
+                field.y as f64 * s,
+                field.w as f64 * s,
+                field.h as f64 * s,
+            );
+            p.name.place((!p.meta.is_open()).then_some(css));
         }
         (Some(i), _) => {
             if p.alive {
                 sight(&mut p.sighted, &p.st, &i.map, &others, cam.eye, now);
             }
             // The range's lessons, while you play (not under a menu).
-            let menu = p.book || p.meta.is_open() || (!p.touch && !kit::input::locked());
-            let lesson = practice && p.alive && p.orbit.is_none() && !menu && !held_up;
-            let lost = matches!(&p.mode, Mode::Online(link) if !link.up()) && p.st.joined;
+            let lesson = practice && p.alive && p.orbit.is_none() && !under_menu && !held_up;
+            // Lost a moment (a blip passes unsaid).
+            let lost = p.lost.is_some_and(|t| now - t > 400.0);
             let view = hud::View {
                 st: &p.st,
                 others: &others,
@@ -372,6 +396,19 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         if (now as u64 / 500).is_multiple_of(2) {
             kit::document().set_title(&line);
         }
+    }
+}
+
+/// Whether a newer page may load now, at a moment that costs nothing:
+/// on the title, or online between matches (the result shown, or
+/// waiting for the next while one is on). Never in the lobby (the match
+/// may start), nor on the range (the title is soon enough).
+fn calm(p: &Page) -> bool {
+    let phase = p.st.frame.as_ref().map(|f| f.phase);
+    match p.mode {
+        Mode::Title => !p.name.focused(),
+        Mode::Online(_) => phase == Some(2) || (phase == Some(1) && !p.alive && p.st.out.is_none()),
+        Mode::Practice(_) => false,
     }
 }
 
