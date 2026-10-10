@@ -340,8 +340,11 @@ fn say(text: &str) {
     }
 }
 
-#[wasm_bindgen(start)]
-pub fn start() {
+// The page's own start, called by its index.html after init(): never on
+// init, so a host importing this module as a cartridge is left alone
+// (the start-guard rule, which scripts/caps.sh holds).
+#[wasm_bindgen]
+pub fn page() {
     let query = kit::window().location().search().unwrap_or_default();
     let hooks = Hooks::read(&query);
     kit::report::on_panic();

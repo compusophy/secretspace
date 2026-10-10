@@ -17,6 +17,6 @@
 <body>
 <canvas id="screen" aria-label="a desk at night: your keyboard, mouse and hands"></canvas>
 <noscript>battlestation is drawn by WebAssembly; it needs a browser that runs it.</noscript>
-<script type="module">import init from "./pkg/battlestation.js"; init();</script>
+<script type="module">import init, { page } from "./pkg/battlestation.js"; init().then(() => page());</script>
 </body>
 </html>

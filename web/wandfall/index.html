@@ -22,6 +22,6 @@
 <body>
 <canvas id="screen" aria-label="wandfall"></canvas>
 <noscript>wandfall is drawn by WebAssembly; it needs a browser that runs it.</noscript>
-<script type="module">import init from "./pkg/wandfall.js"; init();</script>
+<script type="module">import init, { page } from "./pkg/wandfall.js"; init().then(() => page());</script>
 </body>
 </html>

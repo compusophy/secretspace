@@ -461,8 +461,11 @@ fn context(p: &Page) -> String {
     )
 }
 
-#[wasm_bindgen(start)]
-pub fn start() {
+// The page's own start, called by its index.html after init(): never on
+// init, so a host importing this module as a cartridge is left alone
+// (the start-guard rule, which scripts/caps.sh holds).
+#[wasm_bindgen]
+pub fn page() {
     wasm_bindgen_futures::spawn_local(async {
         kit::report::on_panic();
         // Who cannot play, and why, is worth knowing too.
