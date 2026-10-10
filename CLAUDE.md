@@ -5,22 +5,21 @@ Read this first: the operating map. README.md is the pitch.
 ## What this is
 
 A hub of tiny multiplayer games, all Rust. The front page (`/`) shows a
-card per game with live player counts, and in its footer how many people
-are online anywhere and how many visits there have ever been. Each game is
+card per game with live player counts; its footer, who is online and all
+visits ever. Each game is
 its own page (`/wyrm/`, ...) talking to its own room on one server.
 
 The first game, **wyrm** (snakes: eat the glow, grow, make them run into
 you), is the template the next ones are cloned from: an authoritative
 world on the server, each browser sent only what changed in its view, and
-a page that draws every pixel itself into one buffer. Its card on the hub
-is the real game, live: the hub watches the room (`?watch=1`, never one of
-the people counted) and draws it with the game's own look.
+a page that draws every pixel itself into one buffer. Its hub card is the
+real game, live: the hub watches the room (`?watch=1`, never counted) and
+draws it in the game's own look.
 
-Game #2, **Luciphon** (`docs/luciphon.md`), is **legacy, frozen**: it stays
-as it is (live, its card hidden). **Now: the engine** (`docs/engine.md`,
-UE5-class rendering on WebGPU, generic for every game) and game #3, a
-wand battle royale in the spirit of Plunderstorm (`docs/plunder.md`), the
-engine's first consumer.
+Game #2, **Luciphon** (`docs/luciphon.md`), is **legacy, frozen** (live,
+card hidden). **Now: the engine** (`docs/engine.md`,
+UE5-class WebGPU rendering for every game) and game #3, a wand battle
+royale like Plunderstorm (`docs/plunder.md`), its first consumer.
 
 ## Rules
 
@@ -53,7 +52,7 @@ engine's first consumer.
 crates/engine     wire rng room (Room trait) hub (Stats) who (Hello, Seen,
                   names) words snap (save files) fixed sha1 synth (sounds)
 crates/pixels     Canvas (RGBA buffer, AA shapes, glow), font (5x7), wrap,
-                  fit_scale; examples/sheet.rs draws a test sheet
+                  fit_scale; examples/sheet.rs (a test sheet)
 crates/kit        the browser end: Screen, place/snap/on_resize (whole
                   device pixels), gl (WebGL2), input (keys, fingers, pointer
                   lock), Link (reconnects, Hello first), Session, Version,
@@ -65,7 +64,7 @@ crates/render     the engine: retained scene, geo, sculpt, terrain, shadows
                   sea, decals, slots (bind tables), light grid; its test page
                   crates/showcase-web (/showcase/)
 crates/hub-web    the front page: shelf (layout) backdrop tag; watch (wyrm's
-                  card, live), wand (Wandfall's)
+                  card, live), wand (Wandfall's), desk (Battlestation's)
 crates/wyrm       the game: laws world bots grid proto view mirror room
 crates/wyrm-look  how it looks: ground, food, snake, bursts, live (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
@@ -77,6 +76,9 @@ crates/wandfall-look  its look (page + hub): look land/ flora basalt aura
                   make rig/ fx/ state icon scene spectate camera sky
 crates/wandfall-web  its page: page/ hud/ menu/ bar sound ambience steps
                   touch lessons reload settings
+crates/battlestation*  desk sim: laws keys hands term; -look: gear scene
+                  body glass monitor light desk; -web: page/ (os.rs:
+                  compusophyOS, so pages send COOP+COEP)
 crates/server     main (routes) http sockets host (a Room's thread; panics
                   rebuild it) store souls signal (SIGTERM) feedback
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -87,8 +89,8 @@ scripts/          build-web.sh (dist/: hub at /, games at /<id>/), ship.sh
 Server routes: `/ws/<room>` a game (`/ws` and `/ws/arena` are wyrm, for
 old pages; `?watch=1` only looks), `/ws/hub` the live Stats once a second,
 `/health` (`ok <build> ...`), `/stats` (JSON), `/feedback` (POST a report;
-GET `?key=$FEEDBACK_KEY` reads them); with `--static dist` the pages (`/arena`
-redirects to `/wyrm/`, as `web/vercel.json` does). A page's first connection carries
+GET `?key=$FEEDBACK_KEY` reads them); with `--static dist` the pages (`/arena` ->
+`/wyrm/`, as in `web/vercel.json`). A page's first connection carries
 `?v=1` and counts a visit. `$DATA_DIR` (`/data` in the image, a volume)
 keeps `visits`, `souls`, `feedback`, `rooms/<id>/snap-*.bin`. A deploy is
 a Stillness: SIGTERM, rooms `still()` and save, pages resume after.
@@ -112,22 +114,20 @@ wide at most); `ui()` is the text scale (2 phone, 1 desktop).
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web -p secretspace-wandfall-web --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web -p secretspace-wandfall-web -p secretspace-battlestation-web --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 bash scripts/caps.sh
 bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen
 cargo run -p secretspace-server --profile server -- --static dist   # :8787
 ```
 
-Deploys are automatic (`.github/workflows/deploy.yml`) on every push to
-main or a `claude/` branch: tests, then the server to Railway (`railway
-up` of `ship/`, secret RAILWAY_TOKEN, variable RAILWAY_SERVICE) and the
-pages to Vercel (secrets VERCEL_*), pointed at the server by the variable
-RELAY (`wss://<railway domain>/ws`). No RELAY, no page deploy.
+A push to main or a `claude/` branch deploys (`deploy.yml`): tests, the
+server to Railway (`railway up` of `ship/`; RAILWAY_TOKEN, _SERVICE), the
+pages to Vercel (VERCEL_*) pointed at it by RELAY (`wss://<railway>/ws`;
+none, no page deploy). One production: merge live branches first.
 
-Browser checks: Playwright, `executablePath` the installed Chromium;
-separate contexts are separate players; `hasTouch, isMobile,
-deviceScaleFactor: 3` at 390x844 for a phone.
+Browser checks: Playwright on the installed Chromium; a context a player;
+`hasTouch, isMobile, deviceScaleFactor: 3` at 390x844 a phone.
 
 ## Gotchas
 

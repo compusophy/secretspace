@@ -17,10 +17,13 @@ wyrm = { package = "secretspace-wyrm", path = "../wyrm" }
 look = { package = "secretspace-wyrm-look", path = "../wyrm-look" }
 wandfall = { package = "secretspace-wandfall", path = "../wandfall" }
 wandfall-look = { package = "secretspace-wandfall-look", path = "../wandfall-look" }
+battlestation = { package = "secretspace-battlestation", path = "../battlestation" }
+battlelook = { package = "secretspace-battlestation-look", path = "../battlestation-look" }
 render = { package = "secretspace-render", path = "../render" }
 gpu = { package = "secretspace-gpu", path = "../gpu" }
 pixels = { package = "secretspace-pixels", path = "../pixels" }
 kit = { package = "secretspace-kit", path = "../kit" }
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = ["PointerEvent", "MouseEvent", "KeyboardEvent", "WheelEvent"] }

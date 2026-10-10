@@ -1,0 +1,13 @@
+[package]
+name = "secretspace-battlestation"
+description = "Battlestation's core: a desk seen from the chair. The keyboard's layout, which finger types each key, the hands that reach for keys and the mouse, and the terminal on the monitor. Std only."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "battlestation"
+
+[dependencies]

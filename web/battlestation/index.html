@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>battlestation · secretspace</title>
+<meta name="description" content="A desk at night, from the chair: your keyboard and mouse are the ones on the desk, and the hands type what you type.">
+<meta name="theme-color" content="#07080f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307080f'/%3E%3Crect x='6' y='7' width='20' height='13' rx='2' fill='%237ee8a6'/%3E%3Crect x='8' y='23' width='16' height='3' rx='1' fill='%23ff3d9e'/%3E%3C/svg%3E">
+<!-- The game server. Empty: this page's own origin. The deploy sets it. -->
+<meta name="server" content="">
+<style>
+  html, body { margin: 0; height: 100%; background: #07080f; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; image-rendering: pixelated; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="screen" aria-label="a desk at night: your keyboard, mouse and hands"></canvas>
+<noscript>battlestation is drawn by WebAssembly; it needs a browser that runs it.</noscript>
+<script type="module">import init from "./pkg/battlestation.js"; init();</script>
+</body>
+</html>

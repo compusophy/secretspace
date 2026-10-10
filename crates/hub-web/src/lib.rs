@@ -2,13 +2,15 @@
 //! are in it right now, and along the bottom how many are online anywhere
 //! and how many visits there have ever been. The numbers come live from
 //! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`),
-//! and Wandfall's its match while one is on (`wand`). A card opens its
+//! Wandfall's its match while one is on (`wand`), and Battlestation's the
+//! real desk, compusophyOS on it (`desk`). A card opens its
 //! game over the page, full screen at once (`kit::shell`): clicked,
 //! tapped, or picked with the keys (arrows or Tab, then Enter); the page
 //! rests till the game is left.
 //! Every pixel is drawn here, in Rust.
 
 mod backdrop;
+mod desk;
 mod shelf;
 mod tag;
 mod wand;
@@ -49,12 +51,13 @@ const CARDS: &[Card] = &[
         path: "/wandfall/",
         hue: 265.0,
     },
+    // No room: each desk is its own.
     Card {
         id: "",
-        title: "AND THEN",
-        blurb: ["one more after that", "made of rust too"],
-        path: "",
-        hue: 20.0,
+        title: "BATTLESTATION",
+        blurb: ["sit at a desk at night,", "a real computer on it"],
+        path: "/battlestation/",
+        hue: 300.0,
     },
 ];
 
@@ -78,6 +81,8 @@ struct Hub {
     watch: watch::Watch,
     /// Wandfall, live while a match is on, for its card.
     wand: wand::WandWatch,
+    /// Battlestation's desk, its computer on, for its card.
+    desk: desk::DeskWatch,
     backdrop: backdrop::Backdrop,
     /// How far the page is scrolled.
     scroll: f32,
@@ -282,6 +287,8 @@ fn draw(h: &mut Hub, now: f64) {
             h.watch.draw(c, pv, k, 6.0 * uf, u, now);
         } else if card.id == "wandfall" {
             h.wand.draw(c, pv, u, now);
+        } else if card.path == "/battlestation/" {
+            h.desk.draw(c, pv, u, now);
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }
@@ -311,7 +318,9 @@ fn draw(h: &mut Hub, now: f64) {
                 2.5 * uf,
                 GO.fade(0.6 + 0.4 * (t * 3.0).sin().abs()),
             );
-            let line = if stats.is_some() {
+            let line = if card.id.is_empty() {
+                "your own desk".to_string()
+            } else if stats.is_some() {
                 format!("{n} playing")
             } else {
                 "...".to_string()
@@ -408,6 +417,7 @@ pub fn start() -> Result<(), JsValue> {
             focus: None,
             watch: watch::Watch::new(),
             wand: wand::WandWatch::new(),
+            desk: desk::DeskWatch::new(),
             backdrop: backdrop::Backdrop::default(),
             scroll: 0.0,
             press: None,
@@ -420,15 +430,27 @@ pub fn start() -> Result<(), JsValue> {
             if let Ok(off) = gpu::Offscreen::new().await {
                 with(|h| h.wand.give(off));
             }
+            // Battlestation's desk, drawn the same way on its own device,
+            // its computer starting.
+            if let Ok(off) = gpu::Offscreen::new().await {
+                with(|h| h.desk.give(off));
+                let os = desk::mount().await;
+                with(|h| h.desk.mounted(os));
+            }
         });
     }
     kit::report::on_panic();
     kit::shell::listen();
     kit::frames(|now| {
-        // A game is open over the page: nothing here to see.
-        if !kit::shell::playing() {
-            with(|h| draw(h, now));
-        }
+        // A game is open over the page: nothing here to see (the desk's
+        // computer rests too).
+        let playing = kit::shell::playing();
+        with(|h| {
+            h.desk.rest(playing);
+            if !playing {
+                draw(h, now);
+            }
+        });
     });
     kit::on_resize(|| {
         with(|h| h.screen.fit());
@@ -520,15 +542,16 @@ mod tests {
     fn the_keys_go_round_the_games_only() {
         let wyrm = Some(0);
         let wand = Some(1);
+        let desk = Some(2);
         assert_eq!(along(None, 1), wyrm);
-        assert_eq!(along(None, -1), wand);
+        assert_eq!(along(None, -1), desk);
         assert_eq!(along(wyrm, 1), wand);
-        // Round the end, past the card that is not a game yet.
-        assert_eq!(along(wand, 1), wyrm);
+        // Round the end.
+        assert_eq!(along(desk, 1), wyrm);
         // A row down on a shelf one card wide: the next game.
         assert_eq!(row(wyrm, true, 1), wand);
         // Down from the last row: along, round to the first.
-        assert_eq!(row(wand, true, 3), wyrm);
+        assert_eq!(row(desk, true, 3), wyrm);
         assert!(CARDS[along(wand, 1).unwrap()].path.starts_with('/'));
     }
 
@@ -548,7 +571,10 @@ mod tests {
             assert!(text_width(foot, u) + 10 * u <= room, "{w}");
             let (_, words) = s.words(u);
             for card in CARDS {
-                assert_eq!(fitted(&[card.title], words, 2 * u).1, 2 * u, "{w}");
+                // A long name (BATTLESTATION) may come a size smaller, still
+                // over the words and whole.
+                let (title, k) = fitted(&[card.title], words, 2 * u);
+                assert!(k > u && text_width(title, k) <= words, "{w}: {title}");
                 for line in card.blurb {
                     assert_eq!(fitted(&[line], words, u).1, u, "{w}: {line}");
                 }
