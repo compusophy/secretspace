@@ -100,8 +100,9 @@ pub struct Body {
     pub walls: u8,
     pub wall: u8,
     pub wall_n: [f32; 2],
-    /// How fast it went across the ground as its climb began (carried on
-    /// over the top).
+    /// How fast it went across the ground as it met a wall in the air
+    /// (while it still touches it), or as its climb began: carried on
+    /// over the top.
     pub carry: f32,
 }
 

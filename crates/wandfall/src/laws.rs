@@ -17,22 +17,27 @@ pub const HILL_SIZE: f32 = 48.0;
 /// Trees, rocks, giant mushrooms and ruined pillars on the island.
 /// Trees grow in woods about this wide (m), where the woods' noise (0..1)
 /// is over the edge, thick this much over it; out in the meadows, one
-/// takes root alone at these odds. Mushrooms grow within this far (m) of
-/// a tree.
+/// takes root alone at these odds. A tree's crown (a pine's boughs)
+/// reaches this far out from its trunk, for each of its scale's units
+/// (m, as drawn, its leaves and all), never over a ruin's pillar or a
+/// mushroom's cap. Mushrooms grow by the woods under open sky: their
+/// caps clear of every crown, within this far (m) of one.
 pub const TREES: usize = 400;
 pub const WOODS: f32 = 40.0;
 pub const WOOD_EDGE: f32 = 0.4;
 pub const WOOD_SOFT: f32 = 0.2;
 pub const WOOD_LONE: f32 = 0.06;
-pub const SHROOM_WOOD: f32 = 3.5;
+pub const CROWN: f32 = 3.4;
+pub const SHROOM_WOOD: f32 = 2.5;
 pub const ROCKS: usize = 130;
 pub const SHROOMS: usize = 40;
 pub const RUINS: usize = 8;
-/// A giant mushroom's cap, for every metre the mushroom stands: how wide
-/// (from its middle), and how high its underside and its top are.
-pub const SHROOM_CAP: f32 = 0.44;
+/// A giant mushroom's cap, for every metre the mushroom stands, as it is
+/// drawn: its top, out from its middle (how far, how high: a dome, down
+/// to its rim); its underside; and how far out its top holds you up.
+pub const SHROOM_DOME: [(f32, f32); 4] = [(0.0, 1.19), (0.22, 1.16), (0.4, 1.06), (0.47, 0.94)];
 pub const SHROOM_UNDER: f32 = 0.88;
-pub const SHROOM_TOP: f32 = 1.15;
+pub const SHROOM_CAP: f32 = 0.44;
 /// The Spire at the centre: a plaza this high and this wide, falling to
 /// the hills over this far, and its tower.
 pub const PLATEAU_TOP: f32 = 7.0;
@@ -204,8 +209,9 @@ pub const GLIDE_PULL: f32 = 60.0;
 /// respawn), drawn at once.
 pub const SMOOTH_MS: f64 = 90.0;
 pub const SMOOTH_SNAP: f32 = 4.0;
-/// The Tether: steering square to its rope swings you (m/s a second),
-/// and a swing dies away this much a second.
+/// The Tether: steering square to its rope swings you across the ground
+/// (m/s a second), and a swing dies away this much a second (a sag up or
+/// down is taken up as fast as the pull takes hold, `TETHER_GRIP`).
 pub const TETHER_STEER: f32 = 16.0;
 pub const TETHER_SWAY: f32 = 2.0;
 

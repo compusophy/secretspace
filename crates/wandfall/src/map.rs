@@ -67,15 +67,37 @@ pub struct Prop {
 }
 
 impl Prop {
-    /// Where feet stand on its top, if they can: a boulder's rounded top
-    /// stands a little over its trunk, a mushroom's cap over its stem.
+    /// Where feet stand on its top (at its highest), if they can: a
+    /// boulder's rounded top stands a little over its trunk, a mushroom's
+    /// cap over its stem.
     pub fn top(&self) -> Option<f32> {
         let h = match self.kind {
             Kind::Rock => self.h * ROCK_TOP,
-            Kind::Shroom => self.h * SHROOM_TOP,
+            Kind::Shroom => self.h * SHROOM_DOME[0].1,
             _ => self.h,
         };
         self.kind.standable().then_some(self.y + h)
+    }
+
+    /// Where feet stand on its top `d` out from its middle, if they can
+    /// there: on a mushroom's cap, lower toward its rim.
+    pub fn top_at(&self, d: f32) -> Option<f32> {
+        let t = self.top().filter(|_| d < self.stand_r())?;
+        Some(if self.kind == Kind::Shroom {
+            self.y + self.h * dome(d / self.h)
+        } else {
+            t
+        })
+    }
+
+    /// How far out from its middle it spreads, as drawn: a tree's crown,
+    /// a mushroom's cap to its rim, else its trunk or body.
+    pub fn spread(&self) -> f32 {
+        match self.kind {
+            Kind::Tree => CROWN * self.scale,
+            Kind::Shroom => self.h * RIM,
+            _ => self.r,
+        }
     }
 
     /// How far out from its middle its top holds you up.
@@ -87,13 +109,49 @@ impl Prop {
         }
     }
 
-    /// Its cap, if it has one: how wide, and from what height to what.
-    pub fn cap(&self) -> Option<(f32, f32, f32)> {
+    /// How high its trunk, body or shaft stands in the way: a mushroom's
+    /// stem up to its cap.
+    pub fn solid_top(&self) -> f32 {
+        if self.kind == Kind::Shroom {
+            self.y + self.h * SHROOM_UNDER
+        } else {
+            self.top().unwrap_or(self.y + self.h).max(self.y + self.h)
+        }
+    }
+
+    /// Its cap, if it has one, as rings stacked on its underside, each as
+    /// high as the dome is at its edge (so a bolt is stopped close under
+    /// the dome): how wide, from what height to what.
+    pub fn cap(&self) -> Option<impl Iterator<Item = (f32, f32, f32)> + '_> {
         (self.kind == Kind::Shroom).then(|| {
-            let top = self.y + self.h * SHROOM_TOP;
-            (self.stand_r(), self.y + self.h * SHROOM_UNDER, top)
+            let under = self.y + self.h * SHROOM_UNDER;
+            RINGS.iter().map(move |k| {
+                let r = self.stand_r() * k;
+                (r, under, self.y + self.h * dome(r / self.h))
+            })
         })
     }
+}
+
+/// A mushroom cap's rings, out from its middle (shares of how far its top
+/// holds you up): closer near the rim, where the dome falls fastest.
+const RINGS: [f32; 6] = [1.0, 0.95, 0.85, 0.7, 0.5, 0.25];
+
+/// How far a mushroom's cap spreads to its rim, for every metre it
+/// stands.
+const RIM: f32 = SHROOM_DOME[SHROOM_DOME.len() - 1].0;
+
+/// How high a mushroom's dome is `r` out from its middle (both for every
+/// metre the mushroom stands), between the points of `SHROOM_DOME`.
+fn dome(r: f32) -> f32 {
+    let mut was = SHROOM_DOME[0];
+    for &(x, y) in &SHROOM_DOME[1..] {
+        if r <= x {
+            return was.1 + (y - was.1) * (r - was.0) / (x - was.0);
+        }
+        was = (x, y);
+    }
+    was.1
 }
 
 /// Metres a cell of the props' grid.
@@ -246,11 +304,8 @@ impl Map {
         }
         for q in self.near(x, z, self.reach) {
             let (dx, dz) = (q.x - x, q.z - z);
-            let r = q.stand_r();
-            if dx * dx + dz * dz >= r * r {
-                continue;
-            }
-            if let Some(t) = q.top().filter(|&t| t <= y + STEP) {
+            let d = (dx * dx + dz * dz).sqrt();
+            if let Some(t) = q.top_at(d).filter(|&t| t <= y + STEP) {
                 f = f.max(t);
             }
         }
@@ -308,6 +363,21 @@ impl Map {
     pub fn wood(&self, x: f32, z: f32) -> f32 {
         let (x, z) = (x / WOODS, z / WOODS);
         noise(self.seed ^ 0x3d, x, z) * 0.7 + noise(self.seed ^ 0x3e, x * 2.3, z * 2.3) * 0.3
+    }
+
+    /// How far something at (x, z) spreading `spread` out (a crown, a
+    /// cap) is from the spread of the nearest of the things `of` picks
+    /// (m; under nought, into it).
+    fn gap(&self, x: f32, z: f32, spread: f32, of: impl Fn(&Prop) -> bool) -> f32 {
+        // Nothing spreads further than the biggest tree's crown (its
+        // scale 1.4); and looking for a wood, this much further.
+        self.near(x, z, spread + CROWN * 1.4 + SHROOM_WOOD)
+            .filter(|q| of(q))
+            .map(|q| {
+                let (dx, dz) = (q.x - x, q.z - z);
+                (dx * dx + dz * dz).sqrt() - spread - q.spread()
+            })
+            .fold(f32::MAX, f32::min)
     }
 
     /// Whether a point is on land (not the sea, not past the edge).
@@ -370,17 +440,12 @@ impl Map {
                     continue;
                 }
                 // Trees in the woods (thinning at their edges), now and
-                // then one alone in a meadow; mushrooms under the trees.
-                let fits = match kind {
-                    Kind::Tree => {
-                        let thick = smooth((m.wood(x, z) - WOOD_EDGE) / WOOD_SOFT);
-                        unit(rng) < thick.max(WOOD_LONE)
+                // then one alone in a meadow.
+                if kind == Kind::Tree {
+                    let thick = smooth((m.wood(x, z) - WOOD_EDGE) / WOOD_SOFT);
+                    if unit(rng) >= thick.max(WOOD_LONE) {
+                        continue;
                     }
-                    Kind::Shroom => m.near(x, z, SHROOM_WOOD).any(|q| q.kind == Kind::Tree),
-                    _ => true,
-                };
-                if !fits {
-                    continue;
                 }
                 let s = 0.8 + unit(rng) * 0.6;
                 let (r, h) = match kind {
@@ -388,8 +453,23 @@ impl Map {
                     Kind::Shroom => (0.4 * s, 3.5 * s),
                     _ => (0.35 * s, 6.0 * s),
                 };
-                // Not inside another.
-                if m.near(x, z, r + 1.2).next().is_some() {
+                // Not inside another. A tree's crown not over a ruin's
+                // pillar or a mushroom's cap (the grove's): their tops
+                // stand up into it. A mushroom by a wood under open sky,
+                // its cap clear of every crown and of all else.
+                let fits = match kind {
+                    Kind::Tree => {
+                        let tall = |q: &Prop| matches!(q.kind, Kind::Pillar | Kind::Shroom);
+                        m.gap(x, z, CROWN * s, tall) >= 0.0
+                    }
+                    Kind::Shroom => {
+                        let cap = h * RIM;
+                        m.gap(x, z, cap, |_| true) >= 0.0
+                            && m.gap(x, z, cap, |q| q.kind == Kind::Tree) < SHROOM_WOOD
+                    }
+                    _ => true,
+                };
+                if !fits || m.near(x, z, r + 1.2).next().is_some() {
                     continue;
                 }
                 let y = m.height(x, z) - 0.2;
@@ -444,9 +524,8 @@ impl Map {
         for q in hits {
             // Over its top (or standing on it), a step below the feet, or
             // over the head: clear.
-            let top = q.top().unwrap_or(q.y + q.h).max(q.y + q.h);
             let step = q.top().is_some_and(|t| t <= p[1] + rise);
-            if p[1] >= top - 0.02 || step || p[1] + tall < q.y {
+            if p[1] >= q.solid_top() - 0.02 || step || p[1] + tall < q.y {
                 continue;
             }
             let (dx, dz) = (p[0] - q.x, p[2] - q.z);
@@ -486,11 +565,10 @@ impl Map {
             .near(mid[0], mid[1], len * 0.5 + BOLT_RADIUS + self.reach)
             .filter(|q| solid(q))
         {
-            let top = q.top().unwrap_or(q.y + q.h).max(q.y + q.h);
-            let mut hit = through(a, d, [q.x, q.z], q.r + BOLT_RADIUS, (q.y, top));
-            if let Some((r, lo, hi)) = q.cap() {
-                let cap = through(a, d, [q.x, q.z], r + BOLT_RADIUS, (lo, hi));
-                hit = match (hit, cap) {
+            let mut hit = through(a, d, [q.x, q.z], q.r + BOLT_RADIUS, (q.y, q.solid_top()));
+            for (r, lo, hi) in q.cap().into_iter().flatten() {
+                let ring = through(a, d, [q.x, q.z], r + BOLT_RADIUS, (lo, hi));
+                hit = match (hit, ring) {
                     (Some(s), Some(c)) => Some(s.min(c)),
                     (s, c) => s.or(c),
                 };
@@ -607,6 +685,42 @@ mod tests {
             }
             let share = wooded as f32 / wild as f32;
             assert!((0.45..0.85).contains(&share), "seed {seed}: {share} wooded");
+        }
+    }
+
+    #[test]
+    fn mushrooms_grow_by_the_woods_and_no_crown_hides_a_cap_or_a_pillar() {
+        for seed in 0..16 {
+            let m = Map::new(seed);
+            let gap = |a: &Prop, b: &Prop| (a.x - b.x).hypot(a.z - b.z) - a.spread() - b.spread();
+            let mut wild = 0;
+            for s in m.props.iter().filter(|q| q.kind == Kind::Pillar) {
+                // No crown over a ruin's pillar either.
+                for t in m.props.iter().filter(|q| q.kind == Kind::Tree) {
+                    assert!(gap(s, t) >= 0.0, "seed {seed}: {s:?} under {t:?}");
+                }
+            }
+            for s in m.props.iter().filter(|q| q.kind == Kind::Shroom) {
+                // No crown over any cap (the grove's, too).
+                for t in m.props.iter().filter(|q| q.kind == Kind::Tree) {
+                    assert!(gap(s, t) >= 0.0, "seed {seed}: {s:?} under {t:?}");
+                }
+                if !m.wild(s.x, s.z, 0.0) {
+                    continue;
+                }
+                // Out in the wild, by a wood, nothing else under its cap.
+                wild += 1;
+                let others = m.props.iter().filter(|q| !std::ptr::eq(*q, s));
+                assert!(
+                    others.clone().all(|q| gap(s, q) >= 0.0),
+                    "seed {seed}: {s:?}"
+                );
+                let by = others
+                    .filter(|q| q.kind == Kind::Tree)
+                    .any(|t| gap(s, t) < SHROOM_WOOD);
+                assert!(by, "seed {seed}: {s:?} by a wood");
+            }
+            assert!(wild >= SHROOMS * 9 / 10, "seed {seed}: {wild} mushrooms");
         }
     }
 

@@ -9,7 +9,9 @@ use crate::laws::*;
 use crate::motion::{Body, Wish};
 
 /// One tick of the pull: along the rope, toward its pace; across it, the
-/// swing kept (dying slowly away), and steered.
+/// swing across the ground kept (dying slowly away) and steered, and any
+/// sag up or down taken up as the pull takes hold (so neither gravity
+/// nor a fall at the cast bows the rope much).
 pub fn pull(b: &mut Body, w: &Wish) {
     let d = [
         b.anchor[0] - b.p[0],
@@ -32,7 +34,10 @@ pub fn pull(b: &mut Body, w: &Wish) {
     };
     let rope = d.map(|x| x / dist);
     let along = dot(b.v, rope);
-    let mut side = [0, 1, 2].map(|k| (b.v[k] - rope[k] * along) * (1.0 - TETHER_SWAY * DT));
+    let grip = (TETHER_GRIP * DT).min(1.0);
+    let sway = 1.0 - TETHER_SWAY * DT;
+    let keep = [sway, 1.0 - grip, sway];
+    let mut side = [0, 1, 2].map(|k| (b.v[k] - rope[k] * along) * keep[k]);
     if w.any {
         let s = [w.x, 0.0, w.z];
         let on = dot(s, rope);
@@ -40,7 +45,7 @@ pub fn pull(b: &mut Body, w: &Wish) {
             *x += (s[k] - rope[k] * on) * TETHER_STEER * DT;
         }
     }
-    let along = along + (speed - along) * (TETHER_GRIP * DT).min(1.0);
+    let along = along + (speed - along) * grip;
     b.v = [0, 1, 2].map(|k| rope[k] * along + side[k]);
     b.glide = false;
     b.slide = false;
@@ -115,6 +120,42 @@ mod tests {
         assert_eq!(b.tether, 0);
         assert!(!b.air_jumped, "the press let go; no air jump spent");
         assert!(b.v[0] > before * 0.95 && b.v[1] > 0.0, "{b:?}");
+    }
+
+    #[test]
+    fn cast_falling_it_hauls_you_on_level_and_as_soon() {
+        let map = Map::new(3);
+        // Six metres over the plaza, falling fast, a rope caught level
+        // with you thirty metres east.
+        let haul = |fall: f32| {
+            let mut b = stand(&map);
+            b.p[1] += 6.0;
+            b.ground = false;
+            b.v = [0.0, -fall, 0.0];
+            let y = b.p[1];
+            b.anchor = [b.p[0] + 30.0, y, b.p[2]];
+            b.tether = TETHER_TICKS;
+            let (mut low, mut ticks) = (y, 0);
+            while b.tether > 0 {
+                step(&mut b, &Input::default(), &map);
+                low = low.min(b.p[1]);
+                ticks += 1;
+            }
+            (y - low, ticks)
+        };
+        // Its own weight bows the rope a little; a fall at the cast, not
+        // much more (it is taken up as the pull takes hold), and it gets
+        // there as soon.
+        let (dip, ticks) = haul(0.0);
+        assert!(
+            dip < 0.6 && ticks <= 42,
+            "level: {dip} m down, {ticks} ticks"
+        );
+        let (fell, late) = haul(12.0);
+        assert!(
+            fell < 1.5 && late <= ticks + 1,
+            "falling: {fell} m, {late} ticks"
+        );
     }
 
     #[test]

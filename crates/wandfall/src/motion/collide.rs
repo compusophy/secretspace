@@ -39,6 +39,7 @@ pub(super) fn advance(b: &mut Body, map: &Map) {
     // pushing you off it; on the ground, you step up onto a low one.
     let y = p[1].max(b.p[1]);
     let rise = if was { STEP } else { 0.0 };
+    let (sp, mut met) = (flat(&b.v), false);
     let mut pushed = [0.0, 0.0];
     for _ in 0..n as i32 {
         let at = [
@@ -58,6 +59,7 @@ pub(super) fn advance(b: &mut Body, map: &Map) {
             if into < 0.0 {
                 b.v[0] -= nx * into;
                 b.v[2] -= nz * into;
+                met = true;
             }
         }
         pushed = [pushed[0] + by[0], pushed[1] + by[1]];
@@ -66,6 +68,11 @@ pub(super) fn advance(b: &mut Body, map: &Map) {
     b.wall = b.wall.saturating_sub(1);
     if !was {
         crate::wall::touch(b, pushed);
+        // Met in the air, the speed it came at is kept for a climb up
+        // it (`ledge`) while it still touches it.
+        if met {
+            b.carry = b.carry.max(sp);
+        }
     }
     // The ground, or a deck under you (the sea floor too: you wade, you
     // do not swim).
@@ -84,6 +91,10 @@ pub(super) fn advance(b: &mut Body, map: &Map) {
         b.mantle = 0;
     } else {
         b.ground = false;
+    }
+    // Down, or off the wall and not climbing: no speed kept for a climb.
+    if b.mantle == 0 && (b.ground || b.wall == 0) {
+        b.carry = 0.0;
     }
     b.p = p;
 }
@@ -196,8 +207,9 @@ mod tests {
             .iter()
             .find(|q| q.kind == Kind::Shroom && map.near(q.x, q.z, 4.0).count() == 1)
             .expect("a mushroom on its own");
-        let (r, _, top) = q.cap().unwrap();
-        // Coming down onto its cap, well out from the stem: held there.
+        let (r, top) = (q.stand_r(), q.top().unwrap());
+        // Coming down onto its cap, well out from the stem: held there,
+        // on its dome (lower out toward its rim).
         let mut b = Body {
             p: [q.x + r * 0.7, top + 2.0, q.z],
             ..Body::default()
@@ -205,7 +217,26 @@ mod tests {
         for _ in 0..40 {
             step(&mut b, &Input::default(), &map);
         }
-        assert!(b.ground && (b.p[1] - top).abs() < 0.01, "on the cap: {b:?}");
+        let there = q.top_at(r * 0.7).unwrap();
+        assert!(
+            b.ground && (b.p[1] - there).abs() < 0.01,
+            "on the cap: {b:?}"
+        );
+        assert!(there < top - 0.1, "{there} under its middle's {top}");
+        // Walking west across it, over its middle: on its dome all the
+        // way, never pushed off by the stem under it.
+        let mut most: f32 = 0.0;
+        while b.p[0] > q.x - r * 0.6 {
+            step(&mut b, &east(keys::BACK), &map);
+            let d = (b.p[0] - q.x).hypot(b.p[2] - q.z);
+            let on = q.top_at(d).unwrap();
+            assert!(b.ground && (b.p[1] - on).abs() < 0.01, "{b:?}");
+            most = most.max(b.p[1]);
+        }
+        assert!(
+            (most - top).abs() < 0.05,
+            "over its middle: {most} of {top}"
+        );
         // On the ground, walking under it past the stem: not stopped.
         let x = q.x - r - 1.0;
         let mut b = on(&map, [x, q.z + q.r + RADIUS + 0.3], [0.0, 0.0]);
@@ -216,10 +247,21 @@ mod tests {
             b.p[0] > q.x + r * 0.5 && b.p[1] < top - 1.0,
             "under it: {b:?}"
         );
-        // A bolt coming down onto it strikes the cap.
+        // A bolt coming down onto it strikes its dome; one skimming over
+        // its rim, where the dome has fallen away, flies on.
         let (a, c) = ([q.x + r * 0.5, top + 3.0, q.z], [q.x + r * 0.5, q.y, q.z]);
         let t = map.strikes(a, c).expect("the cap stops it");
-        assert!((a[1] + (c[1] - a[1]) * t - top).abs() < 0.05, "{t}");
+        let on = q.top_at(r * 0.5).unwrap();
+        assert!((a[1] + (c[1] - a[1]) * t - on).abs() < 0.05, "{t}");
+        let rim = q.top_at(r * 0.98).unwrap() + BOLT_RADIUS + 0.1;
+        let (a, c) = (
+            [q.x + r * 0.98, rim, q.z - 2.5],
+            [q.x + r * 0.98, rim, q.z + 2.5],
+        );
+        assert!(
+            rim < top - 0.3 && map.strikes(a, c).is_none(),
+            "over its rim"
+        );
     }
 
     #[test]

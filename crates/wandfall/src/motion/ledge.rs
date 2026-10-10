@@ -42,7 +42,8 @@ pub(super) fn mantle(b: &mut Body, i: &Input, map: &Map, w: &Wish) {
     // they take to rise past its top and come back down to it.
     let over = (2.0 * MANTLE_OVER / GRAVITY).sqrt();
     let push = (d / (2.0 * over)).min(MANTLE_PUSH);
-    b.carry = flat(&b.v);
+    // Up against its side a moment already, the speed it met it at.
+    b.carry = b.carry.max(flat(&b.v));
     b.v = [dx / d * push, need, dz / d * push];
     b.mantle = ((need / GRAVITY + over) / DT) as u8 + 2;
 }
@@ -86,44 +87,86 @@ mod tests {
         let mut tried = 0;
         for q in map.props.iter().filter(|q| q.kind == Kind::Rock) {
             // Hopping at it from open ground to its west, too high to
-            // hop onto.
-            let (top, at) = (q.top().unwrap(), [q.x - q.r - 6.0, q.z]);
-            let rise = top - map.height(at[0], at[1]);
-            let open = map.near(q.x, q.z, q.r + 6.5).count() == 1;
-            if !(1.4..2.1).contains(&rise) || !open || !map.land(at[0], at[1]) {
+            // hop onto; from every distance, so it meets its side at
+            // every height of the hop (on the way up, too, its top not
+            // yet in reach).
+            let top = q.top().unwrap();
+            let rise = top - map.height(q.x - q.r - 6.0, q.z);
+            let open = map.near(q.x, q.z, q.r + 8.5).count() == 1;
+            if !(1.4..2.1).contains(&rise) || !open {
                 continue;
             }
-            let mut b = Body {
-                p: [at[0], map.height(at[0], at[1]), at[1]],
-                v: [12.0, 0.0, 0.0],
-                ground: true,
-                ..Body::default()
-            };
-            let (mut climbed, mut hopped) = (false, false);
-            for _ in 0..40 {
-                let jump = if b.ground && !hopped { keys::JUMP } else { 0 };
-                hopped |= jump != 0;
-                let was = b.mantle;
-                step(
-                    &mut b,
-                    &Input {
-                        keys: keys::FWD | jump,
-                        ..Input::default()
-                    },
-                    &map,
-                );
-                climbed |= was > 0;
-                if climbed && b.ground {
-                    break;
+            for k in 0..=40 {
+                let at = [q.x - q.r - 4.0 - k as f32 * 0.1, q.z];
+                if !map.land(at[0], at[1]) {
+                    continue;
                 }
+                let mut b = Body {
+                    p: [at[0], map.height(at[0], at[1]), at[1]],
+                    v: [12.0, 0.0, 0.0],
+                    ground: true,
+                    ..Body::default()
+                };
+                let (mut climbed, mut hopped) = (false, false);
+                for _ in 0..40 {
+                    let jump = if b.ground && !hopped { keys::JUMP } else { 0 };
+                    hopped |= jump != 0;
+                    let was = b.mantle;
+                    step(
+                        &mut b,
+                        &Input {
+                            keys: keys::FWD | jump,
+                            ..Input::default()
+                        },
+                        &map,
+                    );
+                    climbed |= was > 0;
+                    if climbed && b.ground {
+                        break;
+                    }
+                }
+                if !climbed {
+                    continue;
+                }
+                tried += 1;
+                assert!(b.ground && (b.p[1] - top).abs() < 0.05, "on top: {b:?}");
+                assert!(flat(&b.v) > 8.0, "from {at:?}, the speed kept: {b:?}");
             }
-            if !climbed {
-                continue;
-            }
-            tried += 1;
-            assert!(b.ground && (b.p[1] - top).abs() < 0.05, "on top: {b:?}");
-            assert!(flat(&b.v) > 8.0, "the speed kept: {b:?}");
         }
-        assert!(tried >= 3, "{tried}");
+        assert!(tried >= 60, "{tried}");
+    }
+
+    #[test]
+    fn met_in_the_air_a_wall_keeps_no_speed_once_you_are_off_it() {
+        let map = Map::new(11);
+        let q = *map
+            .props
+            .iter()
+            .find(|q| q.kind == Kind::Pillar && q.h > 4.0)
+            .expect("a tall pillar");
+        // Flying at its west side, its top out of reach: stopped, the
+        // speed kept for a climb while it touches it.
+        let mut b = Body {
+            p: [q.x - q.r - 1.0, q.y + 2.5, q.z],
+            v: [12.0, 0.0, 0.0],
+            ..Body::default()
+        };
+        let at_it = Input {
+            keys: keys::FWD,
+            ..Input::default()
+        };
+        for _ in 0..4 {
+            step(&mut b, &at_it, &map);
+        }
+        assert!(b.wall > 0 && flat(&b.v) < 1.0 && b.carry > 11.9, "{b:?}");
+        // Off it, not climbing: gone.
+        let away = Input {
+            keys: keys::BACK,
+            ..Input::default()
+        };
+        for _ in 0..crate::laws::WALL_GRACE + 1 {
+            step(&mut b, &away, &map);
+        }
+        assert!(b.wall == 0 && b.carry == 0.0, "{b:?}");
     }
 }
