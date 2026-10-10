@@ -214,20 +214,112 @@ pub const BOLT_COOLDOWN: u32 = 13;
 pub const BOLT_RADIUS: f32 = 0.2;
 
 // Bots.
+/// How far they see (m); how wide ahead of them (a cosine: about 75° to
+/// either side); and how near they hear anyone, whichever way they face.
+/// Whoever hurt them they know of for `BOT_MEMORY` ticks, as far off as a
+/// Lance reaches.
 pub const BOT_SIGHT: f32 = 48.0;
-/// Radians their aim wanders, and ticks before they notice someone.
-pub const BOT_AIM_ERROR: f32 = 0.05;
+pub const BOT_FOV_COS: f32 = 0.26;
+pub const BOT_HEAR: f32 = 12.0;
+/// Ticks before they notice someone new (and up to this many more); ticks
+/// they remember one gone from sight (aiming where it was, not shooting);
+/// and how much nearer the one they fight seems (they keep to it).
 pub const BOT_NOTICE: u32 = 14;
-/// The distance they like to duel at.
+pub const BOT_NOTICE_MORE: f32 = 10.0;
+pub const BOT_MEMORY: u32 = TICK_HZ;
+pub const BOT_STICKY: f32 = 0.7;
+/// How fast they turn to aim, and to walk (of 65536 a turn, a tick).
+pub const BOT_AIM_TURN: i32 = 1800;
+pub const BOT_TURN: i32 = 1800;
+/// How far off they shoot (m): this much at any range, and this share of
+/// the distance, more against a wizard crossing their sight (at a run)
+/// and one in the air; each bot's hand is steadier or shakier by up to
+/// this share.
+pub const BOT_MISS_NEAR: f32 = 0.3;
+pub const BOT_AIM_ERROR: f32 = 0.05;
+pub const BOT_LEAD_ERROR: f32 = 0.04;
+pub const BOT_AIR_ERROR: f32 = 0.03;
+pub const BOT_SKILL: f32 = 0.3;
+/// A Fireball aimed this far below the chest (m: a near miss still bursts
+/// by them).
+pub const BOT_FIREBALL_LOW: f32 = 0.8;
+/// For the first seconds of a fight they loot, fighting only whoever is
+/// this near (m) or hurts them.
+pub const BOT_CALM_SECS: u32 = 30;
+pub const BOT_CALM_RANGE: f32 = 14.0;
+/// The distance they like to duel at; closer by this share with Frost,
+/// further with the Lance; past the band about it (shares) they step in
+/// or back.
 pub const BOT_RANGE: f32 = 16.0;
-/// Bots going this far (m) hop their way there; running from the storm,
-/// they take a launch rune this near (m) on the way.
+pub const BOT_RANGE_CLOSE: f32 = 0.75;
+pub const BOT_RANGE_FAR: f32 = 1.15;
+pub const BOT_BAND: (f32, f32) = (0.6, 1.4);
+/// Strafing: legs this long (ticks) and up to this many more, this share
+/// of them hopped; a jump now and then (odds a tick); and out from under
+/// a Lightning mark about to strike (within so many ticks).
+pub const BOT_STRAFE: u32 = 15;
+pub const BOT_STRAFE_MORE: f32 = 40.0;
+pub const BOT_DUEL_HOP: f32 = 0.5;
+pub const BOT_JUMP_ODDS: f32 = 0.02;
+pub const BOT_DODGE: u32 = 12;
+/// Spells: the odds a tick of casting one that is ready; how far off each
+/// attack spell is cast (m; Lightning not nearer than the first, and at
+/// one moving slower than this, m/s, or warded or mending).
+pub const BOT_CAST_ODDS: f32 = 0.08;
+pub const BOT_CAST_LANCE: f32 = 50.0;
+pub const BOT_CAST_FIREBALL: f32 = 32.0;
+pub const BOT_CAST_FROST: f32 = 13.0;
+pub const BOT_CAST_LIGHTNING: (f32, f32) = (6.0, 40.0);
+pub const BOT_STILL: f32 = 3.0;
+/// Hurt (health, percent): struck (within so many ticks) they Ward, they
+/// Mend, struck they Blink away; with neither Mend nor Ward ready they
+/// run off to heal for a few seconds, a Tether thrown this high (of
+/// 65536 a turn) to get away.
+pub const BOT_STRUCK: u32 = 20;
+pub const BOT_WARD_HP: i32 = 85;
+pub const BOT_MEND_HP: i32 = 55;
+pub const BOT_BLINK_HP: i32 = 30;
+pub const BOT_RETREAT_HP: i32 = 35;
+pub const BOT_RETREAT_SECS: u32 = 3;
+pub const BOT_TETHER_UP: i16 = 4000;
+/// The drop: each lands within this far (m) of the island's middle, as
+/// far as it can from where the others are bound, and lets the broom
+/// drop this near its spot (m).
+pub const BOT_DROP_SPREAD: f32 = 105.0;
+pub const BOT_DROP_NEAR: f32 = 6.0;
+/// Where they wander with no one about: within this share of the storm's
+/// next circle (of the whole island, before it first closes), for at
+/// most this long (s).
+pub const BOT_GOAL_SHARE: f32 = 0.7;
+pub const BOT_GOAL_SECS: u32 = 20;
+/// The storm: they head in once they would not otherwise make it with
+/// this many seconds to spare; within this far (m) of the last circle's
+/// middle they hold their ground.
+pub const BOT_FLEE_SPARE: f32 = 5.0;
+pub const BOT_SAFE_R: f32 = 8.0;
+/// Bots going this far (m) hop their way there (now and then off a late
+/// landing too: odds a tick); running from the storm, they take a launch
+/// rune this near (m) on the way.
 pub const BOT_HOP_FAR: f32 = 25.0;
+pub const BOT_HOP_ODDS: f32 = 0.05;
 pub const BOT_PAD: f32 = 30.0;
-/// Stuck, a bot backs off this far (m) before going elsewhere.
+/// They step round what stands this near ahead (m), turning this much
+/// (radians).
+pub const BOT_AVOID: f32 = 4.0;
+pub const BOT_AVOID_TURN: f32 = 1.1;
+/// Stuck (moved less than this in a second, m), a bot backs off this far
+/// (m) for this long (s) before going elsewhere, and gives up for a while
+/// (s) on a cube this near (m) it could not reach.
+pub const BOT_STUCK_MOVE: f32 = 0.7;
 pub const BOT_BACK_OFF: f32 = 8.0;
-/// How far a bot goes out of its way for a cube.
+pub const BOT_BACK_SECS: u32 = 3;
+pub const BOT_SKIP_NEAR: f32 = 4.0;
+pub const BOT_SKIP_SECS: u32 = 30;
+/// How far a bot goes out of its way for a cube, and how high over the
+/// ground under it one may lie and still be reached (m: a held jump and
+/// a climb).
 pub const LOOT_SIGHT: f32 = 70.0;
+pub const BOT_REACH_UP: f32 = 2.6;
 pub const BOT_NAMES: &[&str] = &[
     "Ashwick", "Brindle", "Corvane", "Dusk", "Elowen", "Fenwick", "Gilly", "Harrow", "Ivo",
     "Juniper", "Kestrel", "Lark", "Marrow", "Nettle", "Orrin", "Pell", "Quill", "Rook", "Sable",
@@ -464,5 +556,11 @@ pub const DUMMIES: [(f32, f32, u8); 9] = [
     (34.0, 340.0, 3),
 ];
 pub const DUMMY_RESPAWN: u32 = 60;
+/// A strafing dummy: legs this long (ticks) and up to this many more, a
+/// jump's odds a tick, and how far from its post it strays (m).
+pub const DUMMY_STRAFE: u32 = 35;
+pub const DUMMY_STRAFE_MORE: f32 = 40.0;
+pub const DUMMY_JUMP_ODDS: f32 = 0.01;
+pub const DUMMY_LEASH: f32 = 4.0;
 pub const DUMMY_WHOLE: u32 = 60;
 pub const PRACTICE_LOOT_EVERY: u32 = 120 * TICK_HZ;

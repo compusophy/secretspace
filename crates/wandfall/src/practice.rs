@@ -53,6 +53,7 @@ pub fn setup(w: &mut World) {
         b.yaw = crate::trig::heading((spawn[1] - at[1]).atan2(spawn[0] - at[0]));
         b.mind = Mind::new(w.rng.next_u64());
         b.mind.dummy = mode;
+        b.mind.home = at;
         b.alive = true;
         b.entrant = true;
         w.players.push(b);

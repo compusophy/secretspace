@@ -8,10 +8,11 @@ use wandfall::predict::Predict;
 use wandfall::view;
 use wandfall::world::{Event, Phase, World};
 
+/// A match of bots, watched (a person in it who is knocked out sends
+/// everyone back to the lobby soon after).
 #[test]
 fn a_match_runs_to_a_winner_and_starts_again() {
     let mut w = World::new(42);
-    let me = w.join("tester", 0);
     assert_eq!(w.phase, Phase::Lobby);
     let hour = w.hour;
     let (mut began, mut winner, mut shot, mut storm, mut lobby) = (false, None, 0, 0, false);
@@ -83,7 +84,6 @@ fn a_match_runs_to_a_winner_and_starts_again() {
         lobby && w.players.iter().all(|p| !p.bot),
         "back to the lobby, bots gone"
     );
-    assert!(w.find(me).is_some());
     assert_eq!(w.hour, (hour + 1) % HOURS, "the island's day turns an hour");
     assert!(opened >= 8, "cubes are picked up: {opened}");
     assert!(casts >= 10, "spells are cast: {casts}");
@@ -172,7 +172,6 @@ fn every_spell_has_its_place() {
     let mut by_what = [0i64; 256];
     for seed in [7u64, 8, 9] {
         let mut w = World::new(seed);
-        w.join("tester", 0);
         let mut lobby = false;
         for _ in 0..TICK_HZ * 60 * 6 {
             for e in w.step() {
