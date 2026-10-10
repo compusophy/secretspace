@@ -37,6 +37,10 @@ use math::{chain, point, rz, tr};
 use model::Model;
 use pose::HIP;
 
+/// Beyond these distances (m) a wizard is drawn coarser, then coarser
+/// still (at 16 m one stands some 90 pixels tall on a 1080p screen).
+const LOD: [f32; 2] = [6.0, 16.0];
+
 /// The wizards' colours (an id picks one).
 const HUES: [V3; 8] = [
     rgb(70, 110, 230),
@@ -70,8 +74,8 @@ impl Rig {
     }
 
     /// A wizard at `at` (its feet), facing `yaw` (radians), moving as `a`
-    /// says and doing what `p` says, drawn in full or (`far`) coarser; its
-    /// frames (where its wand's tip is).
+    /// says and doing what `p` says, `far` metres from the eye (drawn the
+    /// coarser the further); its frames (where its wand's tip is).
     #[allow(clippy::too_many_arguments)]
     pub fn wizard(
         &self,
@@ -81,17 +85,17 @@ impl Rig {
         yaw: f32,
         a: &Anim,
         p: &Pose,
-        far: bool,
+        far: f32,
     ) -> Frames {
         let f = pose::wizard(at, yaw, a, p, id);
         self.draw(d, id, &f, p, (far, a.seat.x));
         f
     }
 
-    /// A wizard knocked out `t` seconds ago at `at`: its knees give, it
-    /// topples back (turning a little, a different way each time) and
-    /// sinks away.
-    pub fn fallen(&self, d: &mut Draw, id: u16, at: V3, yaw: f32, t: f32) {
+    /// A wizard knocked out `t` seconds ago at `at`, `far` metres from the
+    /// eye: its knees give, it topples back (turning a little, a different
+    /// way each time) and sinks away.
+    pub fn fallen(&self, d: &mut Draw, id: u16, (at, far): (V3, f32), yaw: f32, t: f32) {
         if t > 1.7 {
             return;
         }
@@ -106,13 +110,14 @@ impl Rig {
         };
         let twist = (unit(hash(at[0] as i32, at[2] as i32, id as u32)) - 0.5) * 1.6;
         let f = pose::fallen(at, yaw, &p, id, t, twist);
-        self.draw(d, id, &f, &p, (false, 0.0));
+        self.draw(d, id, &f, &p, (far, 0.0));
     }
 
-    /// Its parts at their frames, in full or (`far`) coarser; its broom
-    /// under it as far as it sits on it (`seat`).
-    fn draw(&self, d: &mut Draw, id: u16, f: &Frames, p: &Pose, (far, seat): (bool, f32)) {
-        let m = &self.m.lod[far as usize];
+    /// Its parts at their frames, the coarser the further they are
+    /// (`far` metres off); its broom under it as far as it sits on it
+    /// (`seat`).
+    fn draw(&self, d: &mut Draw, id: u16, f: &Frames, p: &Pose, (far, seat): (f32, f32)) {
+        let m = &self.m.lod[LOD.iter().filter(|&&d| far > d).count()];
         let c = hue(id);
         let robe = mix(c, [1.0; 3], 0.7 * p.flash);
         let lit = 0.6 * p.flash;

@@ -56,7 +56,8 @@ fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
     r.mesh(&g)
 }
 
-fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
+/// A mesh whose shared vertices are shaded smooth.
+pub(crate) fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
     let mut g = Geo::default();
     f(&mut g);
     g.smooth();

@@ -109,7 +109,8 @@ pub fn draw(
             let far = render::geo::dot(
                 render::geo::sub(s.p, cam.eye),
                 render::geo::sub(s.p, cam.eye),
-            ) > 16.0 * 16.0;
+            )
+            .sqrt();
             look.rig.wizard(d, s.id, s.p, yaw, a, &pose, far);
         }
         fx::on_wizard(look, d, s, t, own(s.id));
@@ -161,7 +162,10 @@ pub fn draw(
         if !(eyes.alive && own(who)) {
             let when = hold.map_or(when, |ms| when.max(now - ms));
             let age = ((now - when) / 1000.0) as f32;
-            look.rig.fallen(d, who, at, trig::radians(yaw), age);
+            let far =
+                render::geo::dot(render::geo::sub(at, cam.eye), render::geo::sub(at, cam.eye))
+                    .sqrt();
+            look.rig.fallen(d, who, (at, far), trig::radians(yaw), age);
         }
     }
     fx::falls(look, d, &falls, now);

@@ -15,6 +15,7 @@ use render::sculpt::{
 };
 
 use super::pose::{ANKLE, FORE, SHIN, THIGH, TIP, UPPER};
+use crate::flora::steps;
 
 pub const SKIN: V3 = rgb(226, 170, 130);
 pub const GOLD: V3 = rgb(224, 178, 92);
@@ -38,17 +39,17 @@ fn scale(a: V3, k: f32) -> V3 {
     render::geo::scale(a, k)
 }
 
-/// Steps for a sheet at this detail.
-fn steps(n: usize, q: f32) -> usize {
-    ((n as f32 / q).round() as usize).max(4)
-}
-
 /// One geometry onto another.
 fn join(g: &mut Geo, h: Geo) {
     let base = g.len() as u32;
     g.v.extend(h.v);
     g.i.extend(h.i.into_iter().map(|k| k + base));
 }
+
+/// How much a sculpt's creases darken, over how far (m): cloth and
+/// leather's deeply, a face's (small creases) lightly.
+const CREASES: (f32, f32) = (0.55, 0.06);
+const FACE: (f32, f32) = (0.3, 0.03);
 
 /// A sculpt meshed: `cell` metres at full detail, creases darkened.
 fn carved(
@@ -58,30 +59,17 @@ fn carved(
     q: f32,
     paint: impl Fn(V3, V3) -> V3,
 ) -> Geo {
-    mesh(
-        &f,
-        bounds,
-        cell * q,
-        &|p, n| (paint(p, n), 0.0),
-        (0.55, 0.06),
-    )
+    shaded(f, bounds, cell * q, paint, CREASES)
 }
 
-/// As `carved`, its creases only lightly darkened (a face's are small).
-fn carved_soft(
+fn shaded(
     f: impl Fn(V3) -> f32,
     bounds: (V3, V3),
     cell: f32,
-    q: f32,
     paint: impl Fn(V3, V3) -> V3,
+    creases: (f32, f32),
 ) -> Geo {
-    mesh(
-        &f,
-        bounds,
-        cell * q,
-        &|p, n| (paint(p, n), 0.0),
-        (0.3, 0.03),
-    )
+    mesh(&f, bounds, cell, &|p, n| (paint(p, n), 0.0), creases)
 }
 
 // The robe.
@@ -156,7 +144,7 @@ pub fn torso(q: f32) -> Geo {
     carved(
         f,
         ([-0.3, -0.1, -0.36], [0.3, 0.5, 0.36]),
-        0.024,
+        0.028,
         q,
         |_, _| WHITE,
     )
@@ -185,7 +173,7 @@ pub fn belt(q: f32) -> Geo {
         carved(
             buckle,
             ([0.14, -0.03, -0.08], [0.22, 0.09, 0.08]),
-            0.008,
+            0.01,
             q,
             |_, _| GOLD,
         ),
@@ -195,7 +183,7 @@ pub fn belt(q: f32) -> Geo {
         carved(
             pouch,
             ([-0.03, -0.15, -0.28], [0.13, 0.03, -0.16]),
-            0.01,
+            0.014,
             q,
             |p, _| scale(LEATHER, if p[1] > -0.03 { 0.95 } else { 0.8 }),
         ),
@@ -378,11 +366,10 @@ pub fn head(beard: bool, q: f32) -> Geo {
         smin(d, hair(p), 0.02).min(eye_f(p))
     };
     let tuft = if beard { BEARD } else { HAIR };
-    carved_soft(
+    shaded(
         f,
         ([-0.24, -0.34, -0.24], [0.3, 0.42, 0.24]),
-        0.0115,
-        q,
+        0.0115 * q,
         move |p, _| {
             let e = eyes
                 .iter()
@@ -408,6 +395,7 @@ pub fn head(beard: bool, q: f32) -> Geo {
                 + 0.5 * (1.0 - sphere(p, [0.13, 0.13, 0.072 * p[2].signum()], 0.0) / 0.05).max(0.0);
             mix(SKIN, rgb(220, 130, 110), 0.35 * rosy)
         },
+        FACE,
     )
 }
 
@@ -490,7 +478,7 @@ pub fn band(q: f32) -> Geo {
         carved(
             buckle,
             ([0.18, 0.27, -0.06], [0.24, 0.37, 0.06]),
-            0.005,
+            0.007,
             q,
             |_, _| GOLD,
         ),
@@ -602,7 +590,7 @@ pub fn hand(q: f32) -> Geo {
     carved(
         fist,
         ([-0.07, -FORE - 0.13, -0.07], [0.08, -FORE + 0.06, 0.07]),
-        0.0075,
+        0.0095,
         q,
         |_, _| SKIN,
     )
@@ -634,7 +622,7 @@ pub fn wand(q: f32) -> Geo {
     carved(
         f,
         ([-0.07, -TIP - 0.02, -0.07], [0.08, -FORE + 0.06, 0.07]),
-        0.0075,
+        0.0095,
         q,
         move |p, _| {
             if ring(p) < 0.003 {
@@ -692,7 +680,7 @@ pub fn boot(q: f32) -> Geo {
     carved(
         f,
         ([-0.12, -ANKLE - 0.02, -0.12], [0.32, 0.22, 0.12]),
-        0.013,
+        0.019,
         q,
         move |p, _| {
             if sphere(p, tip, 0.017) < 0.003 {
@@ -799,6 +787,8 @@ mod tests {
 
     #[test]
     fn a_wizard_is_detailed_near_and_light_far() {
+        // All of one wizard as drawn: four panels and hems, a leg and an
+        // arm a side.
         let parts = |q: f32| {
             let mut n = 0;
             for c in super::super::model::QUARTERS {
@@ -814,22 +804,21 @@ mod tests {
                 hat(q),
                 band(q),
                 hat_tip(q),
-                thigh(q),
-                shin(q),
-                boot(q),
-                upper(q),
-                fore(q),
-                cuff(q),
                 hand(q),
                 wand(q),
             ] {
                 assert!(!g.is_empty());
                 n += g.triangles();
             }
+            for g in [thigh(q), shin(q), boot(q), upper(q), fore(q), cuff(q)] {
+                assert!(!g.is_empty());
+                n += 2 * g.triangles();
+            }
             n
         };
-        let (near, far) = (parts(1.0), parts(2.4));
-        println!("triangles: near {near}, far {far}");
-        assert!(near < 45_000 && far < near / 3, "near {near}, far {far}");
+        let [near, mid, far] = super::super::model::DETAIL.map(parts);
+        println!("triangles: near {near}, mid {mid}, far {far}");
+        assert!(near < 40_000, "near {near}");
+        assert!(mid < near / 2 && far < near / 4, "mid {mid}, far {far}");
     }
 }

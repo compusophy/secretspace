@@ -1,6 +1,6 @@
 //! A wizard's parts as meshes, each hung from its joint as `pose` places
-//! it, made twice: in full near the camera, coarser far off (`parts`
-//! sculpts them). The robe in four panels hinged at the waist, each with
+//! it, made three times: in full near the camera, coarser a little way
+//! off, coarser still far off (`parts` sculpts them). The robe in four panels hinged at the waist, each with
 //! its gold hem; the chest, belt and pouch; the mantle and its high
 //! collar; a head (bearded or not); the hat, its band and its tip (which
 //! sways); sleeves and cuffs; a hand and the wand hand; legs and boots.
@@ -13,13 +13,15 @@ use render::geo::{rgb, Geo};
 use render::{Mesh, Renderer};
 
 use super::parts::{self, GOLD};
+use crate::land::smooth;
 
 /// The robe's quarters about the waist (front left, front right, back
 /// right, back left), a little overlapped.
 pub const QUARTERS: [f32; 4] = [-FRAC_PI_4, FRAC_PI_4, 3.0 * FRAC_PI_4, -3.0 * FRAC_PI_4];
 
-/// How much coarser the far wizards are (cell size, weave).
-pub const FAR: f32 = 2.4;
+/// How coarse each level of detail is (cell size, weave): near, a
+/// little way off, far off.
+pub const DETAIL: [f32; 3] = [1.0, 1.6, 2.4];
 
 pub struct Parts {
     pub panels: [Mesh; 4],
@@ -97,25 +99,22 @@ impl Parts {
 }
 
 pub struct Model {
-    /// Near and far.
-    pub lod: [Parts; 2],
-    /// Each near part's coarser twin (for the sun's shadow).
+    /// Near, a little way off and far.
+    pub lod: [Parts; 3],
+    /// Each nearer part's far twin (for the sun's shadow).
     coarse: std::collections::HashMap<Mesh, Mesh>,
     pub broom: Mesh,
     pub orb: Mesh,
 }
 
-fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
-    let mut g = Geo::default();
-    f(&mut g);
-    g.smooth();
-    r.mesh(&g)
-}
-
 impl Model {
     pub fn new(r: &mut Renderer) -> Model {
-        let lod = [Parts::new(r, 1.0), Parts::new(r, FAR)];
-        let coarse = lod[0].all().into_iter().zip(lod[1].all()).collect();
+        let lod = DETAIL.map(|q| Parts::new(r, q));
+        let far = lod[2].all();
+        let coarse = [&lod[0], &lod[1]]
+            .into_iter()
+            .flat_map(|l| l.all().into_iter().zip(far.iter().copied()))
+            .collect();
         Model {
             lod,
             coarse,
@@ -140,14 +139,13 @@ impl Model {
         }
     }
 
-    /// A near part's coarser twin (itself, if it has none).
+    /// A nearer part's far twin (itself, if it has none).
     pub fn coarse(&self, near: Mesh) -> Mesh {
         self.coarse.get(&near).copied().unwrap_or(near)
     }
 
     pub fn all(&self) -> Vec<Mesh> {
-        let mut v = self.lod[0].all();
-        v.extend(self.lod[1].all());
+        let mut v: Vec<Mesh> = self.lod.iter().flat_map(Parts::all).collect();
         v.extend([self.broom, self.orb]);
         v
     }

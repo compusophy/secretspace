@@ -187,7 +187,7 @@ pub fn pine(seed: u32, q: f32) -> Geo {
 }
 
 /// Steps for a sheet at this detail.
-fn steps(n: usize, q: f32) -> usize {
+pub(crate) fn steps(n: usize, q: f32) -> usize {
     ((n as f32 / q).round() as usize).max(4)
 }
 
