@@ -77,8 +77,8 @@ fn sees(w: &World, a: [f32; 2], b: [f32; 2]) -> bool {
 }
 
 /// Where you start: in the open by the ruin nearest the middle of the
-/// island, the way east (where you first look, and the lesson cubes lie)
-/// clear.
+/// island (no cap overhead), the way east (where you first look, and the
+/// lesson cubes lie) clear.
 fn start(w: &World) -> [f32; 2] {
     let ruin = w
         .map
@@ -88,9 +88,12 @@ fn start(w: &World) -> [f32; 2] {
         .map(|p| [p.x, p.z])
         .min_by(|a, b| (a[0].hypot(a[1])).total_cmp(&b[0].hypot(b[1])))
         .unwrap_or([0.0, 0.0]);
+    // Nothing standing near, no tree's or mushroom's cap overhead.
     let open = |p: [f32; 2]| {
+        let capped = |q: &crate::map::Prop| matches!(q.kind, PropKind::Tree | PropKind::Shroom);
         w.map.land(p[0], p[1])
             && w.map.near(p[0], p[1], RANGE_CLEAR).next().is_none()
+            && !w.map.near(p[0], p[1], RANGE_CLEAR * 2.0).any(capped)
             && sees(w, p, [p[0] + RANGE_VIEW, p[1]])
     };
     // Ring after ring about the ruin, its own pillars and all.

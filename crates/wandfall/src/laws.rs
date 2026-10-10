@@ -571,5 +571,5 @@ pub const DUMMY_JUMP_ODDS: f32 = 0.01;
 pub const DUMMY_LEASH: f32 = 4.0;
 /// Where you start on the range: nothing standing within this far (m),
 /// and the way east clear this far (m).
-pub const RANGE_CLEAR: f32 = 3.0;
+pub const RANGE_CLEAR: f32 = 4.0;
 pub const RANGE_VIEW: f32 = 15.0;

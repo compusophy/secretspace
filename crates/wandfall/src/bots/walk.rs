@@ -20,8 +20,9 @@ pub struct Plan {
     pub flee: bool,
     pub far: bool,
     pub retreat: bool,
-    /// Gliding down, and near where it means to land.
-    pub landed_near: bool,
+    /// Nowhere to go this tick: gliding down near where it means to
+    /// land, or a sparring dummy at its post.
+    pub stay: bool,
     /// The cube it goes for: which, and where.
     pub cube: Option<(u16, [f32; 3])>,
 }
@@ -140,6 +141,7 @@ pub fn plan(
     if m.dummy == 3 {
         m.goal = m.home;
     }
+    let goal_far = (p[0] - m.goal[0]).hypot(p[2] - m.goal[1]);
     // Hurt, with nothing ready to heal or shield: off, out of sight.
     let low = me.hp * 100 < BOT_RETREAT_HP * me.max_hp();
     let cover = me.slots.iter().zip(me.cds).any(|(s, cd)| {
@@ -199,7 +201,7 @@ pub fn plan(
         flee,
         far,
         retreat,
-        landed_near: me.body.glide && goal_far < BOT_DROP_NEAR,
+        stay: (me.body.glide && goal_far < BOT_DROP_NEAR) || (m.dummy == 3 && goal_far < 2.0),
         cube,
     }
 }

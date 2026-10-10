@@ -77,7 +77,7 @@ pub fn act(
                 keys |= keys::FIRE;
             }
             keys |= if plan.flee {
-                walk::keys(plan, yaw)
+                walk::keys(plan, yaw) | keys::SPRINT
             } else {
                 duel(w, me, m, mk, yaw, tick)
             };
@@ -90,11 +90,11 @@ pub fn act(
             // Walking: turning toward where it goes, a little at a time,
             // at a sprint; far, hopping, each hop timed to the landing (a
             // press, so let go between). Gliding down near its spot, it
-            // lets the broom drop.
+            // lets the broom drop; a sparring dummy at its post waits.
             yaw = turn(me.yaw, plan.heading, BOT_TURN).0;
             pitch = 0;
             bits &= !aimed_bits(me);
-            if !plan.landed_near {
+            if !plan.stay {
                 keys |= walk::keys(plan, yaw) | keys::SPRINT;
             }
             let b = &me.body;
