@@ -5,7 +5,8 @@
 //! over, so a server that takes the page and drops it at once is not
 //! asked four times a second. A socket gone quiet (every room and the hub
 //! say something every second or two) or one still connecting after a
-//! while is given up on, as after a change of network.
+//! while is given up on, as after a change of network; but only while the
+//! page runs: a page that stalled itself does not blame the socket.
 //!
 //! The page polls it once a frame. A page that is not polled (a hidden
 //! tab) is not sent a backlog to play through all at once when it comes
@@ -28,6 +29,10 @@ const LASTED: f64 = 5000.0;
 const QUIET: f64 = 5000.0;
 /// Still connecting after this long, a socket is given up on.
 const CONNECTING: f64 = 6000.0;
+/// Polls this far apart, the page itself stalled (a long build, a phone
+/// compiling pipelines, a frozen tab woken): what the socket said
+/// meanwhile may still be queued behind this very poll.
+const STALLED: f64 = QUIET / 2.0;
 /// Not polled for this long, a watcher lets go (nobody is looking).
 const AWAY: f64 = 5000.0;
 /// The most messages kept for the next poll; past them, the link lets go.
@@ -78,6 +83,19 @@ impl Pace {
 
     fn opened(&mut self, now: f64) {
         (self.opened, self.heard) = (Some(now), now);
+    }
+
+    /// Polled at `now`, `gap` after the last poll. After a stall the
+    /// socket's silence is not held against it: the clock starts again
+    /// now, so only a socket quiet (or connecting) while the page runs
+    /// is given up on.
+    fn polled(&mut self, gap: f64, now: f64) {
+        if gap > STALLED {
+            self.heard = self.heard.max(now);
+            if self.opened.is_none() {
+                self.made = self.made.max(now);
+            }
+        }
     }
 
     /// Whether the socket is to be given up on: open and quiet too long,
@@ -176,7 +194,9 @@ impl Link {
     pub fn poll(&self, now: f64) -> Vec<Net> {
         let (due, dead, gen) = {
             let mut i = self.0.borrow_mut();
+            let gap = now - i.polled;
             i.polled = now;
+            i.pace.polled(gap, now);
             let dead = i.ws.is_some() && i.pace.dead(now);
             (i.ws.is_none() && now >= i.pace.retry_at, dead, i.gen)
         };
@@ -333,5 +353,32 @@ mod tests {
         assert!(p.dead(9000.0 + QUIET + 1.0), "quiet");
         p.let_go(20_000.0);
         assert_eq!((p.retry_at, p.delay), (20_000.0, FIRST));
+    }
+
+    #[test]
+    fn a_page_that_stalled_does_not_drop_a_healthy_socket() {
+        let mut p = Pace::new();
+        p.made(1000.0);
+        p.opened(1100.0);
+        p.heard = 2000.0;
+        // The page hangs for 7 s (a build); the messages that came
+        // meanwhile wait behind the first poll after it.
+        p.polled(7000.0, 9000.0);
+        assert!(!p.dead(9000.0), "the stall is not the socket's");
+        // Polled every frame from then on and still quiet: gone.
+        let mut now = 9000.0;
+        while now < 9000.0 + QUIET + 100.0 {
+            now += 16.0;
+            p.polled(16.0, now);
+        }
+        assert!(p.dead(now), "quiet while the page ran");
+
+        // Connecting when the page hung: its open may be queued too.
+        let mut p = Pace::new();
+        p.made(1000.0);
+        p.polled(CONNECTING + 1000.0, CONNECTING + 2000.0);
+        assert!(!p.dead(CONNECTING + 2000.0));
+        p.polled(16.0, 2.0 * CONNECTING + 2100.0);
+        assert!(p.dead(2.0 * CONNECTING + 2100.0), "stuck connecting");
     }
 }

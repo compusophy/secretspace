@@ -257,7 +257,12 @@ impl Screen {
         // About 960 buffer pixels across, at most: big screens get bigger
         // pixels, a phone gets one per CSS pixel.
         let pick = (w / 960.0).ceil().clamp(1.0, 4.0);
-        // Text reads the same size whichever way that is snapped.
+        // Text keeps its size in buffer pixels however that is snapped,
+        // so on the screen it moves with the snap, by up to half a device
+        // pixel a buffer pixel: a third bigger in a window under 960 CSS
+        // pixels at 150%, a fifth smaller at 125%, a fifth bigger on a
+        // laptop at 125%. The buffer is as much narrower or wider, which
+        // can change a layout (the hub's cards: two to a row, or one).
         self.ui = if pick >= 2.0 { 1 } else { 2 };
         self.size(snap(pick, window().device_pixel_ratio()), w, h);
     }
@@ -277,7 +282,9 @@ impl Screen {
         place(&self.canvas, bw as f64 * scale, bh as f64 * scale);
     }
 
-    /// The text scale that reads the same size on any screen.
+    /// The text scale, in buffer pixels: 2 where a buffer pixel is about
+    /// a CSS pixel (a phone, a small window), 1 where it is two or more,
+    /// so text is about the same size on any screen (how near: `fit`).
     pub fn ui(&self) -> i32 {
         self.ui
     }

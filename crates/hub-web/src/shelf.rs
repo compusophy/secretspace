@@ -5,9 +5,33 @@
 //! and narrower, two to a row; on a tall one the lot sits a little above
 //! the middle rather than at the top with the floor left empty.
 
-use pixels::{fit_scale, Rect};
+use pixels::{fit_scale, text_width, Rect};
 
 pub const TITLE: &str = "SECRETSPACE";
+/// The line under the name.
+pub const TAGLINE: &str = "tiny games, everyone in them";
+/// How it is made, along the bottom: whole where it fits, else shorter
+/// (on most phones: a 412-px Android's buffer is 361 pixels wide).
+pub const MADE: [&str; 2] = [
+    "all rust - no javascript written",
+    "all rust - no js written",
+];
+
+/// The first of `lines` that fits in `room` pixels at text scale `u`, at
+/// `u`; else the last, as big as it fits.
+pub fn fitted<'a>(lines: &[&'a str], room: i32, u: i32) -> (&'a str, i32) {
+    let last = lines.last().copied().unwrap_or("");
+    match lines.iter().find(|l| text_width(l, u) <= room) {
+        Some(l) => (l, u),
+        None => (last, fit_scale(last, room, u)),
+    }
+}
+
+/// The room a line across a `w`-pixel page has at text scale `u`: all but
+/// a margin each side.
+pub fn across(w: f32, u: i32) -> i32 {
+    (w - 8.0 * u as f32) as i32
+}
 
 /// The page laid out, before it is scrolled.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,6 +112,13 @@ pub fn shelf(w: f32, ht: f32, u: i32, n: usize) -> Shelf {
 }
 
 impl Shelf {
+    /// How far into a card its words start, and how wide they may run (to
+    /// a little short of its right edge), at text scale `u`.
+    pub fn words(&self, u: i32) -> (f32, i32) {
+        let uf = u as f32;
+        (9.0 * uf, (self.card.0 - 11.0 * uf) as i32)
+    }
+
     /// Where card `slot` goes, before scrolling.
     pub fn at(&self, slot: usize) -> Rect {
         let (col, row) = (slot % self.cols, slot / self.cols);

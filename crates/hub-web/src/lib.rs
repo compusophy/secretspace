@@ -22,7 +22,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{KeyboardEvent, PointerEvent, WheelEvent};
 
-use shelf::{shelf, Shelf};
+use shelf::{fitted, shelf, Shelf};
 
 /// A game on the shelf.
 struct Card {
@@ -245,8 +245,11 @@ fn draw(h: &mut Hub, now: f64) {
     let tw = text_width(shelf::TITLE, s.title_scale);
     let ty = (s.title_y - scroll) as i32;
     backdrop::wordmark(c, (w as i32 - tw) / 2, ty, s.title_scale, t);
-    let line = "tiny games, everyone in them";
-    c.text_centred(w as i32 / 2, (s.tag_y - scroll) as i32, line, u, DIM);
+    // Every line is fitted to the page: a phone's buffer may be narrower
+    // than its CSS width (`kit::snap`).
+    let room = shelf::across(w, u);
+    let (line, size) = fitted(&[shelf::TAGLINE], room, u);
+    c.text_centred(w as i32 / 2, (s.tag_y - scroll) as i32, line, size, DIM);
 
     // The cards.
     h.hits.clear();
@@ -282,17 +285,20 @@ fn draw(h: &mut Hub, now: f64) {
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }
-        let (tx, mut ty) = (b.x + pad + 2.0 * uf, pv.y + pv.h + 8.0 * uf);
+        let (inset, words) = s.words(u);
+        let (tx, mut ty) = (b.x + inset, pv.y + pv.h + 8.0 * uf);
+        let (title, size) = fitted(&[card.title], words, 2 * u);
         c.text_shadowed(
             tx as i32,
             ty as i32,
-            card.title,
-            2 * u,
+            title,
+            size,
             if live { INK } else { DIM },
         );
         ty += 19.0 * uf;
         for line in card.blurb {
-            c.text(tx as i32, ty as i32, line, u, DIM);
+            let (line, size) = fitted(&[line], words, u);
+            c.text(tx as i32, ty as i32, line, size, DIM);
             ty += 10.0 * uf;
         }
         // Who is in it.
@@ -339,29 +345,35 @@ fn draw(h: &mut Hub, now: f64) {
     );
     c.hline(0, w as i32, foot_y as i32, Rgba(255, 255, 255, 18));
     let fy = (ht - 13.0 * uf) as i32;
+    let dot = (10.0 * uf) as i32;
     let foot = match &stats {
-        Some(s) => format!(
-            "{} online   {} visits",
-            grouped(s.online as u64),
-            grouped(s.visits)
-        ),
-        None if up => "counting...".to_string(),
-        None => "connecting...".to_string(),
+        Some(s) => {
+            let (online, visits) = (grouped(s.online as u64), grouped(s.visits));
+            // Closer together if that is what fits.
+            vec![
+                format!("{online} online   {visits} visits"),
+                format!("{online} online  {visits} visits"),
+            ]
+        }
+        None if up => vec!["counting...".to_string()],
+        None => vec!["connecting...".to_string()],
     };
-    let fw = text_width(&foot, u) + (10.0 * uf) as i32;
-    let fx = (w as i32 - fw) / 2;
+    let ways: Vec<&str> = foot.iter().map(String::as_str).collect();
+    let (foot, size) = fitted(&ways, room - dot, u);
+    let fx = (w as i32 - text_width(foot, size) - dot) / 2;
     c.circle(
         fx as f32 + 2.5 * uf,
         fy as f32 + 3.5 * uf,
         2.5 * uf,
         if stats.is_some() { GO } else { DIM },
     );
-    c.text(fx + (10.0 * uf) as i32, fy, &foot, u, DIM);
+    c.text(fx + dot, fy, foot, size, DIM);
+    let (made, size) = fitted(&shelf::MADE, room, u);
     c.text_centred(
         w as i32 / 2,
         fy - (12.0 * uf) as i32,
-        "all rust - no javascript written",
-        u,
+        made,
+        size,
         Rgba(244, 241, 255, 70),
     );
     h.screen.present();
@@ -518,5 +530,37 @@ mod tests {
         // Down from the last row: along, round to the first.
         assert_eq!(row(wand, true, 3), wyrm);
         assert!(CARDS[along(wand, 1).unwrap()].path.starts_with('/'));
+    }
+
+    #[test]
+    fn every_line_fits_a_narrow_phone_whole() {
+        // 360 CSS pixels at DPR 3, and the 412 of most Androids at 2.625
+        // and 2.75, which the snap makes 361 and 378 buffer pixels.
+        for w in [360.0, 361.0, 378.0] {
+            let u = 2;
+            let s = shelf(w, 800.0, u, CARDS.len());
+            let room = shelf::across(w, u);
+            assert_eq!(fitted(&[shelf::TAGLINE], room, u).1, u, "{w}");
+            let (made, k) = fitted(&shelf::MADE, room, u);
+            assert!(k == u && text_width(made, k) <= room, "{w}: {made}");
+            // Busy days, too: the dot and both numbers.
+            let foot = "123 online  123,456 visits";
+            assert!(text_width(foot, u) + 10 * u <= room, "{w}");
+            let (_, words) = s.words(u);
+            for card in CARDS {
+                assert_eq!(fitted(&[card.title], words, 2 * u).1, 2 * u, "{w}");
+                for line in card.blurb {
+                    assert_eq!(fitted(&[line], words, u).1, u, "{w}: {line}");
+                }
+            }
+        }
+        // Where the whole line fits it is said whole.
+        assert_eq!(
+            fitted(&shelf::MADE, shelf::across(412.0, 2), 2).0,
+            shelf::MADE[0]
+        );
+        // Too narrow even for the short one: smaller, never cut.
+        let (made, k) = fitted(&shelf::MADE, 200, 2);
+        assert!(k == 1 && text_width(made, k) <= 200);
     }
 }

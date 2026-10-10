@@ -41,40 +41,18 @@ for f in crates/wandfall/src/{motion,tether,wall,predict,map,places}.rs \
   [ -z "$hits" ] || say "$f calls the platform's float functions (use crate::trig): $hits"
 done
 
-# 7. Every WGSL string has a naga test: each source holding shader entry
-# points is named (by a const or a pub fn it defines) in its crate's tests,
-# or in a source that is (a shader put together from parts).
+# 7. Every WGSL string has a naga test: each string holding an entry point
+# sits in a const (or a fn giving a string) that a test's code names, or
+# that something such a test reaches names (a shader put together from
+# parts). shaders.awk says how, and why a test saying `new` is not enough.
 for crate in crates/*/; do
-  shaders=$(grep -rlE '@(vertex|fragment|compute)' "${crate}src" 2>/dev/null || true)
-  [ -n "$shaders" ] || continue
-  covered=$(ls "${crate}"tests/*.rs 2>/dev/null || true)
-  if [ -z "$covered" ]; then
-    say "${crate} has shaders and no tests/ to check them with naga"
-    continue
-  fi
-  pending=$(find "${crate}src" -name '*.rs')
-  grew=1
-  while [ "$grew" = 1 ]; do
-    grew=0
-    left=""
-    for f in $pending; do
-      names=$( (grep -oE '(const [A-Z][A-Z0-9_]*|pub fn [a-z_][a-z0-9_]*)' -- "$f" || true) | awk '{print $NF}' | sort -u | paste -sd'|' -)
-      # shellcheck disable=SC2086
-      if [ -n "$names" ] && grep -qwE "($names)" -- $covered; then
-        covered="$covered $f"
-        grew=1
-      else
-        left="$left $f"
-      fi
-    done
-    pending=$left
-  done
-  for f in $shaders; do
-    case " $covered " in
-      *" $f "*) ;;
-      *) say "$f has shaders no naga test reaches" ;;
-    esac
-  done
+  srcs=$(find "${crate}src" -name '*.rs' 2>/dev/null | sort || true)
+  [ -n "$srcs" ] || continue
+  tests=$(find "${crate}tests" -name '*.rs' 2>/dev/null | sort || true)
+  # shellcheck disable=SC2086
+  while IFS= read -r why; do
+    [ -z "$why" ] || say "$why"
+  done < <(awk -v crate="$crate" -f scripts/shaders.awk $srcs $tests | sort)
 done
 
 total=$(cat crates/*/src/*.rs | wc -l)
