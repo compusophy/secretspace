@@ -77,7 +77,8 @@ const BUILD: &str = match option_env!("SECRETSPACE_BUILD") {
 const MOST_OPEN: usize = 2000;
 const MOST_FROM_ONE: usize = 128;
 /// A request (its head, and a report's body) must all be here this soon
-/// after its connection: a slow drip is let go.
+/// after its connection, and an answer must be taken as patiently: a
+/// slow drip either way is let go.
 const REQUEST_WAIT: Duration = Duration::from_secs(10);
 
 /// What every connection thread can see.
@@ -315,6 +316,7 @@ fn serve(
     root: Option<&Path>,
 ) -> std::io::Result<()> {
     stream.set_nodelay(true)?;
+    stream.set_write_timeout(Some(REQUEST_WAIT))?;
     let peer = stream.peer_addr().ok().map(|a| a.ip());
     // One socket for reading and writing (its threads share it, so a
     // connection is one file handle).
