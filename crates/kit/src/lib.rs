@@ -139,13 +139,20 @@ pub fn touch() -> bool {
         .is_some_and(|m| m.matches())
 }
 
-/// The WebSocket address of a room (or "hub"): `?server=` if given, else
-/// `<meta name="server">` (a `wss://host/ws` address), else this page's
-/// own origin. `query` goes on the end: "v=1" on a page's first
-/// connection counts a visit; "watch=1" only looks.
+/// The WebSocket address of a room (or "hub"): `<meta name="server">` (a
+/// `wss://host/ws` address), else this page's own origin. `query` goes on
+/// the end: "v=1" on a page's first connection counts a visit; "watch=1"
+/// only looks. A page on this machine (localhost, or built by hand) may
+/// name another server with `?server=`; a deployed page never does, or a
+/// link could send the soul's key, said in every Hello, to anyone.
 pub fn room_url(room: &str, query: &str) -> String {
     let loc = window().location();
-    let param = loc.search().ok().and_then(|q| {
+    let local = version::PAGE == "dev"
+        || matches!(
+            loc.hostname().as_deref(),
+            Ok("localhost" | "127.0.0.1" | "[::1]")
+        );
+    let param = loc.search().ok().filter(|_| local).and_then(|q| {
         q.trim_start_matches('?')
             .split('&')
             .find_map(|kv| kv.strip_prefix("server=").map(str::to_string))
