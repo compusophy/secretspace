@@ -28,7 +28,7 @@ pub(crate) fn bytes(
         put_f32s(&mut b, cascades.get(c).unwrap_or(&m4::ID));
     }
     let v4 = |b: &mut Vec<u8>, v: [f32; 3], w: f32| put_f32s(b, &[v[0], v[1], v[2], w]);
-    v4(&mut b, f.cam.eye, f.time);
+    v4(&mut b, f.cam.eye, f.time.rem_euclid(laws::TIME_WRAP));
     v4(&mut b, fwd, t * f.cam.aspect);
     v4(&mut b, right, t);
     v4(&mut b, up, size.1 as f32 / 2.0 / t);

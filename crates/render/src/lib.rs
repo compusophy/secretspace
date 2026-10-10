@@ -159,8 +159,8 @@ pub struct Light {
 /// A mark laid on whatever lies under it (the ground, a rock, a step):
 /// a disc `r` across about `p`, turned `yaw`, cast down and up `depth`
 /// metres (fading toward both ends, and on what is steep). `c`: its
-/// colour, and how much of it (fade it out with this). Drawn once the
-/// scene's depth can be read (with ambient occlusion on).
+/// colour, and how much of it (fade it out with this). Drawn on the
+/// tiers that draw decals (`Quality::decals`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Decal {
     pub p: V3,
@@ -385,6 +385,8 @@ pub struct Quality {
     /// Steps the sea's reflections march across the screen (0: the sky
     /// alone).
     pub ssr: u32,
+    /// Whether decals are laid.
+    pub decals: bool,
 }
 
 impl Quality {
@@ -438,6 +440,7 @@ impl Quality {
         ao: 6,
         shafts: true,
         ssr: 16,
+        decals: true,
     };
     pub const MEDIUM: Quality = Quality {
         msaa: 4,
@@ -449,6 +452,7 @@ impl Quality {
         ao: 4,
         shafts: true,
         ssr: 10,
+        decals: true,
     };
     pub const LOW: Quality = Quality {
         msaa: 1,
@@ -460,6 +464,7 @@ impl Quality {
         ao: 0,
         shafts: false,
         ssr: 0,
+        decals: false,
     };
 }
 
@@ -477,9 +482,51 @@ pub struct Frame<'a> {
     pub view_fov: f32,
 }
 
+/// A normal `n` as the world shader turns it by the model `m` (`world_vs`
+/// does the same): by its cofactor, the inverse-transpose up to a
+/// positive scale, turned back if `m` mirrors; not normalised.
+pub fn normal_of(m: &M4, n: V3) -> V3 {
+    let col = |k: usize| [m[k * 4], m[k * 4 + 1], m[k * 4 + 2]];
+    let (a0, a1, a2) = (col(0), col(1), col(2));
+    let c = [geo::cross(a1, a2), geo::cross(a2, a0), geo::cross(a0, a1)];
+    let sign = if geo::dot(a0, c[0]) < 0.0 { -1.0 } else { 1.0 };
+    (0..3)
+        .map(|k| geo::scale(c[k], n[k] * sign))
+        .fold([0.0; 3], geo::add)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A model's matrix applied to a direction (no move).
+    fn turn(m: &M4, v: V3) -> V3 {
+        [0, 1, 2].map(|r| m[r] * v[0] + m[4 + r] * v[1] + m[8 + r] * v[2])
+    }
+
+    #[test]
+    fn a_normal_stays_square_to_its_surface_however_it_is_stretched() {
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        // A facet leaning 45 degrees, and a line along it.
+        let (n, along) = ([s, s, 0.0], [-s, s, 0.0]);
+        let stretched = m4::place([3.0, 1.0, -2.0], 0.7, [1.0, 5.0, 1.0]);
+        let thin = m4::basis([0.0; 3], [0.06, 0.0, 0.0], [0.0, 2.5, 0.0], [0.0, 0.0, 2.5]);
+        let mirrored = m4::basis([0.0; 3], [1.4, 0.0, 0.0], [0.0, -3.0, 0.0], [0.0, 0.0, 1.4]);
+        for m in [stretched, thin, mirrored] {
+            let w = geo::norm(normal_of(&m, n));
+            let t = geo::norm(turn(&m, along));
+            assert!(geo::dot(w, t).abs() < 1e-4, "square: {w:?} {t:?}");
+            // Still out of the shape: the same side as the point it is
+            // the normal of, on a ball about the origin.
+            assert!(geo::dot(w, turn(&m, n)) > 0.0, "out: {w:?}");
+        }
+        // Stretched tall, a steep facet stays steep (the model's own
+        // matrix would tip it toward the sky).
+        let w = geo::norm(normal_of(&stretched, n));
+        assert!(w[1] < 0.25, "steep: {w:?}");
+        let naive = geo::norm(turn(&stretched, n));
+        assert!(naive[1] > 0.9, "the model's matrix tips it up: {naive:?}");
+    }
 
     #[test]
     fn depth_is_reversed_and_infinite() {

@@ -10,7 +10,7 @@ use crate::ao::Ao;
 use crate::buffers::bytes;
 use crate::fullscreen;
 use crate::shafts::{Shafts, SHAFT};
-use crate::{shaders, Camera, Look};
+use crate::{shaders, Camera, Look, Quality};
 
 pub const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -89,6 +89,8 @@ struct Pass {
 pub struct Post {
     msaa: u32,
     levels: u32,
+    /// Whether the scene's depth is read once what is solid is drawn.
+    reads: bool,
     layout: wgpu::BindGroupLayout,
     finish_layout: wgpu::BindGroupLayout,
     down: wgpu::RenderPipeline,
@@ -150,15 +152,11 @@ fn uniform(device: &wgpu::Device, queue: &wgpu::Queue, v: [f32; 8]) -> wgpu::Buf
 }
 
 impl Post {
-    /// Post-processing into targets of `out` format, with occlusion
-    /// looking `ao` ways out from a pixel (none at 0).
-    pub fn new(
-        device: &wgpu::Device,
-        out: wgpu::TextureFormat,
-        msaa: u32,
-        levels: u32,
-        (ao, shafts): (u32, bool),
-    ) -> Post {
+    /// Post-processing into targets of `out` format, doing as much as
+    /// `quality` says (occlusion, shafts, bloom's depth).
+    pub fn new(device: &wgpu::Device, out: wgpu::TextureFormat, quality: Quality) -> Post {
+        let (msaa, levels) = (quality.msaa, quality.bloom_levels);
+        let (ao, shafts) = (quality.ao, quality.shafts);
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -228,6 +226,7 @@ impl Post {
         Post {
             msaa,
             levels: levels.max(1),
+            reads: ao > 0 || shafts || quality.ssr > 0 || quality.decals,
             down: pipe(&layout, "down_fs", HDR, None),
             up: pipe(&layout, "up_fs", HDR, Some(add)),
             finish: pipe(&finish_layout, "finish_fs", out, None),
@@ -262,10 +261,11 @@ impl Post {
         }
     }
 
-    /// Whether the scene's depth is read (`occlude`) once what is solid
-    /// is drawn, before what glows.
-    pub fn occludes(&self) -> bool {
-        self.ao.is_some() || self.shafts.is_some()
+    /// Whether the scene's depth is read once what is solid is drawn
+    /// (occlusion, shafts, the sea's reflections, decals), before what
+    /// glows: the scene is then drawn in passes that may read it.
+    pub fn reads_depth(&self) -> bool {
+        self.reads
     }
 
     /// Ambient occlusion over the picture drawn so far, and the sun's
@@ -292,7 +292,7 @@ impl Post {
         }
         self.size = size;
         let hdr = texture(device, "hdr", size, HDR, 1, true);
-        let read = self.occludes();
+        let read = self.reads;
         let depth = texture(device, "depth", size, DEPTH, self.msaa, read);
         if let Some(ao) = &mut self.ao {
             ao.fit(device, &depth, size);

@@ -7,6 +7,10 @@ pub const GRID_CELLS: u32 = 64;
 pub const MAX_PER_CELL: u32 = 48;
 /// The nearest the camera sees (metres); there is no far plane.
 pub const NEAR: f32 = 0.05;
+/// The shaders' clock wraps at this many seconds (about four and a half
+/// hours: one jump then), so it stays precise to the millisecond and
+/// what it is fed to (sines, noise) never grows huge.
+pub const TIME_WRAP: f32 = 16384.0;
 /// A spark of light's size on screen, in pixels, at most; a flame's or a
 /// puff's, as a share of the screen's height; and how near the eye a
 /// spark fades out (metres), so none blinds it.

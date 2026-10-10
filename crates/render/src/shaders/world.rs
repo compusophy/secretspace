@@ -50,7 +50,14 @@ fn world_vs(v: WorldIn) -> WorldOut {
     var o: WorldOut;
     o.clip = g.vp * w;
     o.pos = w.xyz;
-    o.nrm = (m * vec4<f32>(v.nrm, 0.0)).xyz;
+    // The normal by the model's cofactor (its inverse-transpose, scaled),
+    // so what is stretched or squashed still faces the way its surface
+    // does; turned back if the model mirrors (`normal_of` in lib.rs).
+    let a0 = v.m0.xyz;
+    let a1 = v.m1.xyz;
+    let a2 = v.m2.xyz;
+    let cof = mat3x3<f32>(cross(a1, a2), cross(a2, a0), cross(a0, a1));
+    o.nrm = cof * v.nrm * select(1.0, -1.0, dot(a0, cross(a1, a2)) < 0.0);
     o.col = v.col;
     o.tint = v.tint;
     o.extra = v.extra;

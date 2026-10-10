@@ -50,9 +50,13 @@ pub struct Renderer {
     moving: Grow,
     still: Grow,
     spark_buf: Grow,
+    /// Every mesh made, by its id (none once let go: an id is never
+    /// handed out again, so what still holds one draws nothing).
     meshes: Vec<Option<MeshBuf>>,
-    free: Vec<u32>,
+    /// The statics: the solid ones (culled, laid once); the rest, drawn
+    /// in their passes with what moves.
     statics: Vec<Item>,
+    statics_lit: Vec<Item>,
     statics_dirty: bool,
     /// Where the eye was when the statics were laid (their near or far
     /// meshes chosen from it).
@@ -106,8 +110,8 @@ impl Renderer {
             still: Grow::new(device, "still", vbuf),
             spark_buf: Grow::new(device, "sparks", vbuf),
             meshes: Vec::new(),
-            free: Vec::new(),
             statics: Vec::new(),
+            statics_lit: Vec::new(),
             statics_dirty: false,
             still_eye: [0.0; 3],
             still_runs: Vec::new(),
@@ -118,13 +122,7 @@ impl Renderer {
             heights: tiny_texture(device, queue),
             terrain: [0.0; 4],
             water: Mesh(0),
-            post: Post::new(
-                device,
-                format,
-                quality.msaa,
-                quality.bloom_levels,
-                (quality.ao, quality.shafts),
-            ),
+            post: Post::new(device, format, quality),
             stats: Stats::default(),
         };
         let mut sea = geo::Geo::default();
@@ -170,30 +168,21 @@ impl Renderer {
             count: g.i.len() as u32,
             r,
         };
-        match self.free.pop() {
-            Some(i) => {
-                self.meshes[i as usize] = Some(m);
-                Mesh(i)
-            }
-            None => {
-                self.meshes.push(Some(m));
-                Mesh(self.meshes.len() as u32 - 1)
-            }
-        }
+        self.meshes.push(Some(m));
+        Mesh(self.meshes.len() as u32 - 1)
     }
 
     /// Let a mesh go (anything still drawing it is skipped).
     pub fn free(&mut self, m: Mesh) {
         if let Some(slot) = self.meshes.get_mut(m.0 as usize) {
-            if slot.take().is_some() {
-                self.free.push(m.0);
-            }
+            *slot = None;
         }
     }
 
-    /// What never moves: drawn every frame, uploaded only when it changes.
+    /// What never moves: drawn every frame, uploaded only when it changes
+    /// (what is see-through or glows, with what moves, in its pass).
     pub fn statics(&mut self, items: Vec<Item>) {
-        self.statics = items;
+        (self.statics, self.statics_lit) = items.into_iter().partition(|i| i.pass == Pass::Opaque);
         self.statics_dirty = true;
     }
 
@@ -360,8 +349,9 @@ impl Renderer {
             ];
             -(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
         };
+        let lit = self.statics_lit.clone();
         let mut by: [Vec<&Item>; 4] = Default::default();
-        for it in f.items.iter().chain(sea.iter()) {
+        for it in f.items.iter().chain(&lit).chain(sea.iter()) {
             by[it.pass as usize].push(it);
         }
         by[Pass::Faint as usize].sort_by(|a, b| far(a).total_cmp(&far(b)));
@@ -408,7 +398,7 @@ impl Renderer {
 
         // The scene: what is solid, then (once it is occluded, if it is)
         // what is see-through or glows.
-        let split = self.post.occludes();
+        let split = self.post.reads_depth();
         if split && self.soft_group.as_ref().is_none_or(|g| g.1 != size) {
             let scene = t.resolve.as_ref().unwrap_or(&self.nothing);
             let group = crate::pipes::soft_group(
@@ -421,7 +411,7 @@ impl Renderer {
             self.soft_group = Some((group, size));
         }
         let soft = self.soft_group.as_ref().filter(|_| split).map(|g| &g.0);
-        let marks = soft.filter(|_| !f.decals.is_empty());
+        let marks = soft.filter(|_| self.quality.decals && !f.decals.is_empty());
         // The sea mirrors the picture so far (resolved into a copy first).
         let ssr = split && self.quality.ssr > 0 && t.resolve.is_some();
         let pipes = &self.pipes;
