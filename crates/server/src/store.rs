@@ -2,12 +2,14 @@
 //!
 //! - A writer thread takes each snapshot, writes it to a temporary file,
 //!   syncs it, renames it into place and syncs the directory, so a crash
-//!   leaves the old file or the new one, never half of either.
+//!   leaves the old file or the new one, never half of either
+//!   (`write_atomic`, which the souls and the visit count use too).
 //! - It keeps the newest 6, one an hour for a day, one a day for 14 days.
 //! - On boot each attempt is a fresh room from its factory, given the
 //!   newest snapshot, then older ones. A fresh world is made only when
 //!   there is no snapshot at all; when there are some and none loads, the
 //!   room stays closed and its files are copied to `quarantine/<unix>/`.
+//!   Each is told the schema it was written in (`Room::load_snap`).
 
 use std::fs;
 use std::io::Write;
@@ -114,7 +116,7 @@ impl Store {
                 })
                 .and_then(|s| {
                     let mut room = std::mem::replace(&mut fresh, factory(seed));
-                    match catch_unwind(AssertUnwindSafe(|| room.load(&s.payload))) {
+                    match catch_unwind(AssertUnwindSafe(|| room.load_snap(s.schema, &s.payload))) {
                         Ok(Ok(())) => Ok(room),
                         Ok(Err(e)) => Err(e),
                         Err(_) => Err("panicked loading"),
@@ -171,17 +173,37 @@ fn list(dir: &Path) -> Vec<(u64, PathBuf)> {
 fn write(root: &Path, snap: &Snap) -> std::io::Result<()> {
     let dir = root.join(&snap.room);
     fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("snap-{}.bin", snap.unix));
-    let tmp = dir.join(format!("snap-{}.tmp", snap.unix));
-    let mut f = fs::File::create(&tmp)?;
-    f.write_all(&snap.pack())?;
-    f.sync_all()?;
-    fs::rename(&tmp, &path)?;
-    fs::File::open(&dir)?.sync_all()?;
+    write_atomic(&dir.join(format!("snap-{}.bin", snap.unix)), &snap.pack())?;
     for gone in rotate(&list(&dir), snap.unix) {
         let _ = fs::remove_file(gone);
     }
     Ok(())
+}
+
+/// Put `bytes` at `path` so a crash leaves the old file or the new one,
+/// never half of either: a temporary file beside it, synced, renamed into
+/// place, and the directory synced (so the rename itself is kept).
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let mut f = fs::File::create(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    fs::rename(&tmp, path)?;
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        fs::File::open(dir)?.sync_all()?;
+    }
+    Ok(())
+}
+
+/// A file that does not read, renamed to `<name>.bad-<now>` so nothing
+/// writes over it (someone may yet read it); where it went, if it could.
+pub fn set_aside(path: &Path, now: u64) -> Option<PathBuf> {
+    let mut to = path.as_os_str().to_owned();
+    to.push(format!(".bad-{now}"));
+    let to = PathBuf::from(to);
+    fs::rename(path, &to).ok().map(|_| to)
 }
 
 /// The snapshots to delete, of these (newest first) at time `now`.
@@ -219,5 +241,22 @@ mod tests {
         assert!((40..=46).contains(&kept), "{kept}");
         let kept_now = rotate(&snaps[..6], now);
         assert!(kept_now.is_empty());
+    }
+
+    #[test]
+    fn a_file_is_written_whole_and_one_that_does_not_read_is_kept_aside() {
+        let dir = std::env::temp_dir().join(format!("store-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("visits");
+        write_atomic(&path, b"12").unwrap();
+        write_atomic(&path, b"345").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"345");
+        assert!(!dir.join("visits.tmp").exists());
+        let to = set_aside(&path, 99).unwrap();
+        assert_eq!(to, dir.join("visits.bad-99"));
+        assert!(!path.exists() && fs::read(&to).unwrap() == b"345");
+        assert_eq!(set_aside(&path, 100), None, "nothing there to set aside");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
