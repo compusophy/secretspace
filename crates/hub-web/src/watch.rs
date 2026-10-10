@@ -6,13 +6,10 @@
 use look::{Burst, Gulp, Scene, View};
 use pixels::{Canvas, Rect, Rgba};
 use wyrm::mirror::Mirror;
-use wyrm::proto::{unq, Down};
+use wyrm::proto::{unq, Down, Up};
 
 pub struct Watch {
-    pub socket: Option<kit::Socket>,
-    pub up: bool,
-    pub retry_at: f64,
-    pub retries: u32,
+    link: Option<kit::Link>,
     mirror: Mirror,
     arena: f32,
     frame_at: f64,
@@ -26,10 +23,7 @@ pub struct Watch {
 impl Watch {
     pub fn new() -> Watch {
         Watch {
-            socket: None,
-            up: false,
-            retry_at: 0.0,
-            retries: 0,
+            link: None,
             mirror: Mirror::default(),
             arena: wyrm::laws::ARENA,
             frame_at: 0.0,
@@ -41,7 +35,40 @@ impl Watch {
         }
     }
 
-    pub fn receive(&mut self, now: f64, bytes: &[u8]) {
+    /// Watch the arena (connecting when it is time) and take in what it
+    /// says; `css` is the screen the server is told the watcher has.
+    pub fn poll(&mut self, now: f64, css: (f64, f64)) {
+        let link = self
+            .link
+            .get_or_insert_with(|| kit::Link::open("wyrm", Vec::new(), true));
+        for ev in link.poll(now) {
+            match ev {
+                kit::Net::Up => {
+                    // The server sends the part of the arena this screen
+                    // would show a watcher; the card shows the middle of it.
+                    let screen = Up::Screen {
+                        w: css.0 as u16,
+                        h: css.1 as u16,
+                    };
+                    if let Some(l) = &self.link {
+                        l.send(&screen.encode());
+                    }
+                }
+                kit::Net::Holding => self.lost(),
+                kit::Net::Message(b) => self.receive(now, &b),
+            }
+        }
+    }
+
+    /// Stop watching (a game is open over the page); `poll` starts again.
+    pub fn rest(&mut self) {
+        if let Some(l) = self.link.take() {
+            l.close();
+        }
+        self.lost();
+    }
+
+    fn receive(&mut self, now: f64, bytes: &[u8]) {
         match Down::decode(bytes) {
             Some(Down::Hello { arena, .. }) => {
                 self.arena = arena as f32;
@@ -53,6 +80,7 @@ impl Watch {
                     self.gap += (g - self.gap) * 0.1;
                 }
                 self.frame_at = now;
+                self.forget(now);
                 for &(x, y, hue, r) in &f.bursts {
                     self.bursts.push(Burst {
                         x: unq(x),
@@ -76,19 +104,22 @@ impl Watch {
         }
     }
 
-    pub fn closed(&mut self, now: f64) {
-        self.up = false;
-        self.socket = None;
-        self.retries += 1;
-        self.retry_at = now + 1000.0 * 2f64.powi(self.retries.min(5) as i32);
+    /// The watch is lost: what comes next starts from a new Hello, and
+    /// frames rebuild bodies exactly only from there.
+    fn lost(&mut self) {
         self.mirror = Mirror::default();
         self.camera = None;
     }
 
-    /// Draw what is happening now into `at`, at `k` pixels per world unit.
-    pub fn draw(&mut self, into: &mut Canvas, at: Rect, k: f32, corner: f32, u: i32, now: f64) {
+    /// Gulps and bursts that are over.
+    fn forget(&mut self, now: f64) {
         self.gulps.retain(|g| now - g.at < 250.0);
         self.bursts.retain(|b| now - b.at < 700.0);
+    }
+
+    /// Draw what is happening now into `at`, at `k` pixels per world unit.
+    pub fn draw(&mut self, into: &mut Canvas, at: Rect, k: f32, corner: f32, u: i32, now: f64) {
+        self.forget(now);
         self.buf.resize(at.w as i32, at.h as i32);
         let alpha = ((now - self.frame_at) / self.gap).clamp(0.0, 1.0) as f32;
         let live = !self.mirror.snakes.is_empty();
@@ -116,33 +147,14 @@ impl Watch {
             look::world(&mut self.buf, &v, &scene, now);
         } else {
             self.buf.clear(look::BG);
-            let msg = if self.up { "..." } else { "connecting..." };
+            let up = self.link.as_ref().is_some_and(kit::Link::up);
+            let msg = if up { "..." } else { "connecting..." };
             let (w, h) = (self.buf.w, self.buf.h);
             self.buf
                 .text_centred(w / 2, h / 2 - 4 * u, msg, u, Rgba(244, 241, 255, 120));
         }
-        // LIVE, with a beating dot.
         if live {
-            let p = (4 * u) as f32;
-            let beat = 0.55 + 0.45 * ((now / 400.0) as f32).sin().abs();
-            self.buf.round_rect(
-                Rect::new(p, p, (31 * u) as f32, (11 * u) as f32),
-                3.0 * u as f32,
-                Rgba(7, 10, 18, 170),
-            );
-            self.buf.circle(
-                p + 5.5 * u as f32,
-                p + 5.5 * u as f32,
-                2.5 * u as f32,
-                Rgba(255, 70, 90, 255).fade(beat),
-            );
-            self.buf.text(
-                (p as i32) + 10 * u,
-                (p as i32) + 2 * u,
-                "LIVE",
-                u,
-                Rgba(244, 241, 255, 230),
-            );
+            crate::tag::tag(&mut self.buf, 0, "LIVE", true, u, now);
         }
         into.blit(&self.buf, at.x as i32, at.y as i32, corner);
     }

@@ -24,33 +24,10 @@ struct Three {
     has: bool,
 }
 
-/// The spells' colours (as the game draws them).
-const SPELLS: [(u8, u8, u8); 8] = [
-    (255, 120, 40),
-    (255, 215, 90),
-    (120, 225, 255),
-    (165, 115, 255),
-    (255, 100, 200),
-    (80, 140, 255),
-    (120, 235, 110),
-    (215, 235, 245),
-];
-
-/// The wizards' colours (as the game draws them).
-const HUES: [(u8, u8, u8); 8] = [
-    (70, 110, 230),
-    (200, 60, 70),
-    (226, 218, 200),
-    (150, 80, 200),
-    (220, 140, 40),
-    (40, 170, 190),
-    (220, 90, 160),
-    (120, 120, 130),
-];
-
-fn spell(k: u8) -> Rgba {
-    let (r, g, b) = SPELLS.get(k as usize).copied().unwrap_or((255, 214, 128));
-    Rgba::rgb(r, g, b)
+/// A colour of the game's (0 to 1) as the card's.
+fn rgba(c: [f32; 3]) -> Rgba {
+    let k = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Rgba::rgb(k(c[0]), k(c[1]), k(c[2]))
 }
 
 pub struct WandWatch {
@@ -142,11 +119,7 @@ impl WandWatch {
                 self.said.push(b.clone());
             }
             if let Some(h) = proto::read_hall(&b) {
-                // Short enough for the card's corner on a phone.
-                self.champion = h
-                    .into_iter()
-                    .find(|r| r.1 > 0)
-                    .map(|r| r.0.chars().take(14).collect());
+                self.champion = h.into_iter().find(|r| r.1 > 0).map(|r| r.0);
             }
             if let Some((_, _, seed, _)) = proto::read_welcome(&b) {
                 if self.seed != Some(seed) {
@@ -184,9 +157,12 @@ impl WandWatch {
         self.falls.retain(|f| now - f.0 < 900.0);
     }
 
-    /// The island from above, `s` pixels a side.
-    fn island(&mut self, s: i32) -> Option<&Canvas> {
-        let map = self.map.as_ref()?;
+    /// The island from above, `s` pixels a side, drawn into `island`
+    /// once for the size.
+    fn island(&mut self, s: i32) {
+        let Some(map) = self.map.as_ref() else {
+            return;
+        };
         if self.island.as_ref().is_none_or(|c| c.w != s) {
             let mut c = Canvas::new(s, s);
             for j in 0..s {
@@ -229,7 +205,6 @@ impl WandWatch {
             }
             self.island = Some(c);
         }
-        self.island.as_ref()
     }
 
     /// The card's picture in `b`: the room, live.
@@ -237,8 +212,7 @@ impl WandWatch {
         self.poll(now);
         let uf = u as f32;
         if self.three(b, now) {
-            let tag = self.standing(now);
-            self.tag(&tag.0, tag.1, u, now);
+            self.tags(u, now);
             c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
             return;
         }
@@ -246,9 +220,9 @@ impl WandWatch {
         self.buf.clear(Rgba::rgb(22, 50, 84));
         let side = (b.h.min(b.w) * 1.15) as i32;
         let (ox, oy) = ((b.w as i32 - side) / 2, (b.h as i32 - side) / 2);
-        if let Some(isl) = self.island(side) {
-            let isl = isl.clone();
-            self.buf.blit(&isl, ox, oy, 0.0);
+        self.island(side);
+        if let Some(isl) = &self.island {
+            self.buf.blit(isl, ox, oy, 0.0);
         }
         let to = |x: f32, z: f32| {
             (
@@ -258,7 +232,7 @@ impl WandWatch {
         };
         let k = side as f32 / (2.0 * MAP_HALF);
         let Some(f) = self.frame.as_ref() else {
-            self.tag("connecting to the island", false, u, now);
+            self.tags(u, now);
             c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
             return;
         };
@@ -277,7 +251,7 @@ impl WandWatch {
         for bo in &f.bolts {
             let (x, y) = to(bo.p[0], bo.p[2]);
             let (x0, y0) = to(bo.p[0] - bo.v[0] * 0.08, bo.p[2] - bo.v[2] * 0.08);
-            let col = spell(bo.kind);
+            let col = rgba(wandfall_look::fx::colour(bo.kind));
             self.buf.line(x0, y0, x, y, 1.2 * uf, col);
             self.buf.glow(x, y, 3.0 * uf, col.fade(0.7));
         }
@@ -285,18 +259,15 @@ impl WandWatch {
             let a = (1.0 - (now - when) / 400.0) as f32;
             let (x0, y0) = to(from[0], from[2]);
             let (x1, y1) = to(to_[0], to_[2]);
-            self.buf.line(x0, y0, x1, y1, 1.5 * uf, spell(sp).fade(a));
+            let col = rgba(wandfall_look::fx::colour(sp));
+            self.buf.line(x0, y0, x1, y1, 1.5 * uf, col.fade(a));
         }
         for s in f.players.iter().filter(|s| s.flags & flag::ALIVE != 0) {
             let (x, y) = to(s.p[0], s.p[2]);
-            let (r, g, bl) = HUES[s.id as usize % HUES.len()];
+            let hue = rgba(wandfall_look::rig::hue(s.id));
             self.buf.circle(x, y, 2.6 * uf, Rgba(7, 10, 18, 200));
-            self.buf.circle(
-                x,
-                y,
-                2.0 * uf,
-                Rgba::rgb(r, g, bl).mix(Rgba::rgb(255, 255, 255), 0.25),
-            );
+            self.buf
+                .circle(x, y, 2.0 * uf, hue.mix(Rgba::rgb(255, 255, 255), 0.25));
         }
         for &(when, at) in &self.falls {
             let a = (1.0 - (now - when) / 900.0) as f32;
@@ -309,8 +280,7 @@ impl WandWatch {
                 Rgba(255, 214, 128, 255).fade(a),
             );
         }
-        let (tag, live) = self.standing(now);
-        self.tag(&tag, live, u, now);
+        self.tags(u, now);
         c.blit(&self.buf, b.x as i32, b.y as i32, 6.0 * uf);
     }
 
@@ -344,19 +314,23 @@ impl WandWatch {
         true
     }
 
-    /// How it stands: how many of how many are left, the lobby's
-    /// countdown, or who won; and whether it is live.
-    fn standing(&self, now: f64) -> (String, bool) {
+    /// How it stands, a tag a line: how many of how many are left, the
+    /// lobby's countdown (and the champion, under it), or who won; and
+    /// whether it is live.
+    fn standing(&self, now: f64) -> Vec<(String, bool)> {
         let Some(f) = self.frame.as_ref() else {
-            return ("connecting to the island".to_string(), false);
+            return vec![("connecting to the island".to_string(), false)];
         };
-        match f.phase {
+        let line = match f.phase {
             _ if now - self.frame_at > 3000.0 => ("reconnecting".to_string(), false),
             1 => (format!("LIVE  {} of {} left", f.alive, f.entrants), true),
-            0 => match &self.champion {
-                Some(c) => (format!("next match in {}s - champion {c}", f.secs), false),
-                None => (format!("next match in {}s", f.secs), false),
-            },
+            0 => {
+                let next = (format!("next match in {}s", f.secs), false);
+                return match &self.champion {
+                    Some(c) => vec![next, (format!("champion {c}"), false)],
+                    None => vec![next],
+                };
+            }
             _ => {
                 let name = self
                     .names
@@ -368,35 +342,14 @@ impl WandWatch {
                     false,
                 )
             }
-        }
+        };
+        vec![line]
     }
 
-    /// A tag at the card's corner; with a beating red dot when live.
-    fn tag(&mut self, tag: &str, live: bool, u: i32, now: f64) {
-        let uf = u as f32;
-        let p = 4.0 * uf;
-        let dot = if live { 10.0 * uf } else { 0.0 };
-        let tw = pixels::text_width(tag, u) as f32;
-        self.buf.round_rect(
-            Rect::new(p, p, tw + dot + 6.0 * uf, 11.0 * uf),
-            3.0 * uf,
-            Rgba(7, 10, 18, 170),
-        );
-        if live {
-            let beat = 0.55 + 0.45 * ((now / 400.0) as f32).sin().abs();
-            self.buf.circle(
-                p + 5.5 * uf,
-                p + 5.5 * uf,
-                2.5 * uf,
-                Rgba(240, 70, 70, 255).fade(beat),
-            );
+    /// How it stands, in the card's corner.
+    fn tags(&mut self, u: i32, now: f64) {
+        for (row, (text, live)) in self.standing(now).into_iter().enumerate() {
+            crate::tag::tag(&mut self.buf, row as i32, &text, live, u, now);
         }
-        self.buf.text(
-            (p + 3.0 * uf + dot) as i32,
-            (p as i32) + 2 * u,
-            tag,
-            u,
-            Rgba(244, 241, 255, 230),
-        );
     }
 }

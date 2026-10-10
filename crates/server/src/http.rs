@@ -125,8 +125,9 @@ pub fn respond(out: &mut impl Write, status: &str, kind: &str, body: &[u8]) -> i
     out.write_all(&msg)
 }
 
-/// A page's file from `root` (`--static dist`).
-pub fn file(out: &mut impl Write, root: &Path, path: &str) -> io::Result<()> {
+/// A page's file from `root` (`--static dist`); a page's folder asked for
+/// without its slash is sent to it (`query` kept).
+pub fn file(out: &mut impl Write, root: &Path, path: &str, query: &str) -> io::Result<()> {
     if path.split('/').any(|seg| seg == "..") {
         return respond(out, "400 Bad Request", "text/plain", b"no");
     }
@@ -139,7 +140,13 @@ pub fn file(out: &mut impl Write, root: &Path, path: &str) -> io::Result<()> {
     }
     let rel = path.trim_start_matches('/');
     let mut p = root.join(rel);
-    if rel.is_empty() || rel.ends_with('/') || p.is_dir() {
+    if let Some(to) = slash_redirect(rel, query, p.is_dir()) {
+        return write!(
+            out,
+            "HTTP/1.1 301 Moved Permanently\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+    }
+    if rel.is_empty() || rel.ends_with('/') {
         p = p.join("index.html");
     }
     let kind = match p.extension().and_then(|e| e.to_str()) {
@@ -158,9 +165,47 @@ pub fn file(out: &mut impl Write, root: &Path, path: &str) -> io::Result<()> {
     }
 }
 
+/// Where a page's folder asked for without its slash (`/wandfall`) is
+/// sent: to the slash, or its own paths (`./pkg/`) would miss. `rel` is
+/// the path with its leading slashes gone, so the answer starts with
+/// exactly one: `//wandfall` stays on this site rather than naming a host
+/// called wandfall. No folder here has a backslash in its name, and a
+/// browser reads `/\` as `//`, so one is never sent anywhere.
+fn slash_redirect(rel: &str, query: &str, is_dir: bool) -> Option<String> {
+    if rel.is_empty() || rel.ends_with('/') || rel.contains('\\') || !is_dir {
+        return None;
+    }
+    let q = if query.is_empty() { "" } else { "?" };
+    Some(format!("/{rel}/{q}{query}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_without_its_slash_is_sent_to_it_on_this_site() {
+        let to = |path: &str, query: &str, dir: bool| {
+            slash_redirect(path.trim_start_matches('/'), query, dir)
+        };
+        assert_eq!(to("/wandfall", "", true).as_deref(), Some("/wandfall/"));
+        assert_eq!(
+            to("/wandfall", "x=1", true).as_deref(),
+            Some("/wandfall/?x=1")
+        );
+        assert_eq!(to("/wyrm/pkg", "", true).as_deref(), Some("/wyrm/pkg/"));
+        // A protocol-relative path never leaves the site.
+        assert_eq!(to("//wandfall", "", true).as_deref(), Some("/wandfall/"));
+        assert_eq!(
+            to("///wandfall", "a", true).as_deref(),
+            Some("/wandfall/?a")
+        );
+        assert_eq!(to("/\\wandfall", "", true), None);
+        // The page itself, a folder with its slash, and a file: served.
+        assert_eq!(to("/", "", true), None);
+        assert_eq!(to("/wandfall/", "", true), None);
+        assert_eq!(to("/wandfall/index.html", "", false), None);
+    }
 
     fn head(text: &str) -> Option<Head> {
         read_head(&mut text.as_bytes()).unwrap()

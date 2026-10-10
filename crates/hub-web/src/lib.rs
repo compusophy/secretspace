@@ -3,21 +3,26 @@
 //! and how many visits there have ever been. The numbers come live from
 //! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`),
 //! and Wandfall's its match while one is on (`wand`). A card opens its
-//! game over the page, full screen at once (`kit::shell`); the page rests
-//! till the game is left.
+//! game over the page, full screen at once (`kit::shell`): clicked,
+//! tapped, or picked with the keys (arrows or Tab, then Enter); the page
+//! rests till the game is left.
 //! Every pixel is drawn here, in Rust.
 
-mod luci;
+mod backdrop;
+mod shelf;
+mod tag;
 mod wand;
 mod watch;
 
 use std::cell::RefCell;
 
 use engine::hub::Stats;
-use pixels::{fit_scale, text_width, Canvas, Rect, Rgba};
+use pixels::{text_width, Canvas, Rect, Rgba};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{PointerEvent, WheelEvent};
+use web_sys::{KeyboardEvent, PointerEvent, WheelEvent};
+
+use shelf::{fitted, shelf, Shelf};
 
 /// A game on the shelf.
 struct Card {
@@ -27,8 +32,6 @@ struct Card {
     blurb: [&'static str; 2],
     path: &'static str,
     hue: f32,
-    /// Kept off the public shelf (`?all=1` shows it) until it is ready.
-    hidden: bool,
 }
 
 const CARDS: &[Card] = &[
@@ -38,15 +41,6 @@ const CARDS: &[Card] = &[
         blurb: ["eat the glow, grow long,", "make them run into you"],
         path: "/wyrm/",
         hue: 140.0,
-        hidden: false,
-    },
-    Card {
-        id: "luciphon",
-        title: "LUCIPHON",
-        blurb: ["carry your light out,", "knock them off the edge"],
-        path: "/luciphon/",
-        hue: 42.0,
-        hidden: true,
     },
     Card {
         id: "wandfall",
@@ -54,7 +48,6 @@ const CARDS: &[Card] = &[
         blurb: ["a wand battle royale:", "be the last one standing"],
         path: "/wandfall/",
         hue: 265.0,
-        hidden: false,
     },
     Card {
         id: "",
@@ -62,38 +55,32 @@ const CARDS: &[Card] = &[
         blurb: ["one more after that", "made of rust too"],
         path: "",
         hue: 20.0,
-        hidden: false,
     },
 ];
 
-const BG: Rgba = Rgba::rgb(7, 10, 18);
 const INK: Rgba = Rgba::rgb(244, 241, 255);
 const DIM: Rgba = Rgba(244, 241, 255, 150);
 const GO: Rgba = Rgba::rgb(87, 227, 137);
 
 struct Hub {
     screen: kit::Screen,
-    socket: Option<kit::Socket>,
-    /// The first connection counts the visit.
-    counted: bool,
-    retry_at: f64,
-    retries: u32,
-    up: bool,
+    /// The live numbers (`/ws/hub`); its first connection counts the visit.
+    link: kit::Link,
     stats: Option<Stats>,
     pointer: Option<(f32, f32)>,
+    /// The page as last laid out.
+    shelf: Shelf,
     /// Where each card was drawn last frame, for clicks.
     hits: Vec<(Rect, usize)>,
+    /// The card picked with the keys, if any.
+    focus: Option<usize>,
     /// wyrm, live, for its card.
     watch: watch::Watch,
-    /// Luciphon, live, while its card is shown (`?all=1` for now).
-    luci: Option<luci::LuciWatch>,
     /// Wandfall, live while a match is on, for its card.
     wand: wand::WandWatch,
-    /// The cards on the shelf, by index into CARDS.
-    shown: Vec<usize>,
-    /// How far the page is scrolled, and the most it can be.
+    backdrop: backdrop::Backdrop,
+    /// How far the page is scrolled.
     scroll: f32,
-    max_scroll: f32,
     /// A press in progress: its pointer, where it started, the scroll
     /// then, and whether it has moved enough to be a drag, not a tap.
     press: Option<(i32, f32, f32, bool)>,
@@ -107,31 +94,15 @@ fn with<R>(f: impl FnOnce(&mut Hub) -> R) -> Option<R> {
     HUB.with(|h| h.try_borrow_mut().ok()?.as_mut().map(f))
 }
 
-fn connect(h: &mut Hub) {
-    let url = kit::room_url("hub", if h.counted { "" } else { "v=1" });
-    h.counted = true;
-    h.socket = kit::Socket::open(
-        &url,
-        || {
-            with(|h| {
-                h.up = true;
-                h.retries = 0;
-            });
-        },
-        |bytes| {
-            if let Some(s) = Stats::decode(&bytes) {
-                with(|h| h.stats = Some(s));
+/// The live numbers, as they come.
+fn numbers(h: &mut Hub, now: f64) {
+    for ev in h.link.poll(now) {
+        if let kit::Net::Message(b) = ev {
+            if let Some(s) = Stats::decode(&b) {
+                h.stats = Some(s);
             }
-        },
-        || {
-            with(|h| {
-                h.up = false;
-                h.socket = None;
-                h.retries += 1;
-                h.retry_at = kit::now() + 500.0 * 2f64.powi(h.retries.min(5) as i32);
-            });
-        },
-    );
+        }
+    }
 }
 
 /// 2413 -> "2,413".
@@ -166,130 +137,130 @@ fn soon_preview(c: &mut Canvas, b: Rect, t: f32, u: f32, hue: f32) {
     );
 }
 
-/// Watch wyrm for its card: a watcher is never one of the people there.
-fn watch_wyrm(h: &mut Hub) {
-    let url = kit::room_url("wyrm", "watch=1");
-    h.watch.socket = kit::Socket::open(
-        &url,
-        || {
-            with(|h| {
-                h.watch.up = true;
-                h.watch.retries = 0;
-                // The server sends the part of the arena this screen would
-                // show a watcher; the card shows the middle of it.
-                let (w, ht) = h.screen.css;
-                let screen = wyrm::proto::Up::Screen {
-                    w: w as u16,
-                    h: ht as u16,
-                };
-                if let Some(s) = &h.watch.socket {
-                    s.send(&screen.encode());
-                }
-            });
-        },
-        |bytes| {
-            with(|h| h.watch.receive(kit::now(), &bytes));
-        },
-        || {
-            with(|h| h.watch.closed(kit::now()));
-        },
-    );
-}
-
 /// A game is open over the page: let its connections go (the player is
 /// counted in the game; the cards are not watched unseen). They come back
 /// once it is left.
 fn rest(h: &mut Hub) {
-    if let Some(s) = h.socket.take() {
-        s.close();
-    }
-    if let Some(s) = h.watch.socket.take() {
-        s.close();
-    }
+    // Hung up, not dropped: polled again, it connects again, uncounted.
+    h.link.close();
+    h.watch.rest();
     h.wand.rest();
 }
 
+/// The cards that open a game, in order.
+fn playable() -> Vec<usize> {
+    (0..CARDS.len())
+        .filter(|&i| !CARDS[i].path.is_empty())
+        .collect()
+}
+
+/// The playable card `step` along from `from` (round the end), or the
+/// first (the last, going back) when none is picked.
+fn along(from: Option<usize>, step: isize) -> Option<usize> {
+    let all = playable();
+    let at = from.and_then(|f| all.iter().position(|&i| i == f));
+    let k = match at {
+        Some(k) => (k as isize + step).rem_euclid(all.len() as isize) as usize,
+        None if step < 0 => all.len().checked_sub(1)?,
+        None => 0,
+    };
+    all.get(k).copied()
+}
+
+/// The playable card a row down (or up) from `from`, on a shelf `cols`
+/// wide; along the row where there is none.
+fn row(from: Option<usize>, down: bool, cols: usize) -> Option<usize> {
+    let to = from.and_then(|f| {
+        if down {
+            Some(f + cols)
+        } else {
+            f.checked_sub(cols)
+        }
+    });
+    match to {
+        Some(t) if t < CARDS.len() && !CARDS[t].path.is_empty() => Some(t),
+        _ => along(from, if down { 1 } else { -1 }),
+    }
+}
+
+/// A key on the page: the card picked moves (arrows, Tab), opens (Enter)
+/// or is let go (Esc); the page scrolls (Space, Page Up and Down, Home,
+/// End). Whether the key was the page's, and the game to open.
+fn key(h: &mut Hub, key: &str, shift: bool) -> (bool, Option<&'static str>) {
+    let ht = h.screen.px.h as f32;
+    let s = h.shelf;
+    let focus = match key {
+        "Tab" => along(h.focus, if shift { -1 } else { 1 }),
+        "ArrowRight" => along(h.focus, 1),
+        "ArrowLeft" => along(h.focus, -1),
+        "ArrowDown" => row(h.focus, true, s.cols),
+        "ArrowUp" => row(h.focus, false, s.cols),
+        "Enter" => return (true, h.focus.map(|i| CARDS[i].path)),
+        "Escape" => {
+            h.focus = None;
+            return (true, None);
+        }
+        " " | "PageDown" | "PageUp" | "Home" | "End" => {
+            let page = (ht - s.foot_h - s.gap).max(s.gap);
+            let to = match key {
+                "PageUp" => h.scroll - page,
+                "Home" => 0.0,
+                "End" => f32::MAX,
+                _ => h.scroll + page,
+            };
+            h.scroll = to.clamp(0.0, s.max_scroll(ht));
+            return (true, None);
+        }
+        _ => return (false, None),
+    };
+    h.focus = focus;
+    if let Some(i) = focus {
+        h.scroll = s.show(i, h.scroll, ht);
+    }
+    (true, None)
+}
+
 fn draw(h: &mut Hub, now: f64) {
-    if h.socket.is_none() && now >= h.retry_at {
-        connect(h);
-    }
-    if h.watch.socket.is_none() && now >= h.watch.retry_at {
-        watch_wyrm(h);
-    }
+    numbers(h, now);
     let css = h.screen.css;
+    h.watch.poll(now, css);
     // A watcher's zoom in the game, pulled back a little: a card is small.
     let k = 0.8 * wyrm::laws::view_scale(18.0, css.0 as f32, css.1 as f32) / h.screen.scale as f32;
     let u = h.screen.ui();
     let uf = u as f32;
     let t = (now / 1000.0) as f32;
     let (w, ht) = (h.screen.px.w as f32, h.screen.px.h as f32);
+    let s = shelf(w, ht, u, CARDS.len());
+    h.shelf = s;
+    // The page scrolls under a fixed footer when the cards do not fit.
+    let scroll = h.scroll.clamp(0.0, s.max_scroll(ht));
+    h.scroll = scroll;
     let pointer = h.pointer;
     let stats = h.stats.clone();
-    let up = h.up;
+    let up = h.link.up();
     let c = &mut h.screen.px;
-    c.clear(BG);
+    h.backdrop.draw(c, t, scroll, uf);
 
-    // A slow drift of faint lights behind everything.
-    for k in 0..40 {
-        let x = ((k * 173 % 1000) as f32 / 1000.0 * w + t * (3.0 + (k % 5) as f32)) % w;
-        let y = (k * 337 % 1000) as f32 / 1000.0 * ht;
-        c.circle(
-            x,
-            y,
-            0.7 * uf,
-            Rgba::hsl((k * 29 % 360) as f32, 0.6, 0.7).fade(0.35),
-        );
-    }
+    // The name, and what this is.
+    let tw = text_width(shelf::TITLE, s.title_scale);
+    let ty = (s.title_y - scroll) as i32;
+    backdrop::wordmark(c, (w as i32 - tw) / 2, ty, s.title_scale, t);
+    // Every line is fitted to the page: a phone's buffer may be narrower
+    // than its CSS width (`kit::snap`).
+    let room = shelf::across(w, u);
+    let (line, size) = fitted(&[shelf::TAGLINE], room, u);
+    c.text_centred(w as i32 / 2, (s.tag_y - scroll) as i32, line, size, DIM);
 
-    // The page scrolls under a fixed footer when the cards do not fit.
-    let foot_h = 34.0 * uf;
-    let scroll = h.scroll.clamp(0.0, h.max_scroll);
-    h.scroll = scroll;
-
-    // The name, each letter its own colour, drifting.
-    let narrow = w / uf < 420.0;
-    let title = "SECRETSPACE";
-    let title_scale = fit_scale(title, (w - 16.0 * uf) as i32, 5 * u);
-    let tw = text_width(title, title_scale);
-    let mut x = (w as i32 - tw) / 2;
-    let ty = (18.0 * uf - scroll) as i32;
-    for (i, ch) in title.chars().enumerate() {
-        let hue = 140.0 + i as f32 * 14.0 + (t * 40.0);
-        let s = ch.to_string();
-        x += c.text_shadowed(x, ty, &s, title_scale, Rgba::hsl(hue, 0.75, 0.62));
-    }
-    let tag = "tiny games, everyone in them";
-    let tag_y = ty + 8 * title_scale + (6.0 * uf) as i32;
-    c.text_centred(w as i32 / 2, tag_y, tag, u, DIM);
-
-    // The cards: side by side on a wide screen, one under another on a
-    // narrow one, the picture shorter.
+    // The cards.
     h.hits.clear();
-    let top = tag_y as f32 + 22.0 * uf;
-    let gap = 12.0 * uf;
-    let preview_h = if narrow { 64.0 } else { 104.0 } * uf;
-    let (cw, ch) = if narrow {
-        ((w - 24.0 * uf).min(360.0 * uf), preview_h + 84.0 * uf)
-    } else {
-        (196.0 * uf, preview_h + 84.0 * uf)
-    };
-    let shown = h.shown.clone();
-    let cols = (((w - 24.0 * uf + gap) / (cw + gap)).floor() as usize).clamp(1, shown.len());
-    let grid_w = cols as f32 * cw + (cols - 1) as f32 * gap;
-    let x0 = (w - grid_w) / 2.0;
     let mut hover = false;
-    for (slot, &i) in shown.iter().enumerate() {
-        let card = &CARDS[i];
-        let (col, row) = (slot % cols, slot / cols);
-        let b = Rect::new(
-            x0 + col as f32 * (cw + gap),
-            top + row as f32 * (ch + gap),
-            cw,
-            ch,
-        );
+    for (i, card) in CARDS.iter().enumerate() {
+        let b = s.at(i);
+        let b = Rect::new(b.x, b.y - scroll, b.w, b.h);
         let live = !card.path.is_empty();
-        let over = live && pointer.is_some_and(|(px, py)| b.contains(px, py) && py < ht - foot_h);
-        hover |= over;
+        let pointed = pointer.is_some_and(|(px, py)| b.contains(px, py) && py < ht - s.foot_h);
+        hover |= live && pointed;
+        let over = live && (pointed || h.focus == Some(i));
         let lift = if over { -2.0 * uf } else { 0.0 };
         let b = Rect::new(b.x, b.y + lift, b.w, b.h);
         c.round_rect(b, 9.0 * uf, Rgba::rgb(16, 21, 36));
@@ -306,27 +277,28 @@ fn draw(h: &mut Hub, now: f64) {
         );
 
         let pad = 7.0 * uf;
-        let pv = Rect::new(b.x + pad, b.y + pad, b.w - 2.0 * pad, preview_h);
+        let pv = Rect::new(b.x + pad, b.y + pad, b.w - 2.0 * pad, s.preview_h);
         if card.id == "wyrm" {
             h.watch.draw(c, pv, k, 6.0 * uf, u, now);
-        } else if let (Some(l), "luciphon") = (h.luci.as_mut(), card.id) {
-            l.draw(c, pv, 6.0 * uf, u, now);
         } else if card.id == "wandfall" {
             h.wand.draw(c, pv, u, now);
         } else {
             soon_preview(c, pv, t, uf, card.hue);
         }
-        let (tx, mut ty) = (b.x + pad + 2.0 * uf, pv.y + pv.h + 8.0 * uf);
+        let (inset, words) = s.words(u);
+        let (tx, mut ty) = (b.x + inset, pv.y + pv.h + 8.0 * uf);
+        let (title, size) = fitted(&[card.title], words, 2 * u);
         c.text_shadowed(
             tx as i32,
             ty as i32,
-            card.title,
-            2 * u,
+            title,
+            size,
             if live { INK } else { DIM },
         );
         ty += 19.0 * uf;
         for line in card.blurb {
-            c.text(tx as i32, ty as i32, line, u, DIM);
+            let (line, size) = fitted(&[line], words, u);
+            c.text(tx as i32, ty as i32, line, size, DIM);
             ty += 10.0 * uf;
         }
         // Who is in it.
@@ -354,55 +326,63 @@ fn draw(h: &mut Hub, now: f64) {
                 u,
                 if over { GO } else { DIM },
             );
+            h.hits.push((b, i));
         } else {
             c.text(tx as i32, status_y, "soon", u, DIM);
         }
-        if live {
-            h.hits.push((b, i));
-        }
     }
-    let rows = shown.len().div_ceil(cols) as f32;
-    let content = top + scroll + rows * (ch + gap) + 8.0 * uf;
-    h.max_scroll = (content + foot_h - ht).max(0.0);
     h.screen.cursor(if hover { "pointer" } else { "default" });
 
     // Along the bottom: everyone, everywhere, ever.
     let c = &mut h.screen.px;
+    let foot_y = ht - s.foot_h;
     c.fill_rect(
         0,
-        (ht - foot_h) as i32,
+        foot_y as i32,
         w as i32,
-        foot_h as i32 + 1,
+        s.foot_h as i32 + 1,
         Rgba(7, 10, 18, 235),
     );
-    c.hline(0, w as i32, (ht - foot_h) as i32, Rgba(255, 255, 255, 18));
+    c.hline(0, w as i32, foot_y as i32, Rgba(255, 255, 255, 18));
     let fy = (ht - 13.0 * uf) as i32;
+    let dot = (10.0 * uf) as i32;
     let foot = match &stats {
-        Some(s) => format!(
-            "{} online   {} visits",
-            grouped(s.online as u64),
-            grouped(s.visits)
-        ),
-        None if up => "counting...".to_string(),
-        None => "connecting...".to_string(),
+        Some(s) => {
+            let (online, visits) = (grouped(s.online as u64), grouped(s.visits));
+            // Closer together if that is what fits.
+            vec![
+                format!("{online} online   {visits} visits"),
+                format!("{online} online  {visits} visits"),
+            ]
+        }
+        None if up => vec!["counting...".to_string()],
+        None => vec!["connecting...".to_string()],
     };
-    let fw = text_width(&foot, u) + (10.0 * uf) as i32;
-    let fx = (w as i32 - fw) / 2;
+    let ways: Vec<&str> = foot.iter().map(String::as_str).collect();
+    let (foot, size) = fitted(&ways, room - dot, u);
+    let fx = (w as i32 - text_width(foot, size) - dot) / 2;
     c.circle(
         fx as f32 + 2.5 * uf,
         fy as f32 + 3.5 * uf,
         2.5 * uf,
         if stats.is_some() { GO } else { DIM },
     );
-    c.text(fx + (10.0 * uf) as i32, fy, &foot, u, DIM);
+    c.text(fx + dot, fy, foot, size, DIM);
+    let (made, size) = fitted(&shelf::MADE, room, u);
     c.text_centred(
         w as i32 / 2,
         fy - (12.0 * uf) as i32,
-        "all rust - no javascript written",
-        u,
+        made,
+        size,
         Rgba(244, 241, 255, 70),
     );
     h.screen.present();
+}
+
+/// Open the game at `path` over the page, and rest.
+fn open(path: &str) {
+    kit::shell::open(path);
+    with(rest);
 }
 
 #[wasm_bindgen(start)]
@@ -411,33 +391,25 @@ pub fn start() -> Result<(), JsValue> {
     let canvas = kit::document()
         .get_element_by_id("screen")
         .ok_or("no #screen")?;
-    // A card not yet on the public shelf shows with ?all=1, in place of
-    // the "next game" it is.
-    let all = kit::window()
-        .location()
-        .search()
-        .is_ok_and(|q| q.trim_start_matches('?').split('&').any(|kv| kv == "all=1"));
-    let shown: Vec<usize> = (0..CARDS.len())
-        .filter(|&i| !CARDS[i].hidden || all)
-        .filter(|&i| !(all && CARDS[i].title == "NEXT GAME"))
-        .collect();
+    let s = shelf(
+        screen.px.w as f32,
+        screen.px.h as f32,
+        screen.ui(),
+        CARDS.len(),
+    );
     HUB.with(|h| {
         *h.borrow_mut() = Some(Hub {
             screen,
-            socket: None,
-            counted: false,
-            retry_at: 0.0,
-            retries: 0,
-            up: false,
+            link: kit::Link::open("hub", Vec::new(), false),
             stats: None,
             pointer: None,
+            shelf: s,
             hits: Vec::new(),
+            focus: None,
             watch: watch::Watch::new(),
-            luci: all.then(luci::LuciWatch::new),
             wand: wand::WandWatch::new(),
-            shown,
+            backdrop: backdrop::Backdrop::default(),
             scroll: 0.0,
-            max_scroll: 0.0,
             press: None,
         })
     });
@@ -458,14 +430,33 @@ pub fn start() -> Result<(), JsValue> {
             with(|h| draw(h, now));
         }
     });
-    kit::on(&kit::window(), "resize", |_| {
+    kit::on_resize(|| {
         with(|h| h.screen.fit());
+    });
+    kit::on(&kit::window(), "keydown", |e| {
+        let Ok(e) = e.dyn_into::<KeyboardEvent>() else {
+            return;
+        };
+        if kit::shell::playing() || e.ctrl_key() || e.meta_key() || e.alt_key() {
+            return;
+        }
+        let Some((ours, to)) = with(|h| key(h, &e.key(), e.shift_key())) else {
+            return;
+        };
+        if ours {
+            e.prevent_default();
+        }
+        if let Some(path) = to {
+            open(path);
+        }
     });
     kit::on(&canvas, "pointerdown", |e| {
         if let Ok(e) = e.dyn_into::<PointerEvent>() {
             with(|h| {
                 let (_, y) = h.screen.to_px(e.client_x() as f64, e.client_y() as f64);
                 h.press = Some((e.pointer_id(), y, h.scroll, false));
+                // A hand on the page: the keys' pick goes.
+                h.focus = None;
             });
         }
     });
@@ -479,7 +470,8 @@ pub fn start() -> Result<(), JsValue> {
                     if id == e.pointer_id() {
                         let moved = moved || (y - from).abs() > 6.0;
                         if moved {
-                            h.scroll = (at - (y - from)).clamp(0.0, h.max_scroll);
+                            let most = h.shelf.max_scroll(h.screen.px.h as f32);
+                            h.scroll = (at - (y - from)).clamp(0.0, most);
                         }
                         h.press = Some((id, from, at, moved));
                     }
@@ -490,8 +482,8 @@ pub fn start() -> Result<(), JsValue> {
     kit::on(&canvas, "wheel", |e| {
         if let Ok(e) = e.dyn_into::<WheelEvent>() {
             with(|h| {
-                h.scroll =
-                    (h.scroll + (e.delta_y() / h.screen.scale) as f32).clamp(0.0, h.max_scroll);
+                let most = h.shelf.max_scroll(h.screen.px.h as f32);
+                h.scroll = (h.scroll + (e.delta_y() / h.screen.scale) as f32).clamp(0.0, most);
             });
         }
     });
@@ -503,7 +495,7 @@ pub fn start() -> Result<(), JsValue> {
             let to = with(|h| {
                 let (x, y) = h.screen.to_px(e.client_x() as f64, e.client_y() as f64);
                 let dragged = h.press.take().is_some_and(|p| p.3);
-                if dragged || y >= h.screen.px.h as f32 - 34.0 * h.screen.ui() as f32 {
+                if dragged || y >= h.screen.px.h as f32 - h.shelf.foot_h {
                     return None;
                 }
                 h.hits
@@ -513,10 +505,62 @@ pub fn start() -> Result<(), JsValue> {
             })
             .flatten();
             if let Some(path) = to {
-                kit::shell::open(path);
-                with(rest);
+                open(path);
             }
         }
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_keys_go_round_the_games_only() {
+        let wyrm = Some(0);
+        let wand = Some(1);
+        assert_eq!(along(None, 1), wyrm);
+        assert_eq!(along(None, -1), wand);
+        assert_eq!(along(wyrm, 1), wand);
+        // Round the end, past the card that is not a game yet.
+        assert_eq!(along(wand, 1), wyrm);
+        // A row down on a shelf one card wide: the next game.
+        assert_eq!(row(wyrm, true, 1), wand);
+        // Down from the last row: along, round to the first.
+        assert_eq!(row(wand, true, 3), wyrm);
+        assert!(CARDS[along(wand, 1).unwrap()].path.starts_with('/'));
+    }
+
+    #[test]
+    fn every_line_fits_a_narrow_phone_whole() {
+        // 360 CSS pixels at DPR 3, and the 412 of most Androids at 2.625
+        // and 2.75, which the snap makes 361 and 378 buffer pixels.
+        for w in [360.0, 361.0, 378.0] {
+            let u = 2;
+            let s = shelf(w, 800.0, u, CARDS.len());
+            let room = shelf::across(w, u);
+            assert_eq!(fitted(&[shelf::TAGLINE], room, u).1, u, "{w}");
+            let (made, k) = fitted(&shelf::MADE, room, u);
+            assert!(k == u && text_width(made, k) <= room, "{w}: {made}");
+            // Busy days, too: the dot and both numbers.
+            let foot = "123 online  123,456 visits";
+            assert!(text_width(foot, u) + 10 * u <= room, "{w}");
+            let (_, words) = s.words(u);
+            for card in CARDS {
+                assert_eq!(fitted(&[card.title], words, 2 * u).1, 2 * u, "{w}");
+                for line in card.blurb {
+                    assert_eq!(fitted(&[line], words, u).1, u, "{w}: {line}");
+                }
+            }
+        }
+        // Where the whole line fits it is said whole.
+        assert_eq!(
+            fitted(&shelf::MADE, shelf::across(412.0, 2), 2).0,
+            shelf::MADE[0]
+        );
+        // Too narrow even for the short one: smaller, never cut.
+        let (made, k) = fitted(&shelf::MADE, 200, 2);
+        assert!(k == 1 && text_width(made, k) <= 200);
+    }
 }

@@ -289,7 +289,7 @@ pub fn start() {
                 }
             })
         });
-        kit::on(&kit::window(), "resize", |_| {
+        kit::on_resize(|| {
             PAGE.with(|p| {
                 if let Some(p) = p.borrow_mut().as_mut() {
                     p.back.fit();

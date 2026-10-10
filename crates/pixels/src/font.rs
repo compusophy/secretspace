@@ -1,5 +1,8 @@
 //! A 5x7 pixel font for printable ASCII, drawn by hand. Each glyph is
-//! seven rows; bit 4 is the leftmost column. Anything else draws as `?`.
+//! seven rows; bit 4 is the leftmost column. A Latin letter with an accent
+//! (a name like José, Zoë, Łukasz) draws as its letter, a small one with
+//! its accent over it where the font has room (above the x-height); a few
+//! (ß, æ, ø) have glyphs of their own. Anything else draws as `?`.
 
 /// Glyph cells are this wide and tall (one column and one row of air).
 pub const CELL_W: i32 = 6;
@@ -77,7 +80,7 @@ pub const GLYPHS: [[u8; 7]; 95] = [
     [0x01, 0x01, 0x0d, 0x13, 0x11, 0x11, 0x0f], // 'd'
     [0x00, 0x00, 0x0e, 0x11, 0x1f, 0x10, 0x0e], // 'e'
     [0x06, 0x09, 0x08, 0x1c, 0x08, 0x08, 0x08], // 'f'
-    [0x00, 0x0f, 0x11, 0x11, 0x0f, 0x01, 0x0e], // 'g'
+    [0x00, 0x00, 0x0f, 0x11, 0x0f, 0x01, 0x0e], // 'g'
     [0x10, 0x10, 0x16, 0x19, 0x11, 0x11, 0x11], // 'h'
     [0x04, 0x00, 0x0c, 0x04, 0x04, 0x04, 0x0e], // 'i'
     [0x02, 0x00, 0x06, 0x02, 0x02, 0x12, 0x0c], // 'j'
@@ -103,12 +106,112 @@ pub const GLYPHS: [[u8; 7]; 95] = [
     [0x00, 0x00, 0x08, 0x15, 0x02, 0x00, 0x00], // '~'
 ];
 
-/// The rows of a character's glyph.
-pub fn glyph(c: char) -> &'static [u8; 7] {
+/// U+00C0 to U+00FF: each one's letter, and its accent (see `mark`).
+const LATIN_1: (&str, &str) = (
+    "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo-ouuuuypy",
+    "gact:r--gac:gac:-tgact:--gac:a--gact:r--gac:gac:-tgact:--gac:a-:",
+);
+
+/// U+0100 to U+017F (Latin Extended-A), the same way.
+const LATIN_A: (&str, &str) = (
+    "AaAaAaCcCcCcCcDdDdEeEeEeEeEeGgGgGgGgHhHhIiIiIiIiIiIiJjKkkLlLlLlLlLlNnNnNnnNnOoOoOoOoRrRrRrSsSsSsSsTtTtTtUuUuUuUuUuUuWwYyYZzZzZzs",
+    "mmbbooaaccddvvvv--mmbbddoovvccbbdd-acc--ttmmbbood --cc---aa--------aa--vv---mmbbaa--aa--vvaacc--vv------ttmmbbrraa--cccc:aaddvv-",
+);
+
+/// An accent's two rows, over a small letter: grave, acute, circumflex,
+/// tilde, diaeresis, ring, macron, breve, caron, dot; a space takes away
+/// the letter's own (the dotless i).
+fn mark(m: char) -> Option<[u8; 2]> {
+    Some(match m {
+        'g' => [0x08, 0x04],
+        'a' => [0x02, 0x04],
+        'c' => [0x04, 0x0a],
+        't' => [0x0d, 0x12],
+        ':' => [0x0a, 0x00],
+        'r' => [0x0e, 0x0a],
+        'm' => [0x0e, 0x00],
+        'b' => [0x11, 0x0e],
+        'v' => [0x0a, 0x04],
+        'd' => [0x04, 0x00],
+        ' ' => [0x00, 0x00],
+        _ => return None,
+    })
+}
+
+/// A letter and its accent, for an accented Latin letter.
+fn fold(c: char) -> Option<(char, char)> {
     let i = c as u32;
-    if (32..127).contains(&i) {
-        &GLYPHS[(i - 32) as usize]
-    } else {
-        &GLYPHS[('?' as u32 - 32) as usize]
+    let (table, from) = match i {
+        0xc0..=0xff => (LATIN_1, 0xc0),
+        0x100..=0x17f => (LATIN_A, 0x100),
+        _ => return None,
+    };
+    let k = (i - from) as usize;
+    Some((table.0.chars().nth(k)?, table.1.chars().nth(k)?))
+}
+
+/// The rows of a character's glyph.
+pub fn glyph(c: char) -> [u8; 7] {
+    let ascii = |c: char| GLYPHS[(c as u32 - 32) as usize];
+    match c {
+        ' '..='~' => return ascii(c),
+        'ß' => return [0x0c, 0x12, 0x12, 0x14, 0x12, 0x11, 0x16],
+        'æ' => return [0x00, 0x00, 0x1a, 0x05, 0x1f, 0x14, 0x0f],
+        'ø' => return [0x00, 0x00, 0x0e, 0x13, 0x15, 0x19, 0x0e],
+        _ => {}
+    }
+    let Some((base, accent)) = fold(c) else {
+        return ascii('?');
+    };
+    let mut g = ascii(base);
+    // Over a small letter with nothing above its body (or the dot of an
+    // i or a j, which the accent takes the place of).
+    let room = base.is_ascii_lowercase() && (g[0] == 0 && g[1] == 0 || matches!(base, 'i' | 'j'));
+    if let Some(m) = mark(accent).filter(|_| room) {
+        g[0] = m[0];
+        g[1] = m[1];
+    }
+    g
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_letters_sit_on_one_line() {
+        // Every body starts at row 2, descenders too ('g' was a row high).
+        for c in "acegmnopqrsuvwxyz".chars() {
+            let g = glyph(c);
+            assert!(g[0] == 0 && g[1] == 0 && g[2] != 0, "{c}");
+        }
+    }
+
+    #[test]
+    fn accented_letters_draw_as_their_letters() {
+        assert_eq!(LATIN_1.0.chars().count(), 64);
+        assert_eq!(LATIN_1.1.chars().count(), 64);
+        assert_eq!(LATIN_A.0.chars().count(), 128);
+        assert_eq!(LATIN_A.1.chars().count(), 128);
+        let q = glyph('?');
+        for i in (0xc0..=0x17f).filter(|&i| i != 0xd7 && i != 0xf7) {
+            let c = char::from_u32(i).unwrap();
+            assert_ne!(glyph(c), q, "{c}");
+        }
+        // Capitals as they are; small letters keep their body under the
+        // accent.
+        assert_eq!(glyph('É'), glyph('E'));
+        assert_eq!(glyph('Ł'), glyph('L'));
+        assert_eq!(glyph('é')[2..], glyph('e')[2..]);
+        assert_ne!(glyph('é'), glyph('e'));
+        assert_ne!(glyph('é'), glyph('è'));
+        assert_eq!(glyph('ñ')[..2], [0x0d, 0x12]);
+        assert_eq!(glyph('í')[2..], glyph('i')[2..]);
+        assert_eq!(glyph('ı')[..2], [0, 0]);
+        // A letter with its own ascender keeps it.
+        assert_eq!(glyph('ľ'), glyph('l'));
+        // Other scripts: still a question.
+        assert_eq!(glyph('Ж'), q);
+        assert_eq!(glyph('日'), q);
     }
 }

@@ -109,6 +109,7 @@ impl Gpu {
         (self.scale, self.dpr, self.css, self.size) = (f.scale, f.dpr, f.css, f.size);
         self.canvas.set_width(f.size.0);
         self.canvas.set_height(f.size.1);
+        kit::place(&self.canvas, f.css.0, f.css.1);
         self.hud.resize(f.hud.0, f.hud.1);
         self.config.width = f.size.0;
         self.config.height = f.size.1;

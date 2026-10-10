@@ -1,4 +1,5 @@
 {
+  "trailingSlash": true,
   "redirects": [
     { "source": "/arena", "destination": "/wyrm/", "permanent": false },
     { "source": "/arena/(.*)", "destination": "/wyrm/", "permanent": false }

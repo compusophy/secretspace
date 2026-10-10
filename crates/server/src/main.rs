@@ -388,7 +388,7 @@ fn serve(
         return respond(&mut out, "200 OK", "application/json", body.as_bytes());
     }
     match root {
-        Some(root) => http::file(&mut out, root, path),
+        Some(root) => http::file(&mut out, root, path, query),
         None => respond(&mut out, "200 OK", "text/plain", b"secretspace\n"),
     }
 }
