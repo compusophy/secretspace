@@ -15,9 +15,6 @@ use super::input::clock;
 use super::Page;
 use crate::SHOT_AFTER;
 
-const INK: Rgba = Rgba::rgb(244, 241, 255);
-const GREEN: Rgba = Rgba::rgb(126, 232, 166);
-
 /// Where you look from: the chair, leaned in as far as the wheel says,
 /// the head turned a little toward the arrow, breathing.
 fn camera(p: &mut Page, t: f32, dt: f32) -> Camera {
@@ -117,46 +114,44 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
     }
 }
 
-/// What is said over the picture: how to sit down, a hint once seated,
-/// the shared menu.
+/// What is said over the picture: a hint at first, a word if the browser
+/// left the page unisolated (the computer's programs cannot run), the
+/// shared menu.
 fn hud(p: &mut Page, now: f64) {
     let ui = p.out.ui();
+    let unisolated = !p.isolated && p.on_os();
+    let (open, touch, hint_until) = (p.meta.is_open(), p.touch, p.hint_until);
     let hud = p.out.hud();
     hud.wipe();
-    let (w, h) = (hud.w, hud.h);
-    if !p.seated && !p.meta.is_open() {
-        // A slim bar along the bottom, clear of the hands.
-        let go = if p.touch {
-            "tap to sit down"
-        } else {
-            "click to sit down"
-        };
-        let line = format!("battlestation - {go} - esc menu");
-        let k = pixels::fit_scale(&line, w - 24 * ui, 2 * ui);
-        let bar = 8 * k + 10 * ui;
-        hud.fill_rect(0, h - bar, w, bar, Rgba(6, 7, 14, 175));
-        let tw = pixels::text_width(&line, k);
-        let x = (w - tw) / 2;
-        let y = h - bar + 5 * ui;
-        let lead = pixels::text_width("battlestation - ", k);
-        hud.text(x, y, "battlestation - ", k, INK);
-        if (now / 600.0) as i64 % 2 == 0 {
-            hud.text(x + lead, y, go, k, GREEN);
+    let w = hud.w;
+    if !open {
+        let mut said = Vec::new();
+        if unisolated {
+            let text = "this browser did not isolate the page, so the computer's programs cannot run: reload it";
+            said.push((
+                pixels::wrap(text, w - 24 * ui, ui),
+                Rgba(255, 196, 120, 230),
+            ));
         }
-        let rest = pixels::text_width(go, k);
-        hud.text(x + lead + rest, y, " - esc menu", k, INK.fade(0.6));
-    } else if p.seated && now < p.hint_until && !p.meta.is_open() {
-        let fade = ((p.hint_until - now) / 1500.0).clamp(0.0, 1.0);
-        let text = if p.touch {
-            "drag to move the mouse - tap to type"
-        } else {
-            "type anything - move the mouse - shift+wheel leans in - esc for the menu"
-        };
-        let lines = pixels::wrap(text, w - 24 * ui, ui);
-        let mut y = h - 14 * ui - lines.len() as i32 * 10 * ui;
-        for l in &lines {
-            hud.text_centred(w / 2, y, l, ui, Rgba(244, 241, 255, (fade * 170.0) as u8));
-            y += 10 * ui;
+        if now < hint_until {
+            let fade = ((hint_until - now) / 1500.0).clamp(0.0, 1.0);
+            let text = if touch {
+                "drag to move the mouse - tap to click and type"
+            } else {
+                "your mouse and keys are the desk's - shift+wheel leans in - esc for the menu"
+            };
+            said.push((
+                pixels::wrap(text, w - 24 * ui, ui),
+                Rgba(244, 241, 255, (fade * 170.0) as u8),
+            ));
+        }
+        let mut y = 8 * ui;
+        for (lines, ink) in said {
+            for l in &lines {
+                hud.text_centred(w / 2, y, l, ui, ink);
+                y += 10 * ui;
+            }
+            y += 4 * ui;
         }
     }
     if p.meta.is_open() {

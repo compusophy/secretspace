@@ -4,7 +4,6 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use battlestation::demo::Demo;
 use battlestation::hands::Hands;
 use battlestation::keys;
 use battlestation::term::Term;
@@ -111,9 +110,7 @@ struct Page {
     hands: Hands,
     term: Term,
     screen: Screen,
-    demo: Option<Demo>,
-    seated: bool,
-    /// When you sat down (ms).
+    /// When the page opened (ms): the computer's uptime.
     since: f64,
     pointer: kit::input::Hands,
     heard: Rc<RefCell<Heard>>,
@@ -131,26 +128,26 @@ struct Page {
     field: Option<kit::TextField>,
     /// The last finger on the glass (CSS pixels), and when it went down.
     finger: Option<(f64, f64, f64, f64)>,
-    /// Where the mouse was last (CSS pixels).
-    last_mouse: Option<(f64, f64)>,
-    /// Mouse moves to pass over (see `input::pointer`).
-    skip: u8,
     /// When the menu last opened (ms).
     menu_at: f64,
     /// The canvas's CSS cursor as last set.
     cursor: &'static str,
-    was_locked: bool,
+    /// The sound has been woken (a person has acted).
+    woke: bool,
     touch: bool,
     hooks: Hooks,
     frames: u32,
     last: f64,
     fps: f64,
     hint_until: f64,
+    /// Whether the browser isolated the page (else the computer's
+    /// programs cannot run).
+    isolated: bool,
 }
 
 thread_local! {
     static PAGE: RefCell<Option<Page>> = const { RefCell::new(None) };
-    /// Whether the keys are the desk's (seated, no menu): then the
+    /// Whether the keys are the desk's (no menu): then the
     /// browser's own uses of them are held back.
     static CAPTURE: Cell<bool> = const { Cell::new(false) };
 }
@@ -180,8 +177,6 @@ impl Page {
             hands: Hands::new(),
             term: Term::new(),
             screen: Screen::new(),
-            demo: (hooks.demo && !hooks.sit).then(|| Demo::new(now as u32 ^ 0x5eed)),
-            seated: hooks.sit,
             since: now,
             pointer,
             heard,
@@ -194,17 +189,16 @@ impl Page {
             ups: Vec::new(),
             field: touch.then(|| kit::TextField::new(64, "type")),
             finger: None,
-            last_mouse: None,
-            skip: 0,
             menu_at: 0.0,
             cursor: "",
-            was_locked: false,
+            woke: false,
             touch,
             hooks,
             frames: 0,
             last: now,
             fps: 60.0,
-            hint_until: 0.0,
+            hint_until: now + 9000.0,
+            isolated: isolated(),
             out,
         }
     }
@@ -215,11 +209,11 @@ impl Page {
             self.fps += (1000.0 / (now - self.last).max(1.0) - self.fps) * 0.05;
         }
         self.last = now;
-        input::input(self, now, dt);
-        let playing = self.seated && !self.meta.is_open();
+        input::input(self, now);
+        let playing = !self.meta.is_open();
         CAPTURE.with(|c| c.set(playing));
-        // Your own arrow is hidden only while you sit at the desk (its
-        // arrow is on the monitor); over a menu, or standing, it shows.
+        // Your own arrow is hidden at the desk (its arrow is on the
+        // monitor, where yours points); over the menu it shows.
         let cursor = if playing { "none" } else { "default" };
         if cursor != self.cursor {
             let _ = self.out.canvas().style().set_property("cursor", cursor);
@@ -230,58 +224,23 @@ impl Page {
 }
 
 impl Page {
-    /// Sit down: the demo stops (a clean terminal), the mouse is taken
-    /// (`grab`, from a press) and the sound wakes.
-    fn sit(&mut self, grab: bool) {
+    /// A person acted: the sound may start (a browser lets it only now).
+    fn wake(&mut self) {
         self.sounds.audio.wake();
-        self.sounds.hum();
-        if !self.seated {
-            self.seated = true;
-            self.since = kit::now();
-            self.hint_until = kit::now() + 9000.0;
-            if self.demo.take().is_some() {
-                for k in keys::layout() {
-                    self.hands.key(k.code, false);
-                }
-                self.hands.button(0, false);
-                self.hands.button(2, false);
-                self.ups.clear();
-                self.term = Term::new();
-            }
-        }
-        if grab && !self.touch {
-            self.grab();
+        if !self.woke {
+            self.woke = true;
+            self.sounds.hum();
         }
     }
 
-    /// Take the mouse (and, unless `?windowed`, the screen and the keys);
-    /// with `?lock=0`, nothing (a test's mouse then moves the arrow).
-    fn grab(&self) {
-        if self.hooks.lock {
-            kit::input::play(self.out.canvas(), !self.hooks.windowed);
-        }
-    }
-
-    /// Get up: give the mouse, the keys and the screen back.
-    fn stand(&mut self) {
-        self.seated = false;
-        kit::input::release();
-        if let Some(f) = &self.field {
-            f.blur();
-            f.place(None);
-        }
-    }
-
-    /// Whether the monitor shows compusophyOS: once mounted and you have
-    /// sat down (before, the desk's own terminal types by itself).
+    /// Whether the monitor shows compusophyOS (once it has mounted).
     fn on_os(&self) -> bool {
-        self.os.is_some() && self.demo.is_none()
+        self.os.is_some()
     }
 
-    /// Whether you sit at the desk while compusophyOS is still starting
-    /// (the monitor says so, rather than show its own terminal).
+    /// Whether compusophyOS is still starting (the monitor says so).
     fn booting(&self) -> bool {
-        self.hooks.os && self.os.is_none() && self.os_said.is_empty() && self.demo.is_none()
+        self.hooks.os && self.os.is_none() && self.os_said.is_empty()
     }
 
     fn items(&self) -> Vec<String> {
@@ -292,15 +251,12 @@ impl Page {
             } else {
                 "sound: on".into()
             },
-            "get up from the desk".into(),
         ]
     }
 
     fn open_menu(&mut self) {
-        kit::input::unlock();
         self.meta.context = format!(
-            "seated: {}\nfps: {:.0}\ngpu: {}\nran: {}\nos: {}",
-            self.seated,
+            "fps: {:.0}\ngpu: {}\nran: {}\nos: {}",
             self.fps,
             self.out.caps().adapter,
             self.term.ran(),
@@ -316,22 +272,63 @@ impl Page {
 
     fn resume(&mut self) {
         self.meta.hide();
-        if self.seated && !self.touch {
-            self.grab();
-        }
     }
 
     fn picked(&mut self, pick: kit::meta::Pick) {
         match pick {
             kit::meta::Pick::Resume => self.resume(),
             kit::meta::Pick::Game(0) => self.desk.next_tone(&mut self.r),
-            kit::meta::Pick::Game(1) => self.sounds.audio.muted = !self.sounds.audio.muted,
-            kit::meta::Pick::Game(_) => {
-                self.meta.hide();
-                self.stand();
-            }
+            kit::meta::Pick::Game(_) => self.sounds.audio.muted = !self.sounds.audio.muted,
             kit::meta::Pick::Exit => kit::shell::exit(),
         }
+    }
+}
+
+/// The query mark of a page loaded again to be isolated.
+const AGAIN: &str = "again";
+
+/// Whether the browser isolated this page (COOP+COEP): compusophyOS runs
+/// its programs only on an isolated page.
+fn isolated() -> bool {
+    js_sys::Reflect::get(&kit::window(), &"crossOriginIsolated".into())
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// An unisolated page: load it again, once, on its own (a front page
+/// loaded before it was isolated cannot isolate its frames; a stale copy
+/// may lack the headers). Whether it is going.
+fn again(query: &str) -> bool {
+    if crate::param(query, AGAIN).is_some() {
+        return false;
+    }
+    let w = kit::window();
+    let path = w.location().pathname().unwrap_or_default();
+    let sep = if query.is_empty() { "?" } else { "&" };
+    let to = format!("{path}{query}{sep}{AGAIN}=1");
+    let top = w.top().ok().flatten().unwrap_or(w);
+    top.location().replace(&to).is_ok()
+}
+
+/// An isolated page loaded again: its address without the mark.
+fn unmark(query: &str) {
+    if crate::param(query, AGAIN).is_none() {
+        return;
+    }
+    let w = kit::window();
+    let rest: Vec<&str> = query
+        .trim_start_matches('?')
+        .split('&')
+        .filter(|kv| kv.split('=').next() != Some(AGAIN))
+        .collect();
+    let path = w.location().pathname().unwrap_or_default();
+    let to = match rest.join("&") {
+        q if q.is_empty() => path,
+        q => format!("{path}?{q}"),
+    };
+    if let Ok(h) = w.history() {
+        let _ = h.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&to));
     }
 }
 
@@ -348,6 +345,13 @@ pub fn start() {
     let query = kit::window().location().search().unwrap_or_default();
     let hooks = Hooks::read(&query);
     kit::report::on_panic();
+    if hooks.os {
+        if isolated() {
+            unmark(&query);
+        } else if again(&query) {
+            return;
+        }
+    }
     wasm_bindgen_futures::spawn_local(async move {
         if !gpu::offered() {
             // (`?capture=1` needs it too.)

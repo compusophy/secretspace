@@ -396,10 +396,12 @@ fn stats_json(shared: &Shared) -> String {
     )
 }
 
+/// Every answer isolates its page (COOP+COEP, as `web/vercel.json`): the
+/// desk's computer runs its programs only on an isolated page.
 fn respond(out: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> std::io::Result<()> {
     write!(
         out,
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nAccess-Control-Allow-Origin: *\r\nCross-Origin-Opener-Policy: same-origin\r\nCross-Origin-Embedder-Policy: require-corp\r\nConnection: close\r\n\r\n",
         body.len()
     )?;
     out.write_all(body)

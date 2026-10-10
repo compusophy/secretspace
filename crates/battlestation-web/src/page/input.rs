@@ -1,12 +1,12 @@
-//! Your hands: keys to the desk's keyboard and the terminal, the mouse
-//! to the desk's mouse and the screen's arrow, the wheel to lean in; a
-//! phone's taps, drags and keyboard; the demo's hands before you sit;
-//! the shared menu (Esc, or the mouse let go).
+//! Your hands: keys to the desk's keyboard and the computer, your mouse
+//! to the desk's mouse and the monitor's arrow (where you point on the
+//! page is where it points on the monitor: no click to start, nothing
+//! to let go of), the wheel to scroll or lean in; a phone's taps, drags
+//! and keyboard; the shared menu (Esc).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use battlestation::demo::Ev;
 use battlestation::hands::mouse_for;
 use battlestation::keys;
 use battlestation::laws::{CURSOR_SPEED, LEAN_NOTCH, SCREEN_PX};
@@ -18,12 +18,13 @@ use web_sys::{HtmlCanvasElement, KeyboardEvent, WheelEvent};
 use super::os;
 use super::{Heard, KeyEv, Page, CAPTURE};
 
-/// The most one mouse move may move the arrow (pixels).
-const MOUSE_MOST: f64 = 250.0;
+/// How much of the page, from each edge, lies past the monitor's edge
+/// (so its edge is easy to reach): across, and up and down.
+const MARGIN: (f64, f64) = (0.04, 0.06);
 /// How long a menu just opened ignores Esc (ms).
 const MENU_SETTLE: f64 = 400.0;
 
-/// Whether a key's own use in the browser is held back while seated: all
+/// Whether a key's own use in the browser is held back at the desk: all
 /// but the function keys and the browser's own shortcuts (reload, a tab,
 /// a window).
 fn hold_back(k: &KeyboardEvent) -> bool {
@@ -98,23 +99,8 @@ pub(super) fn clock() -> String {
     format!("{:02}:{:02}", d.get_hours(), d.get_minutes())
 }
 
-pub(super) fn input(p: &mut Page, now: f64, dt: f32) {
+pub(super) fn input(p: &mut Page, now: f64) {
     let heard = std::mem::take(&mut *p.heard.borrow_mut());
-    // The mouse let go while seated (the browser's own Esc, a switch
-    // away): the menu, as if Esc had come to the page (once: an Esc that
-    // came too must not close it again).
-    let locked = kit::input::locked();
-    if locked != p.was_locked {
-        p.skip = 2;
-    }
-    let esc = heard
-        .keys
-        .iter()
-        .any(|k| k.down && !k.repeat && k.code == "Escape");
-    if p.was_locked && !locked && p.seated && !p.touch && !p.meta.is_open() && !esc {
-        p.open_menu();
-    }
-    p.was_locked = locked;
     if heard.blur {
         for k in keys::layout() {
             p.hands.key(k.code, false);
@@ -128,7 +114,7 @@ pub(super) fn input(p: &mut Page, now: f64, dt: f32) {
     }
     // The wheel scrolls the computer where it takes it; elsewhere (or
     // with Shift) it leans you in and out.
-    if heard.wheel != 0.0 && p.seated && !p.meta.is_open() {
+    if heard.wheel != 0.0 && !p.meta.is_open() {
         let taken = match &p.os {
             Some(o) if p.on_os() && !heard.wheel_shift => o.wheel(p.screen.cursor, heard.wheel),
             _ => false,
@@ -155,25 +141,14 @@ pub(super) fn input(p: &mut Page, now: f64, dt: f32) {
             press(p, code, "", false, 0, false, now);
         }
     }
-    if let Some(mut demo) = p.demo.take() {
-        for ev in demo.step(dt) {
-            match ev {
-                Ev::Key { code, key, down } => press(p, code, &key, down, 0, false, now),
-                Ev::Move { dx, dy } => move_mouse(p, dx, dy),
-                Ev::Button { b, down } => p.hands.button(b, down),
-            }
-        }
-        p.demo = Some(demo);
-    }
 }
 
 fn key(p: &mut Page, e: KeyEv, now: f64) {
     if e.down {
-        p.sounds.audio.wake();
+        p.wake();
     }
-    // Esc: the menu, always (seated or not); Esc again, back. A menu that
-    // has only just opened (the mouse let go a moment before the key
-    // came) stays open.
+    // Esc: the menu; Esc again, back (a menu only just opened stays: a
+    // held Esc repeats).
     if e.code == "Escape" {
         if e.down && !e.repeat {
             if !p.meta.is_open() {
@@ -194,13 +169,6 @@ fn key(p: &mut Page, e: KeyEv, now: f64) {
     }
     if p.meta.is_open() {
         return;
-    }
-    if !p.seated {
-        if !e.down {
-            return;
-        }
-        // A key sits you down (the mouse waits for a click).
-        p.sit(false);
     }
     let Some(code) = keys::find(&e.code).map(|k| k.code) else {
         // Not on this keyboard: the computer may still want it.
@@ -254,7 +222,7 @@ fn run(p: &mut Page, key: &str, ctrl: bool, gpu: &str, now: f64) {
         screen: SCREEN_PX,
     };
     match p.term.key(key, ctrl, &facts) {
-        Some(Act::StandUp) => p.stand(),
+        Some(Act::StandUp) => p.open_menu(),
         Some(Act::Open(url)) => {
             let _ = kit::window().open_with_url_and_target(url, "_blank");
         }
@@ -266,7 +234,29 @@ fn run(p: &mut Page, key: &str, ctrl: bool, gpu: &str, now: f64) {
 /// desk under it, and the right hand to it.
 fn move_mouse(p: &mut Page, dx: f32, dy: f32) {
     p.screen.nudge(dx * CURSOR_SPEED, dy * CURSOR_SPEED);
-    p.hands.stir(dx.hypot(dy));
+    moved(p, dx.hypot(dy));
+}
+
+/// Your mouse is at (x, y) on the page (CSS pixels): the arrow is there on
+/// the monitor.
+fn point_mouse(p: &mut Page, x: f64, y: f64) {
+    let (w, h) = p.out.css();
+    let at = |v: f64, size: f64, m: f64, px: i32| {
+        (((v / size.max(1.0) - m) / (1.0 - 2.0 * m)).clamp(0.0, 1.0) * (px as f64 - 1.0)) as f32
+    };
+    let to = (
+        at(x, w, MARGIN.0, SCREEN_PX.0),
+        at(y, h, MARGIN.1, SCREEN_PX.1),
+    );
+    let (dx, dy) = (to.0 - p.screen.cursor.0, to.1 - p.screen.cursor.1);
+    p.screen.cursor = to;
+    moved(p, dx.hypot(dy) / CURSOR_SPEED);
+}
+
+/// The arrow moved, `px` of your mouse: the desk's mouse under it, the
+/// right hand to it, the computer told.
+fn moved(p: &mut Page, px: f32) {
+    p.hands.stir(px);
     let (x, z) = mouse_for(p.screen.cursor, SCREEN_PX);
     p.hands.put_mouse(x, z);
     if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
@@ -276,36 +266,15 @@ fn move_mouse(p: &mut Page, dx: f32, dy: f32) {
 
 fn pointer(p: &mut Page, h: Hand, now: f64) {
     match h {
-        Hand::Mouse { x, y, dx, dy } => {
-            // Some browsers (and test drivers) give no movement unless the
-            // mouse is held: then it is where it went from where it was.
-            let (dx, dy) = match p.last_mouse {
-                Some((lx, ly)) if dx == 0.0 && dy == 0.0 && !kit::input::locked() => {
-                    (x - lx, y - ly)
-                }
-                _ => (dx, dy),
-            };
-            let first = p.last_mouse.is_none();
-            p.last_mouse = Some((x, y));
-            // The first move, and those just after the mouse is taken or
-            // let go, can carry the whole way the cursor jumped.
-            if first || p.skip > 0 {
-                p.skip = p.skip.saturating_sub(1);
-                return;
-            }
-            if p.seated && !p.meta.is_open() && !p.touch {
-                let most = MOUSE_MOST;
-                move_mouse(
-                    p,
-                    dx.clamp(-most, most) as f32,
-                    dy.clamp(-most, most) as f32,
-                );
+        Hand::Mouse { x, y, .. } => {
+            if !p.meta.is_open() && !p.touch {
+                point_mouse(p, x, y);
             }
         }
         Hand::Button {
             button, down, x, y, ..
         } => {
-            p.sounds.audio.wake();
+            p.wake();
             if p.meta.is_open() {
                 if down {
                     let (px, py) = p.out.to_px(x, y);
@@ -315,14 +284,8 @@ fn pointer(p: &mut Page, h: Hand, now: f64) {
                 }
                 return;
             }
-            if !p.seated {
-                if down {
-                    p.sit(true);
-                }
-                return;
-            }
-            if down && !p.touch && !kit::input::locked() {
-                p.grab();
+            if !p.touch {
+                point_mouse(p, x, y);
             }
             if button == 0 || button == 2 {
                 p.hands.button(button, down);
@@ -345,7 +308,7 @@ fn pointer(p: &mut Page, h: Hand, now: f64) {
 /// A phone: a finger dragged moves the mouse; a tap clicks it, and opens
 /// the phone's keyboard to type with.
 fn finger(p: &mut Page, kind: Kind, x: f64, y: f64, t: f64, now: f64) {
-    p.sounds.audio.wake();
+    p.wake();
     match kind {
         Kind::Down => {
             if p.meta.is_open() {
@@ -355,14 +318,11 @@ fn finger(p: &mut Page, kind: Kind, x: f64, y: f64, t: f64, now: f64) {
                 }
                 return;
             }
-            if !p.seated {
-                p.sit(false);
-            }
             p.finger = Some((x, y, x, t));
         }
         Kind::Move => {
             if let Some((lx, ly, x0, t0)) = p.finger {
-                if p.seated && !p.meta.is_open() {
+                if !p.meta.is_open() {
                     move_mouse(p, ((x - lx) * 1.4) as f32, ((y - ly) * 1.4) as f32);
                 }
                 p.finger = Some((x, y, x0, t0));
@@ -370,7 +330,7 @@ fn finger(p: &mut Page, kind: Kind, x: f64, y: f64, t: f64, now: f64) {
         }
         _ => {
             if let Some((_, _, x0, t0)) = p.finger.take() {
-                if t - t0 < 260.0 && (x - x0).abs() < 12.0 && p.seated {
+                if t - t0 < 260.0 && (x - x0).abs() < 12.0 && !p.meta.is_open() {
                     p.hands.button(0, true);
                     if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
                         o.pointer(os::DOWN, p.screen.cursor, 0);
