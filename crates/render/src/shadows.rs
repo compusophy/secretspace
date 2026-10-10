@@ -22,10 +22,10 @@ struct Island {
     runs: Vec<Run>,
     spheres: Vec<(V3, f32)>,
     layer: Option<Layer>,
-    /// The sun its layer holds (None: draw it again).
+    /// The sun its layer holds (None: draw it again), and the one it is
+    /// to be drawn for this frame (the layer holds it once it is).
     drawn: Option<V3>,
-    /// Whether it is to be drawn this frame.
-    due: bool,
+    due: Option<V3>,
 }
 
 /// The sun's shadow map: its layers (each also a view of its own to draw
@@ -160,7 +160,7 @@ impl Shadows {
                 spheres: Vec::new(),
                 layer: None,
                 drawn: None,
-                due: false,
+                due: None,
             },
         }
     }
@@ -204,15 +204,14 @@ impl Shadows {
     /// sun has turned far enough from the one it holds.
     pub fn island(&mut self, queue: &wgpu::Queue, sun: Option<V3>) -> Option<Layer> {
         let island = &mut self.island;
-        island.due = false;
+        island.due = None;
         let sun = geo::norm(sun?);
         let turned = island
             .drawn
             .is_none_or(|was| geo::dot(was, sun) < laws::SHADOW_TURN.cos());
         if turned {
             island.layer = crate::shadow::whole(&island.spheres, sun, self.size);
-            island.drawn = Some(sun);
-            island.due = island.layer.is_some();
+            island.due = island.layer.map(|_| sun);
             if let Some(l) = &island.layer {
                 let last = self.casters.len() - 1;
                 queue.write_buffer(&self.casters[last].0, 0, &bytes(&l.m));
@@ -237,15 +236,18 @@ impl Shadows {
     /// the first `count` cascades: what stands still, then what moves
     /// (`cull`'s lists).
     pub fn record(
-        &self,
+        &mut self,
         encoder: &mut wgpu::CommandEncoder,
         cull: &Cull,
         meshes: &[Option<MeshBuf>],
         count: usize,
         stats: &mut Stats,
     ) {
-        let island = &self.island;
         let last = self.layers.len() - 1;
+        if self.island.due.is_some() {
+            self.island.drawn = self.island.due;
+        }
+        let island = &self.island;
         let lists = (0..count).map(|c| {
             let lists = [
                 (&cull.bufs[c].buf, &cull.runs[c]),
@@ -255,7 +257,7 @@ impl Shadows {
         });
         let whole = island
             .due
-            .then(|| (last, vec![(&island.buf.buf, &island.runs)]));
+            .map(|_| (last, vec![(&island.buf.buf, &island.runs)]));
         for (c, lists) in whole.into_iter().chain(lists) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow"),
