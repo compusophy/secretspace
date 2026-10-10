@@ -1,6 +1,6 @@
 //! Spells: what each does when cast, when its bolt lands, and over time.
-//! Nine, one verb each; damage grows with the caster's level, every
-//! effect with the spell's rank.
+//! Nine, one verb each; damage, shields and healing grow with the
+//! caster's level, every effect with the spell's rank.
 //!
 //! - Fireball: a ball of fire bursting where it lands (the splash finds
 //!   cover).
@@ -203,12 +203,12 @@ pub fn cast(w: &mut World, k: usize, slot: usize, aim: Aim, ev: &mut Vec<Event>)
         }
         spell::WARD => {
             let p = &mut w.players[k];
-            p.shield = p.shield.max(pw);
+            p.shield = p.shield.max(level_scale(level, pw));
             p.shield_until = tick + WARD_TICKS;
         }
         spell::MEND => {
             let p = &mut w.players[k];
-            p.mend = pw;
+            p.mend = level_scale(level, pw);
             p.mend_until = tick + MEND_TICKS;
         }
         spell::GUST => gust(w, k, pw as f32, ev),

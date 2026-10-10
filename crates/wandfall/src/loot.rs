@@ -48,8 +48,8 @@ pub fn slots_of(spell: u8) -> [usize; 2] {
     }
 }
 
-/// XP for `who`: levels gained raise health with them (a practice
-/// dummy never levels).
+/// XP for `who`: a level gained raises its health, and heals it by a
+/// share of the rise (a practice dummy never levels).
 pub fn gain(w: &mut World, who: u16, xp: u32, ev: &mut Vec<Event>) {
     let range = w.practice.is_some();
     let Some(p) = w
@@ -66,7 +66,7 @@ pub fn gain(w: &mut World, who: u16, xp: u32, ev: &mut Vec<Event>) {
     while p.xp >= XP_PER_LEVEL && p.level < MAX_LEVEL {
         p.xp -= XP_PER_LEVEL;
         p.level += 1;
-        p.hp += HEALTH_PER_LEVEL;
+        p.hp += HEALTH_PER_LEVEL * LEVEL_HEAL / 100;
         ev.push(Event::Level {
             who,
             level: p.level,
@@ -356,8 +356,8 @@ mod tests {
         assert!(power(spell::LANCE, MAX_RANK) > power(spell::LANCE, 1));
         assert!(cooldown(spell::LANCE, MAX_RANK) < cooldown(spell::LANCE, 1));
         assert_eq!(power(spell::WARD, 3), 60, "a rank is a quarter more");
-        // Small numbers grow too: a Frost shard a level, not every fourth.
+        // Small numbers grow too: rounded, not cut off.
         let shard = power(spell::FROST, 1);
-        assert!(level_scale(3, shard) > level_scale(1, shard));
+        assert!(level_scale(4, shard) > level_scale(1, shard));
     }
 }

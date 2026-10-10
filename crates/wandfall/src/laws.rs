@@ -180,7 +180,8 @@ pub const INPUT_BANK: u32 = TICK_HZ / 3;
 pub const INPUT_IDLE: u32 = TICK_HZ / 3;
 
 // The storm: a circle closing in phases. Each phase: seconds it waits,
-// seconds it shrinks, the radius it shrinks to, damage a second outside.
+// seconds it shrinks, the radius it shrinks to, and damage a second
+// outside (of every HEALTH of a wizard's whole health: a share of it).
 pub const STORM_START: f32 = 235.0;
 pub const STORM: [(u32, u32, f32, i32); 5] = [
     (40, 25, 110.0, 2),
@@ -197,7 +198,8 @@ pub const STORM_END_DPS: i32 = 30;
 
 // Health and the wand.
 pub const HEALTH: i32 = 100;
-/// Seconds without being hurt before health returns, and how fast.
+/// Seconds without being hurt before health returns, and how fast (of
+/// every HEALTH of a wizard's whole health).
 pub const REGEN_AFTER: u32 = 6;
 pub const REGEN: i32 = 3;
 /// Knocked out by the storm, or gone from the match, within this many
@@ -263,8 +265,9 @@ pub const BOT_DUEL_HOP: f32 = 0.5;
 pub const BOT_JUMP_ODDS: f32 = 0.02;
 pub const BOT_DODGE: u32 = 12;
 /// Spells: the odds a tick of casting one that is ready; how far off each
-/// attack spell is cast (m; Lightning not nearer than the first, and at
-/// one moving slower than this, m/s, or warded or mending).
+/// attack spell is cast (m; Lightning not nearer than the first, and not
+/// at one in the air unless it is warded, mending or slower than this,
+/// m/s).
 pub const BOT_CAST_ODDS: f32 = 0.08;
 pub const BOT_CAST_LANCE: f32 = 50.0;
 pub const BOT_CAST_FIREBALL: f32 = 32.0;
@@ -329,9 +332,11 @@ pub const BOT_NAMES: &[&str] = &[
 // Levels: 1 to 20 within a match, from cubes, damage and knockouts.
 pub const MAX_LEVEL: u8 = 20;
 pub const XP_PER_LEVEL: u32 = 100;
-/// Max health and damage (percent) a level above the first.
-pub const HEALTH_PER_LEVEL: i32 = 8;
-pub const POWER_PER_LEVEL: i32 = 5;
+/// Max health and damage (percent) a level above the first; a level
+/// gained heals this share (percent) of the health it adds.
+pub const HEALTH_PER_LEVEL: i32 = 5;
+pub const POWER_PER_LEVEL: i32 = 3;
+pub const LEVEL_HEAL: i32 = 50;
 /// XP for a spell cube run over.
 pub const XP_CUBE: u32 = 20;
 pub const XP_KNOCKOUT: u32 = 110;
@@ -419,7 +424,7 @@ pub const SPELLS: [Spell; 9] = [
         name: "Lance",
         kind: Kind::Offense,
         cooldown: 180,
-        power: 34,
+        power: 30,
         what: "an instant beam of light, far",
         beats: "the still, the far, the mending",
         beaten: "cover, a Ward, a foe in your face",
@@ -427,8 +432,8 @@ pub const SPELLS: [Spell; 9] = [
     Spell {
         name: "Frost",
         kind: Kind::Offense,
-        cooldown: 150,
-        power: 6,
+        cooldown: 120,
+        power: 7,
         what: "a fan of ice: deadly close, and it chills",
         beats: "the runner, the sniper caught close",
         beaten: "Gust, Blink, range",
@@ -437,7 +442,7 @@ pub const SPELLS: [Spell; 9] = [
         name: "Lightning",
         kind: Kind::Offense,
         cooldown: 240,
-        power: 42,
+        power: 48,
         what: "strikes where you look, a breath later",
         beats: "the still, the shielded, the hidden",
         beaten: "anyone who moves",
@@ -463,8 +468,8 @@ pub const SPELLS: [Spell; 9] = [
     Spell {
         name: "Mend",
         kind: Kind::Utility,
-        cooldown: 420,
-        power: 40,
+        cooldown: 480,
+        power: 32,
         what: "heal, quickly",
         beats: "the long fight, the storm",
         beaten: "a burst; Lightning on the still",
@@ -504,14 +509,14 @@ pub const REWIND: u32 = 10;
 /// Frost: shards in a fan, this far apart (of 65536 a turn), how fast and
 /// how long they fly, and how long and how much they chill.
 pub const FROST_SHARDS: usize = 7;
-pub const FROST_SPREAD: i32 = 620;
+pub const FROST_SPREAD: i32 = 520;
 pub const FROST_SPEED: f32 = 55.0;
 pub const FROST_LIFE: u32 = 12;
 pub const CHILL_TICKS: u16 = 60;
 pub const CHILL_SLOW: f32 = 0.6;
 pub const LIGHTNING_RANGE: f32 = 50.0;
 pub const LIGHTNING_DELAY: u32 = 24;
-pub const LIGHTNING_RADIUS: f32 = 4.0;
+pub const LIGHTNING_RADIUS: f32 = 5.0;
 pub const WARD_TICKS: u32 = 120;
 pub const MEND_TICKS: u32 = 60;
 /// Blink: it looks ahead in steps this long (m), stops short of a rise
@@ -522,7 +527,7 @@ pub const BLINK_CLIMB: f32 = 3.0;
 pub const BLINK_CROWD: f32 = RADIUS * 2.2;
 pub const BLINK_MIN: f32 = 1.0;
 /// Gust: how far it reaches about you, how far above or below (m).
-pub const GUST_RADIUS: f32 = 7.0;
+pub const GUST_RADIUS: f32 = 8.5;
 pub const GUST_BAND: f32 = 3.0;
 pub const GUST_LIFT: f32 = 7.0;
 pub const GUST_DAMAGE: i32 = 5;

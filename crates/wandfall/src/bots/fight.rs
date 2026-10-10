@@ -241,7 +241,8 @@ fn incoming(w: &World, me: &Player) -> bool {
 }
 
 /// Which spells a bot casts now: at its mark (each from the distance it
-/// is good at; Lightning at the still or warded), to save itself when
+/// is good at; Lightning at one still, warded, mending or on the ground,
+/// not in the air), to save itself when
 /// hurt, to blow away what comes at it, to run when the storm comes or a
 /// fight is lost, or to chase.
 fn spells(w: &World, me: &Player, mark: Option<&Mark>, plan: &Plan, tick: u32, seed: u64) -> u8 {
@@ -262,7 +263,9 @@ fn spells(w: &World, me: &Player, mark: Option<&Mark>, plan: &Plan, tick: u32, s
             (spell::LANCE, Some(d)) => d < BOT_CAST_LANCE,
             (spell::FIREBALL, Some(d)) => d < BOT_CAST_FIREBALL,
             (spell::FROST, Some(d)) => d < BOT_CAST_FROST,
-            (spell::LIGHTNING, Some(d)) => d > lo && d < hi && seen.is_some_and(|mk| mk.still),
+            (spell::LIGHTNING, Some(d)) => {
+                d > lo && d < hi && seen.is_some_and(|mk| mk.still || mk.ground)
+            }
             (spell::GUST, _) => d.is_some_and(|d| d < GUST_RADIUS) || incoming(w, me),
             (spell::WARD, _) => struck && hurt < BOT_WARD_HP,
             (spell::MEND, _) => hurt < BOT_MEND_HP,

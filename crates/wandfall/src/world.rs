@@ -657,11 +657,15 @@ impl World {
                     burned.push(p.id);
                 }
             } else if second && tick - p.hurt_at >= REGEN_AFTER * TICK_HZ {
-                p.hp = (p.hp + REGEN).min(p.max_hp());
+                let max = p.max_hp();
+                p.hp = (p.hp + REGEN * max / HEALTH).min(max);
             }
         }
+        // Its damage is a share of whole health (as is the regen): the
+        // last circles burn a wizard of any level.
         for id in burned {
-            self.hurt(0, id, storm.dps, STORM, ev);
+            let max = self.find(id).map_or(HEALTH, |p| p.max_hp());
+            self.hurt(0, id, storm.dps * max / HEALTH, STORM, ev);
         }
     }
 }

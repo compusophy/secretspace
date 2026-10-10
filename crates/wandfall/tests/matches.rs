@@ -164,13 +164,13 @@ fn the_page_predicts_its_wizard_exactly() {
     assert_eq!(worst, 0.0, "the prediction never moved");
 }
 
-/// Balance, as bots play it: over a few matches every spell lands, spells
-/// are the big moments (a fair share of the hurt), and none of them, nor
-/// the wand, does all the work.
+/// Balance, as bots play it: over a few matches every attack spell does
+/// a real share of the hurt, spells are the big moments, and none of
+/// them, nor the wand, does all the work.
 #[test]
 fn every_spell_has_its_place() {
     let mut by_what = [0i64; 256];
-    for seed in [7u64, 8, 9] {
+    for seed in 7u64..15 {
         let mut w = World::new(seed);
         let mut lobby = false;
         for _ in 0..TICK_HZ * 60 * 6 {
@@ -195,13 +195,14 @@ fn every_spell_has_its_place() {
     }
     println!("{:>10} {wand:>3}%", "wand");
     for &k in &spell::OFFENSE {
-        assert!(by_what[k as usize] > 0, "{} lands", SPELLS[k as usize].name);
-        assert!(
-            share(k as usize) < 35,
-            "{} does not rule",
-            SPELLS[k as usize].name
-        );
+        let name = SPELLS[k as usize].name;
+        let s = share(k as usize);
+        assert!(s >= 5, "{name} does its share: {s}%");
+        assert!(s < 30, "{name} does not rule: {s}%");
     }
-    assert!(spells >= 25, "spells are the moments: {spells}%");
-    assert!(wand < 70, "the wand is not everything: {wand}%");
+    assert!(spells >= 35, "spells are the moments: {spells}%");
+    assert!(
+        (35..65).contains(&wand),
+        "the wand is the heartbeat, not everything: {wand}%"
+    );
 }
