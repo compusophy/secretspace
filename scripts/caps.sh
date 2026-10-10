@@ -23,6 +23,12 @@ done
 js=$(git ls-files '*.js' '*.ts' '*.mjs' '*.jsx' '*.tsx')
 [ -z "$js" ] || say "hand-written script in the tree: $js"
 
+# A cartridge's init must be inert: a host imports its module and runs
+# init() with its own page around it (a canvas#screen too), so these crates
+# have no #[wasm_bindgen(start)]; their own index.html calls page().
+starts=$(grep -rn 'wasm_bindgen(start)' crates/wandfall-web crates/battlestation-web || true)
+[ -z "$starts" ] || say "a cartridge's init must be inert (export page(), no start): $starts"
+
 # 6. Size caps.
 for f in $(git ls-files '*.rs') $(git ls-files --others --exclude-standard '*.rs'); do
   n=$(wc -l < "$f")

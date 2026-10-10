@@ -323,14 +323,36 @@ pub struct Fit {
     pub hud: (i32, i32),
 }
 
+impl Fit {
+    /// No side past `most` device pixels (a texture's limit): fewer device
+    /// pixels per CSS pixel, so the picture, the layer and the scale from
+    /// one to the other still agree (pure).
+    pub fn under(self, most: u32) -> Fit {
+        let most = most.max(1);
+        if self.size.0.max(self.size.1) <= most {
+            return self;
+        }
+        let dpr = f64::from(most) / self.css.0.max(self.css.1).max(1.0);
+        let side = |v: f64| ((v * dpr).round().max(1.0) as u32).min(most);
+        Fit {
+            dpr,
+            size: (side(self.css.0), side(self.css.1)),
+            ..self
+        }
+    }
+}
+
 pub fn measure(min_short: f64, max_dpr: f64) -> Fit {
-    let w = crate::window();
-    let css = crate::window_css();
+    measure_in(crate::window_css(), crate::dpr(), min_short, max_dpr)
+}
+
+/// `measure` for a window `css` CSS pixels at `dpr` (pure).
+pub fn measure_in(css: (f64, f64), dpr: f64, min_short: f64, max_dpr: f64) -> Fit {
     let s = (css.0 / 960.0)
         .ceil()
         .min((css.0.min(css.1) / min_short).floor());
     let scale = s.clamp(1.0, 4.0);
-    let dpr = w.device_pixel_ratio().clamp(1.0, max_dpr.max(1.0));
+    let dpr = dpr.clamp(1.0, max_dpr.max(1.0));
     Fit {
         scale,
         dpr,
@@ -496,6 +518,57 @@ impl Gl {
 #[cfg(test)]
 mod tests {
     use super::m4::*;
+    use super::{measure, measure_in};
+
+    #[test]
+    fn measure_in_uses_the_hosts_size() {
+        // A laptop window at 125%, and a 4K one: as a page has always fit.
+        let f = measure_in((1280.0, 720.0), 1.25, 300.0, 1.5);
+        assert_eq!(
+            (f.scale, f.dpr, f.size, f.hud),
+            (2.0, 1.25, (1600, 900), (640, 360))
+        );
+        let f = measure_in((3840.0, 2160.0), 3.0, 300.0, 1.5);
+        assert_eq!((f.scale, f.dpr, f.size), (4.0, 1.5, (5760, 3240)));
+        // Hosted, the window is the host's surface (no window is asked).
+        crate::host::end();
+        crate::host::enter(crate::host::Hosted {
+            css: (960.0, 540.0),
+            dpr: 2.0,
+            base: String::new(),
+            ns: String::new(),
+            opts: Default::default(),
+        })
+        .unwrap();
+        let f = measure(300.0, 1.5);
+        assert_eq!(f, measure_in((960.0, 540.0), 2.0, 300.0, 1.5));
+        assert_eq!(
+            (f.scale, f.dpr, f.css, f.size, f.hud),
+            (1.0, 1.5, (960.0, 540.0), (1440, 810), (960, 540))
+        );
+        crate::host::resize((480.0, 270.0), 1.0);
+        let f = measure(300.0, 1.5);
+        assert_eq!((f.size, f.hud), ((480, 270), (480, 270)));
+        crate::host::end();
+    }
+
+    #[test]
+    fn a_fit_past_the_texture_limit_draws_finer_not_cut() {
+        // 6000 CSS px at 1.5 is 9000 device px: past a limit of 8192.
+        let f = measure_in((6000.0, 3000.0), 1.5, 300.0, 1.5);
+        assert_eq!(f.under(16384), f);
+        let u = f.under(8192);
+        assert_eq!((u.scale, u.css, u.hud), (f.scale, f.css, f.hud));
+        assert_eq!(u.size, (8192, 4096));
+        // The layer still covers the picture exactly: hud * scale * dpr.
+        let k = u.scale * u.dpr;
+        assert!((f64::from(u.hud.0) * k - 8192.0).abs() < 1.0);
+        assert!((f64::from(u.hud.1) * k - 4096.0).abs() < 1.0);
+        // A limit no device has: still within it, still in step.
+        let u = f.under(100);
+        assert_eq!(u.size, (100, 50));
+        assert!((6000.0 * u.dpr - 100.0).abs() < 1e-9);
+    }
 
     #[test]
     fn a_camera_sees_what_is_in_front() {

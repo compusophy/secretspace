@@ -1,7 +1,9 @@
 //! Input for a game played with both hands: the keys held down (and
 //! each new press), every finger at once with its own id, the mouse's
 //! buttons each on its own, and its movement, locked or not (a first-person
-//! look). Events keep the browser's own timestamps.
+//! look). Events keep the browser's own timestamps. Hosted (a cartridge,
+//! `crate::host`), nothing listens: the host's events are handed in
+//! (`Hands::detached`), and the lock is only asked for, the host's to give.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, VecDeque};
@@ -204,6 +206,40 @@ impl Hands {
         Hands(inner)
     }
 
+    /// Hands that hear nothing themselves: what they are given (`push`,
+    /// `key`), for a page run by a host.
+    pub fn detached() -> Hands {
+        Hands(Rc::new(RefCell::new(Inner::default())))
+    }
+
+    /// A hand event from elsewhere (the host), as if heard.
+    pub fn push(&self, h: Hand) {
+        push(&self.0, h);
+    }
+
+    /// A key from elsewhere (`KeyboardEvent.code`), down or up, as if heard.
+    pub fn key(&self, code: &str, down: bool, repeat: bool) {
+        let Ok(mut i) = self.0.try_borrow_mut() else {
+            return;
+        };
+        if !down {
+            i.held.remove(code);
+            return;
+        }
+        if !repeat {
+            i.pressed.push(code.to_string());
+        }
+        i.held.insert(code.to_string());
+    }
+
+    /// Every key let go at once (the keys went elsewhere), as leaving the
+    /// window does.
+    pub fn let_go(&self) {
+        if let Ok(mut i) = self.0.try_borrow_mut() {
+            i.held.clear();
+        }
+    }
+
     /// Every hand event since the last call, oldest first.
     pub fn drain(&self) -> Vec<Hand> {
         self.0.borrow_mut().queue.drain(..).collect()
@@ -220,7 +256,11 @@ impl Hands {
 }
 
 /// Take the mouse for looking around (it must come from a press).
+/// Hosted: ask the host for it.
 pub fn lock(el: &web_sys::Element) {
+    if crate::host::hosted() {
+        return crate::host::want_lock(true);
+    }
     el.request_pointer_lock();
 }
 
@@ -255,8 +295,12 @@ fn lock_raw(el: &web_sys::Element) {
 /// where it can be), and with `whole`, the whole screen and the keyboard
 /// where the browser allows it (Chrome and Edge, full screen: then even
 /// Ctrl+W and Esc come to the game, so Esc can open its menu; a held Esc
-/// still leaves). A game gives them back with `release`.
-pub fn play(el: &web_sys::Element, whole: bool) {
+/// still leaves). A game gives them back with `release`. Hosted, only the
+/// mouse, asked of the host (`el` may then be None).
+pub fn play(el: Option<&web_sys::Element>, whole: bool) {
+    if crate::host::hosted() {
+        return crate::host::want_lock(true);
+    }
     if whole {
         if !full() {
             if let Some(root) = crate::shell::outer_document().document_element() {
@@ -265,12 +309,17 @@ pub fn play(el: &web_sys::Element, whole: bool) {
         }
         hold_keys();
     }
-    lock_raw(el);
+    if let Some(el) = el {
+        lock_raw(el);
+    }
 }
 
 /// Give everything back: the mouse, the keyboard and the whole screen.
 pub fn release() {
     unlock();
+    if crate::host::hosted() {
+        return;
+    }
     let_keys_go();
     if full() {
         crate::shell::outer_document().exit_fullscreen();
@@ -280,6 +329,9 @@ pub fn release() {
 /// Whether the page has the whole screen (in the front page's frame: the
 /// front page has it).
 pub fn full() -> bool {
+    if crate::host::hosted() {
+        return false;
+    }
     crate::shell::outer_document()
         .fullscreen_element()
         .is_some()
@@ -288,7 +340,7 @@ pub fn full() -> bool {
 /// Whether every key comes to the page (the keyboard held, full screen):
 /// only then may a game use Ctrl, which otherwise closes tabs.
 pub fn keys_held() -> bool {
-    HELD.with(Cell::get) && full()
+    !crate::host::hosted() && HELD.with(Cell::get) && full()
 }
 
 /// Ask for the keyboard (`navigator.keyboard.lock()`, where there is one;
@@ -331,10 +383,54 @@ fn let_keys_go() {
 }
 
 pub fn unlock() {
+    if crate::host::hosted() {
+        return crate::host::want_lock(false);
+    }
     crate::document().exit_pointer_lock();
 }
 
-/// Whether the page has the mouse.
+/// Whether the page has the mouse (hosted: whether the host says so).
 pub fn locked() -> bool {
+    if crate::host::hosted() {
+        return crate::host::locked();
+    }
     crate::document().pointer_lock_element().is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Hand, Hands};
+
+    #[test]
+    fn detached_hands_hear_what_they_are_given() {
+        let h = Hands::detached();
+        h.key("KeyW", true, false);
+        h.key("KeyW", true, true);
+        h.key("KeyA", true, false);
+        assert!(h.held("KeyW") && h.held("KeyA"));
+        assert_eq!(h.pressed(), ["KeyW", "KeyA"], "a repeat is no new press");
+        h.key("KeyA", false, false);
+        assert!(!h.held("KeyA"));
+        h.let_go();
+        assert!(!h.held("KeyW"));
+        for k in 0..1100 {
+            h.push(Hand::Mouse {
+                x: k as f64,
+                y: 0.0,
+                dx: 1.0,
+                dy: 0.0,
+            });
+        }
+        let all = h.drain();
+        assert_eq!(all.len(), 1024, "the newest kept");
+        assert_eq!(
+            all[0],
+            Hand::Mouse {
+                x: 76.0,
+                y: 0.0,
+                dx: 1.0,
+                dy: 0.0
+            }
+        );
+    }
 }

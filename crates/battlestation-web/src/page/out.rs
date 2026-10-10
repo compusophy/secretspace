@@ -101,10 +101,11 @@ impl Out {
         }
     }
 
-    pub(super) fn canvas(&self) -> &HtmlCanvasElement {
+    /// The page's canvas (none when drawn for a host).
+    pub(super) fn canvas(&self) -> Option<&HtmlCanvasElement> {
         match self {
             Out::Gpu(g) => g.canvas(),
-            Out::Capture(c) => &c.canvas,
+            Out::Capture(c) => Some(&c.canvas),
         }
     }
 
