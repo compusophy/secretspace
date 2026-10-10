@@ -58,9 +58,6 @@ pub const CROWD: usize = 18;
 pub const MIN_BOTS: usize = 4;
 /// Ticks a dead bot waits before a new one takes its place.
 pub const BOT_RESPAWN: u32 = 60;
-/// A bot leaving to make room goes unseen if it can: one this far from
-/// every person's head is out of their sight.
-pub const BOT_UNSEEN: f32 = 1500.0;
 
 // How bots behave.
 

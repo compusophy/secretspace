@@ -16,7 +16,7 @@ const MARGIN: f32 = 120.0;
 const SHOWN_MS: f32 = 300.0;
 
 /// A box in the world: (x0, y0, x1, y1).
-type Area = (f32, f32, f32, f32);
+pub type Area = (f32, f32, f32, f32);
 
 pub struct Viewer {
     /// The snake this browser plays, 0 when it is not playing.
@@ -25,8 +25,11 @@ pub struct Viewer {
     pub watching: u16,
     pub screen: (f32, f32),
     pub centre: (f32, f32),
-    /// The box sent last frame.
-    shown: Option<Area>,
+    /// The box sent last frame, and the half size of the view it eased
+    /// toward.
+    shown: Option<(Area, (f32, f32))>,
+    /// The snake followed last frame.
+    followed: u16,
     known: HashSet<u16>,
     food: HashSet<u32>,
 }
@@ -39,6 +42,7 @@ impl Default for Viewer {
             screen: (1280.0, 800.0),
             centre: (0.0, 0.0),
             shown: None,
+            followed: 0,
             known: HashSet::new(),
             food: HashSet::new(),
         }
@@ -63,7 +67,11 @@ impl Viewer {
             Some(s) => radius(s.mass),
             None => 18.0,
         };
-        let (x0, y0, x1, y1) = self.area(r);
+        // A snake of yours not followed a moment ago is new (you joined, or
+        // took it back): the page puts its camera straight on it.
+        let jump = followed.is_some_and(|id| id == self.you && id != self.followed);
+        self.followed = followed.unwrap_or(0);
+        let (x0, y0, x1, y1) = self.area(r, jump);
 
         let mut f = Frame {
             tick: w.tick,
@@ -134,17 +142,27 @@ impl Viewer {
         proto::encode_frame(&f)
     }
 
+    /// The box sent last frame: all of the arena this browser can show.
+    pub fn shown(&self) -> Option<Area> {
+        self.shown.map(|(a, _)| a)
+    }
+
     /// The box to send this frame, for a snake of radius `r`: what its
     /// screen shows around the centre, and what it still showed a moment
-    /// ago, easing away.
-    fn area(&mut self, r: f32) -> Area {
+    /// ago, easing away. When the page's camera `jump`s, only its zoom
+    /// eases: the box goes with the camera, as big as the view was.
+    fn area(&mut self, r: f32, jump: bool) -> Area {
         let (_, hw, hh) = view(r, self.screen.0, self.screen.1);
         let (hw, hh) = (hw + MARGIN, hh + MARGIN);
         let (cx, cy) = self.centre;
         let t = (cx - hw, cy - hh, cx + hw, cy + hh);
         let s = match self.shown {
             None => t,
-            Some(s) => {
+            Some((_, (pw, ph))) if jump => {
+                let (w, h) = (hw.max(pw), hh.max(ph));
+                (cx - w, cy - h, cx + w, cy + h)
+            }
+            Some((s, _)) => {
                 let k = 1.0 - (-1000.0 / (TICK_HZ as f32 * SHOWN_MS)).exp();
                 let e = |a: f32, b: f32| a + (b - a) * k;
                 (
@@ -155,7 +173,7 @@ impl Viewer {
                 )
             }
         };
-        self.shown = Some(s);
+        self.shown = Some((s, (hw, hh)));
         s
     }
 }

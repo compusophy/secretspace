@@ -88,6 +88,42 @@ fn a_bot_makes_room_without_a_burst() {
 }
 
 #[test]
+fn a_bot_never_steps_out_where_someone_sees_it() {
+    let bots = |w: &World| w.snakes.iter().filter(|s| s.bot.is_some()).count();
+    let inside = |b: (f32, f32, f32, f32), e: (f32, f32, f32, f32)| {
+        b.2 >= e.0 && b.0 <= e.2 && b.3 >= e.1 && b.1 <= e.3
+    };
+    for (eye, everything) in [
+        ((-900.0, -600.0, 900.0, 600.0), false),
+        ((-3e3, -3e3, 3e3, 3e3), true),
+    ] {
+        let mut w = World::new(4);
+        for _ in 0..40 {
+            w.step();
+        }
+        w.eyes = vec![eye];
+        // People arrive, and bots make room for them.
+        for k in 0..6 {
+            w.spawn(&format!("person {k}"), None);
+        }
+        let (start, mut left) = (bots(&w), 0);
+        for _ in 0..TICK_HZ * 2 {
+            let was: Vec<(u16, (f32, f32, f32, f32))> =
+                w.snakes.iter().map(|s| (s.id, s.bbox)).collect();
+            let died: Vec<u16> = w.step().iter().map(|d| d.id).collect();
+            for (id, bbox) in was {
+                if w.find(id).is_none() && !died.contains(&id) {
+                    assert!(!inside(bbox, eye), "{id} left in plain view");
+                    left += 1;
+                }
+            }
+        }
+        // With all the arena in view, they wait; else they go.
+        assert_eq!(left == 0, everything, "{left} of {start} left");
+    }
+}
+
+#[test]
 fn headings_stay_within_a_turn() {
     let mut w = World::new(8);
     let me = w.spawn("me", None);

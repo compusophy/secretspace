@@ -14,6 +14,9 @@ use crate::{along, drawn, hue, phase, Scene, View, BG};
 
 /// Stripes are this many points long.
 const BAND: usize = 5;
+/// Beads are at most this share of a radius apart: closer costs time
+/// for nothing, further shows the rim as a row of beads.
+const SPACING: f32 = 0.66;
 /// The last share of a snake narrows to its tail, down to this share of
 /// its width.
 const TAPER: f32 = 0.2;
@@ -35,12 +38,17 @@ pub(crate) fn draw(c: &mut Canvas, v: &View, s: &Seen, sc: &Scene, mine: bool, n
     }
     let (lag, len) = drawn(s, sc.alpha);
     let r = radius(s.mass as f32) * v.k;
-    // Close points on a fat snake overlap anyway: draw fewer.
+    // Beads no further apart than SPACING of a radius, and no closer than
+    // the points: a whole number of them to a stripe, so a stripe's ends
+    // lie on beads however many a fat snake needs.
     let gap = STEP * v.k;
-    let every = ((r * 0.6) / gap.max(0.1)).floor().max(1.0) as usize;
+    let per = (BAND as f32 * gap / (SPACING * r).max(0.01))
+        .ceil()
+        .clamp(1.0, BAND as f32);
+    let every = BAND as f32 / per;
     let last = len - 1.0;
     let taper = (TAPER * len).max(1.0);
-    let bead = |k: f32| {
+    let bead = |k: f32, band: usize| {
         let (x, y) = v.at(along(s, lag + k));
         let narrow = TIP + (1.0 - TIP) * ((last - k) / taper).min(1.0);
         let wide = if k == 0.0 { HEAD } else { 1.0 };
@@ -48,16 +56,16 @@ pub(crate) fn draw(c: &mut Canvas, v: &View, s: &Seen, sc: &Scene, mine: bool, n
             x,
             y,
             r: r * narrow * wide,
-            band: (k as usize / BAND).is_multiple_of(2),
+            band: band.is_multiple_of(2),
         }
     };
     // Head first; the tail's tip exactly where it is, between points.
     let mut beads: Vec<Bead> = (0..)
-        .map(|k| k * every)
-        .take_while(|&k| (k as f32) < last)
-        .map(|k| bead(k as f32))
+        .map(|m: usize| (m, m as f32 * every))
+        .take_while(|&(_, k)| k < last)
+        .map(|(m, k)| bead(k, m / per as usize))
         .collect();
-    beads.push(bead(last.max(0.0)));
+    beads.push(bead(last.max(0.0), last.max(0.0) as usize / BAND));
     if !beads
         .iter()
         .step_by(4)
@@ -92,7 +100,7 @@ pub(crate) fn draw(c: &mut Canvas, v: &View, s: &Seen, sc: &Scene, mine: bool, n
     }
 
     // How many beads apart two can still overlap.
-    let reach = ((2.4 * r) / (every as f32 * gap)).ceil() as usize + 1;
+    let reach = ((2.4 * r) / (every * gap)).ceil() as usize + 1;
     let see = |b: &Bead| v.sees((b.x, b.y), b.r + 2.0);
     let outline = |c: &mut Canvas, b: &Bead| {
         if see(b) {
@@ -104,18 +112,44 @@ pub(crate) fn draw(c: &mut Canvas, v: &View, s: &Seen, sc: &Scene, mine: bool, n
             c.circle(b.x, b.y, b.r, shade[!b.band as usize]);
         }
     };
-    // The light on a bead, run on to the next bead headward, so the lit
-    // side and the ridge are unbroken strokes.
-    let stroke = |c: &mut Canvas, j: usize, off: (f32, f32), width: f32, ink: [Rgba; 2]| {
-        let (b, to) = (&beads[j], &beads[j.saturating_sub(1)]);
-        if see(b) && b.r * width > 1.0 {
+    // The lit side: a smaller circle toward the light. Beads are close
+    // enough that their light runs on unbroken.
+    let light = |c: &mut Canvas, b: &Bead| {
+        if see(b) {
+            let (x, y) = (b.x - 0.1 * b.r, b.y - 0.12 * b.r);
+            c.circle(x, y, 0.78 * b.r, lit[!b.band as usize]);
+        }
+    };
+    // The ridge is too thin for that: it runs in strokes from the tail up,
+    // each over two beads (half the strokes, for the same picture) but
+    // ending where a stripe does, where the next one starts over it.
+    let mut ends = vec![None; beads.len()];
+    let mut j = beads.len() - 1;
+    loop {
+        let e = if j >= 2 && beads[j - 1].band == beads[j].band {
+            j - 2
+        } else {
+            j.saturating_sub(1)
+        };
+        ends[j] = Some(e);
+        if j == 0 {
+            break;
+        }
+        j = e;
+    }
+    let ridge = |c: &mut Canvas, j: usize| {
+        let Some(e) = ends[j] else {
+            return;
+        };
+        let (b, to) = (&beads[j], &beads[e]);
+        if (see(b) || see(to)) && 0.56 * b.r > 1.0 {
             c.line(
-                b.x + off.0 * b.r,
-                b.y + off.1 * b.r,
-                to.x + off.0 * to.r,
-                to.y + off.1 * to.r,
-                width * b.r,
-                ink[!b.band as usize],
+                b.x - 0.3 * b.r,
+                b.y - 0.36 * b.r,
+                to.x - 0.3 * to.r,
+                to.y - 0.36 * to.r,
+                0.56 * b.r,
+                gloss[!b.band as usize],
             );
         }
     };
@@ -131,10 +165,10 @@ pub(crate) fn draw(c: &mut Canvas, v: &View, s: &Seen, sc: &Scene, mine: bool, n
             fill(c, &beads[j]);
         }
         if let Some(j) = at(i + w) {
-            stroke(c, j, (-0.1, -0.12), 1.56, lit);
+            light(c, &beads[j]);
         }
         if let Some(j) = at(i + 2 * w) {
-            stroke(c, j, (-0.3, -0.36), 0.56, gloss);
+            ridge(c, j);
         }
     }
 

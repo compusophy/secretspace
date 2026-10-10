@@ -101,6 +101,9 @@ pub struct World {
     pub eaten: Vec<(u32, u16)>,
     /// Snakes that burst on the last tick: where, their hue, their radius.
     pub bursts: Vec<(f32, f32, u8, f32)>,
+    /// What people can see: the box each browser was last sent (x0, y0,
+    /// x1, y1). The room fills it in; a bot leaves only from outside them.
+    pub eyes: Vec<(f32, f32, f32, f32)>,
 }
 
 impl World {
@@ -117,6 +120,7 @@ impl World {
             bot_at: 0,
             eaten: Vec::new(),
             bursts: Vec::new(),
+            eyes: Vec::new(),
         };
         while w.food.len() < FOOD_TARGET {
             w.grow_food();
@@ -308,39 +312,23 @@ impl World {
     }
 
     /// Too crowded: a bot steps out quietly, with no burst and no food,
-    /// where nobody sees it go: the smallest out of every person's sight,
-    /// or else the one furthest from them all.
+    /// where nobody sees it go: the smallest no browser was sent (players
+    /// and watchers alike). While every bot is in someone's view, none
+    /// goes yet.
     fn retire(&mut self) {
-        let heads: Vec<(f32, f32)> = self
-            .snakes
-            .iter()
-            .filter(|s| s.bot.is_none())
-            .map(|s| s.head())
-            .collect();
         let seen = |s: &Snake| {
-            let (x, y) = s.head();
-            heads
+            let (x0, y0, x1, y1) = s.bbox;
+            self.eyes
                 .iter()
-                .map(|h| (h.0 - x).powi(2) + (h.1 - y).powi(2))
-                .fold(f32::MAX, f32::min)
-                .sqrt()
+                .any(|e| x1 >= e.0 && x0 <= e.2 && y1 >= e.1 && y0 <= e.3)
         };
         let pick = self
             .snakes
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.bot.is_some())
-            .map(|(i, s)| (i, seen(s), s.mass))
-            .min_by(|a, b| {
-                let (ua, ub) = (a.1 > BOT_UNSEEN, b.1 > BOT_UNSEEN);
-                // Unseen first; of those the smallest, else the furthest.
-                ub.cmp(&ua).then(if ua && ub {
-                    a.2.total_cmp(&b.2)
-                } else {
-                    b.1.total_cmp(&a.1)
-                })
-            })
-            .map(|(i, ..)| i);
+            .filter(|(_, s)| s.bot.is_some() && !seen(s))
+            .min_by(|a, b| a.1.mass.total_cmp(&b.1.mass))
+            .map(|(i, _)| i);
         if let Some(i) = pick {
             self.snakes.remove(i);
             self.rebuild_bodies();

@@ -23,8 +23,6 @@ pub struct Seen {
     pub boosting: bool,
     pub ghost: bool,
     pub angle: f32,
-    /// Points the head gained in the last frame.
-    pub moved: usize,
     /// For drawing only, never part of the body: the points last cut off
     /// its tail, nearest first, so the tail can glide on to where it ends.
     pub trail: VecDeque<(f32, f32)>,
@@ -85,7 +83,6 @@ impl Mirror {
                             boosting: u.boosting,
                             ghost: u.ghost,
                             angle: angle_from_u16(u.angle),
-                            moved: 0,
                             trail: VecDeque::new(),
                             lag: 0.0,
                             short: 0.0,
@@ -111,7 +108,6 @@ impl Mirror {
                             s.trail.push_front(p);
                         }
                     }
-                    s.moved = fresh.len();
                     s.lag = (fresh.len() as f32 + s.lag * left).min(MOST_LAG);
                     let grew = s.body.len() as f32 - was as f32;
                     s.short = (grew + s.short * left).clamp(-MOST_LAG, MOST_LAG);

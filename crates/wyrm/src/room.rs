@@ -103,6 +103,9 @@ impl Room for Wyrm {
     }
 
     fn tick(&mut self, out: &mut Outbox) {
+        // What every browser shows, playing or watching: no bot leaves
+        // from in there.
+        self.world.eyes = self.viewers.values().filter_map(Viewer::shown).collect();
         for d in self.world.step() {
             if d.human {
                 if let Some((&conn, v)) = self.viewers.iter_mut().find(|(_, v)| v.you == d.id) {

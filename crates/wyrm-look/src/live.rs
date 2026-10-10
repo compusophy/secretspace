@@ -97,15 +97,6 @@ impl Live {
         }
     }
 
-    /// The link is gone for good: nothing to show until a new one.
-    pub fn clear(&mut self) {
-        *self = Live {
-            arena: self.arena,
-            period: self.period,
-            ..Live::default()
-        };
-    }
-
     /// Effects that have played out go.
     pub fn age(&mut self, now: f64) {
         self.gulps.retain(|g| now - g.at < GULP_MS);
