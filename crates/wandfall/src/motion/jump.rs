@@ -5,11 +5,11 @@
 //! against a wall it kicks off it (`wall`); in the air, once, it is the
 //! air jump.
 
-use super::{flat, keys, Body, Input, Wish};
+use super::{flat, keys, Body, Input, Under, Wish};
 use crate::laws::*;
 use crate::map::Map;
 
-pub(super) fn jump(b: &mut Body, i: &Input, w: &Wish, map: &Map) {
+pub(super) fn jump(b: &mut Body, i: &Input, w: &Wish, u: &Under, map: &Map) {
     let mut press = i.has(keys::JUMP) && !b.held;
     b.held = i.has(keys::JUMP);
     if press && b.tether > 0 {
@@ -32,7 +32,7 @@ pub(super) fn jump(b: &mut Body, i: &Input, w: &Wish, map: &Map) {
         b.walls = 0;
     }
     if b.buffer > 0 && (b.ground || b.coyote > 0) && b.v[1] <= 0.5 && !b.glide {
-        hop(b);
+        hop(b, u);
     } else if press
         && b.coyote == 0
         && crate::wall::can(b)
@@ -40,7 +40,7 @@ pub(super) fn jump(b: &mut Body, i: &Input, w: &Wish, map: &Map) {
     {
         // Off a wall (pushing into it with the air jump to spend, that
         // is the climb's: the air jump).
-        crate::wall::kick(b);
+        crate::wall::kick(b, w);
         b.buffer = 0;
     } else if press
         && !b.ground
@@ -68,15 +68,17 @@ fn landing(b: &Body, map: &Map) -> bool {
 }
 
 /// Off the ground. Out of a slide, the slide's speed goes with it. Timed
-/// to the landing, a hop keeps its speed and gains a little.
-fn hop(b: &mut Body) {
+/// to the landing, a hop keeps its speed and gains a little (not chilled,
+/// not in the sea, where it is lower too).
+fn hop(b: &mut Body, u: &Under) {
     let sp = flat(&b.v);
-    if b.landed <= HOP_WINDOW && sp > RUN * 0.8 && sp < HOP_MAX {
+    let free = b.chill == 0 && !u.wading;
+    if b.landed <= HOP_WINDOW && sp > RUN * 0.8 && sp < HOP_MAX && free {
         let k = (sp + HOP_BOOST).min(HOP_MAX) / sp;
         b.v[0] *= k;
         b.v[2] *= k;
     }
-    b.v[1] = JUMP;
+    b.v[1] = if u.wading { JUMP * WADE_JUMP } else { JUMP };
     b.ground = false;
     b.slide = false;
     b.coyote = 0;

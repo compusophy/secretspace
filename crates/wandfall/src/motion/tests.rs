@@ -188,6 +188,14 @@ pub(super) fn plaza(map: &Map) -> Body {
     }
 }
 
+/// Across the plaza east, put back to its west side as it nears the
+/// east edge (with `plaza`, flat ground as far as it runs).
+pub(super) fn lap(b: &mut Body) {
+    if b.p[0] > 14.0 {
+        b.p[0] -= 28.0;
+    }
+}
+
 pub(super) fn go(b: &mut Body, keys: u16, yaw: u16, map: &Map) {
     step(
         b,
@@ -493,21 +501,42 @@ fn crouching_is_lower_and_slower_and_jumps_forgive() {
 }
 
 #[test]
-fn the_drop_glides_down_slowly() {
+fn the_drop_glides_down_slowly_unless_you_dive() {
     let map = Map::new(11);
+    let drop = |pitch: i16| {
+        let mut b = stand(&map);
+        b.p[1] += DROP_HEIGHT;
+        b.ground = false;
+        b.glide = true;
+        let mut ticks = 0;
+        while !b.ground && ticks < 2000 {
+            let i = Input {
+                pitch,
+                ..Input::default()
+            };
+            step(&mut b, &i, &map);
+            ticks += 1;
+        }
+        assert!(b.ground && !b.glide);
+        ticks as f32 / TICK_HZ as f32
+    };
+    let (level, dive) = (drop(0), drop(-16000));
+    assert!(
+        level > DROP_HEIGHT / GLIDE_FALL * 0.8,
+        "it takes a while: {level}"
+    );
+    assert!(
+        dive < DROP_HEIGHT / GLIDE_DIVE * 1.3,
+        "diving, not long: {dive}"
+    );
+    // On the broom, let go: it drifts on, it does not stop.
     let mut b = stand(&map);
     b.p[1] += DROP_HEIGHT;
     b.ground = false;
     b.glide = true;
-    let mut ticks = 0;
-    while !b.ground && ticks < 2000 {
+    b.v = [GLIDE_SPEED, 0.0, 0.0];
+    for _ in 0..TICK_HZ {
         step(&mut b, &Input::default(), &map);
-        ticks += 1;
     }
-    let secs = ticks as f32 / TICK_HZ as f32;
-    assert!(
-        secs > DROP_HEIGHT / GLIDE_FALL * 0.8,
-        "it takes a while: {secs}"
-    );
-    assert!(b.ground && !b.glide);
+    assert!(flat(&b.v) > GLIDE_SPEED - GLIDE_DRAG * 1.1, "{b:?}");
 }

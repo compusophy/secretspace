@@ -100,6 +100,9 @@ pub struct Body {
     pub walls: u8,
     pub wall: u8,
     pub wall_n: [f32; 2],
+    /// How fast it went across the ground as its climb began (carried on
+    /// over the top).
+    pub carry: f32,
 }
 
 impl Body {
@@ -203,9 +206,9 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     run::stamina(b);
     run::steer(b, i, &w, &u);
     b.chill = b.chill.saturating_sub(1);
-    jump::jump(b, i, &w, map);
+    jump::jump(b, i, &w, &u, map);
     ledge::rune(b, map);
-    ledge::mantle(b, map, &w);
-    collide::fall(b, i);
+    ledge::mantle(b, i, map, &w);
+    collide::fall(b, i, &w);
     collide::advance(b, map);
 }

@@ -1,10 +1,13 @@
 //! How a wizard stands (crouched, sliding, sprinting), what sprinting
 //! spends, and how it steers: on the ground, sliding, in the air, on the
-//! broom, climbing or hauled by a Tether.
+//! broom, climbing or hauled by a Tether. Speed over its pace is
+//! momentum: held in the air, bled away on the ground, dragged off by
+//! the sea and by Frost's chill.
 
 use super::{flat, keys, Body, Input, Under, Wish};
 use crate::laws::*;
 use crate::map::smooth;
+use crate::trig;
 
 /// A velocity across the ground toward `want`, by at most `step` (the
 /// same whichever way it faces).
@@ -19,22 +22,38 @@ fn toward(v: &mut [f32; 3], want: [f32; 2], step: f32) {
     }
 }
 
-/// Crouching, sliding (crouching at speed, as it starts or as it lands),
-/// sprinting.
+/// A velocity across the ground going `sp`, made to go `to` instead.
+fn scale(v: &mut [f32; 3], sp: f32, to: f32) {
+    if sp > 1e-4 {
+        v[0] *= to / sp;
+        v[2] *= to / sp;
+    }
+}
+
+/// How steeply it looks down, 0 (level, or up) to 1 (straight down): how
+/// hard the broom dives.
+pub(super) fn dive(i: &Input) -> f32 {
+    (-trig::pitch_sin_cos(i.pitch).0).max(0.0)
+}
+
+/// Crouching, sliding (crouching at speed, as it starts or as it lands,
+/// not in the sea), sprinting.
 pub(super) fn stance(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
     let crouch = i.has(keys::CROUCH) && !b.glide;
     let flat = flat(&b.v);
     let fresh = !b.crouch || b.coyote < COYOTE;
-    if crouch && fresh && b.ground && !b.slide && flat >= SLIDE_MIN {
+    if crouch && fresh && b.ground && !u.wading && !b.slide && flat >= SLIDE_MIN {
         b.slide = true;
-        if b.slide_cd == 0 {
-            let k = (flat + SLIDE_BOOST) / flat;
+        // A boost, once in a while, from no faster than a timed hop; not
+        // chilled.
+        if b.slide_cd == 0 && b.chill == 0 && flat < HOP_MAX {
+            let k = (flat + SLIDE_BOOST).min(SLIDE_BOOST_TO) / flat;
             b.v[0] *= k;
             b.v[2] *= k;
+            b.slide_cd = SLIDE_COOLDOWN;
         }
-        b.slide_cd = SLIDE_COOLDOWN;
     }
-    if b.slide && (!crouch || (b.ground && flat < RUN * CROUCH_SLOW)) {
+    if b.slide && (!crouch || u.wading || (b.ground && flat < RUN * CROUCH_SLOW)) {
         b.slide = false;
     }
     b.slide_cd = b.slide_cd.saturating_sub(1);
@@ -75,15 +94,30 @@ pub(super) fn steer(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
     if b.mantle > 0 {
         // Climbing a ledge: carried over it, not steered.
     } else if b.tether > 0 {
-        crate::tether::pull(b);
-    } else if b.slide && b.ground {
-        slide(b, w, u);
+        crate::tether::pull(b, w);
+    } else if b.glide {
+        glide(b, i, w);
     } else {
-        run(b, i, w, u);
+        if b.slide && b.ground {
+            slide(b, w, u);
+        } else {
+            run(b, i, w, u);
+        }
+        chilled(b);
     }
 }
 
-/// Gravity down the slope; friction; a little steering, no faster.
+/// Chilled, whatever speed it has over a chilled run drains away, on the
+/// ground or in the air: Frost slows the hopper as it does the runner.
+fn chilled(b: &mut Body) {
+    let (sp, pace) = (flat(&b.v), RUN * CHILL_SLOW);
+    if b.chill > 0 && sp > pace {
+        scale(&mut b.v, sp, (sp - CHILL_DRAG * DT).max(pace));
+    }
+}
+
+/// Gravity down the slope; friction (more, come in over its top speed);
+/// a little steering.
 fn slide(b: &mut Body, w: &Wish, u: &Under) {
     let (gx, gz) = (u.gx, u.gz);
     let k = GRAVITY * DT / (1.0 + gx * gx + gz * gz);
@@ -91,7 +125,12 @@ fn slide(b: &mut Body, w: &Wish, u: &Under) {
     b.v[2] -= gz * k;
     let sp = flat(&b.v);
     if sp > 1e-4 {
-        let keep = (sp - SLIDE_FRICTION * DT).max(0.0);
+        let friction = if sp > SLIDE_MAX {
+            SLIDE_OVER
+        } else {
+            SLIDE_FRICTION
+        };
+        let keep = (sp - friction * DT).max(0.0);
         let (mut dx, mut dz) = (b.v[0] / sp, b.v[2] / sp);
         if w.any {
             dx += w.x * SLIDE_STEER * DT;
@@ -99,17 +138,38 @@ fn slide(b: &mut Body, w: &Wish, u: &Under) {
             let d = (dx * dx + dz * dz).sqrt();
             (dx, dz) = (dx / d, dz / d);
         }
-        let keep = keep.min(SLIDE_MAX);
         b.v[0] = dx * keep;
         b.v[2] = dz * keep;
     }
 }
 
-/// Running, in the air, on the broom.
+/// On the broom: steered toward its pace (faster diving), drifting on
+/// when let go, speed over its pace bleeding slowly away.
+fn glide(b: &mut Body, i: &Input, w: &Wish) {
+    let mut speed = GLIDE_SPEED * (1.0 + GLIDE_DIVE_FAST * dive(i));
+    if b.chill > 0 {
+        speed *= CHILL_SLOW;
+    }
+    let sp = flat(&b.v);
+    if !w.any {
+        scale(&mut b.v, sp, (sp - GLIDE_DRAG * DT).max(0.0));
+    } else if sp > speed {
+        let (dx, dz) = (
+            b.v[0] / sp + w.x * GLIDE_ACCEL * DT / sp,
+            b.v[2] / sp + w.z * GLIDE_ACCEL * DT / sp,
+        );
+        let d = (dx * dx + dz * dz).sqrt().max(1e-6);
+        let keep = (sp - GLIDE_DRAG * DT).max(speed);
+        b.v[0] = dx / d * keep;
+        b.v[2] = dz / d * keep;
+    } else {
+        toward(&mut b.v, [w.x * speed, w.z * speed], GLIDE_ACCEL * DT);
+    }
+}
+
+/// Running, and in the air.
 fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
-    let mut speed = if b.glide {
-        GLIDE_SPEED
-    } else if u.wading {
+    let mut speed = if u.wading {
         RUN * WADE
     } else if b.sprint {
         SPRINT
@@ -119,7 +179,7 @@ fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
     if b.chill > 0 {
         speed *= CHILL_SLOW;
     }
-    if i.has(keys::AIM) && !b.glide {
+    if i.has(keys::AIM) {
         speed *= AIM_SLOW;
     }
     if b.crouch && b.ground {
@@ -130,7 +190,7 @@ fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
         let up = u.gx * w.x + u.gz * w.z;
         speed *= (1.0 - HILL * up).clamp(0.6, 1.35);
     }
-    let air = !(b.ground || b.glide);
+    let air = !b.ground;
     let accel = if air {
         ACCEL_AIR
     } else if w.any {
@@ -140,8 +200,8 @@ fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
     } * DT;
     // Faster than your pace, still steering more or less its way: the
     // speed holds in the air (steering curves it) and bleeds away on the
-    // ground, slowly while you steer along it, quicker as you turn
-    // (momentum).
+    // ground, slowly while you steer along it, quicker as you turn; the
+    // sea drags at every step (momentum).
     let sp = flat(&b.v);
     let along = if sp > 1e-4 {
         (b.v[0] * w.x + b.v[2] * w.z) / sp
@@ -151,13 +211,15 @@ fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
     let (on, off) = MOMENTUM_ALONG;
     if air && !w.any {
         // Nothing held in the air: it drifts on as it was going.
-    } else if sp > speed && w.any && along > if air { AIR_ALONG } else { off } && !b.glide {
+    } else if sp > speed && w.any && along > if air { AIR_ALONG } else { off } {
         let (mut dx, mut dz) = (b.v[0] / sp, b.v[2] / sp);
         dx += w.x * accel / sp;
         dz += w.z * accel / sp;
         let d = (dx * dx + dz * dz).sqrt();
         let keep = if air {
             sp
+        } else if u.wading {
+            speed + (sp - speed) * WADE_KEEP
         } else {
             let bleed = OVERSPEED + (ACCEL_GROUND - OVERSPEED) * smooth((on - along) / (on - off));
             (sp - bleed * DT).max(speed)
@@ -171,8 +233,8 @@ fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::{go, plaza};
-    use super::super::{flat, keys};
+    use super::super::tests::{go, lap, plaza};
+    use super::super::{flat, keys, Body};
     use crate::laws::*;
     use crate::map::Map;
 
@@ -214,5 +276,106 @@ mod tests {
             go(&mut b, keys::BACK, 0, &map);
         }
         assert!(flat(&b.v) < 11.0, "{b:?}");
+    }
+
+    /// Hopping east across the plaza from `v`, each hop on its landing,
+    /// chilled for `chill` ticks: its speed after `ticks`.
+    fn hopping(map: &Map, v: f32, chill: u16, ticks: u32) -> f32 {
+        let mut b = plaza(map);
+        b.v[0] = v;
+        b.chill = chill;
+        for _ in 0..ticks {
+            let k = keys::FWD | if b.ground { keys::JUMP } else { 0 };
+            go(&mut b, k, 0, map);
+            lap(&mut b);
+        }
+        flat(&b.v)
+    }
+
+    #[test]
+    fn chilled_a_hopper_slows_as_a_runner_does() {
+        let map = Map::new(3);
+        assert!(hopping(&map, 12.0, 0, 15) > 11.5, "unchilled it keeps on");
+        let cold = hopping(&map, 12.0, CHILL_TICKS, 15);
+        assert!(
+            cold < RUN * CHILL_SLOW + 0.1,
+            "chilled, half a second on: {cold}"
+        );
+    }
+
+    #[test]
+    fn slides_and_hops_in_turn_hold_their_speed_on_the_flat_not_run_away() {
+        let map = Map::new(3);
+        // Sliding so many ticks each landing, then hopping.
+        let rhythm = |n: u32| {
+            let mut b = plaza(&map);
+            for _ in 0..30 {
+                go(&mut b, keys::FWD | keys::SPRINT, 0, &map);
+                lap(&mut b);
+            }
+            let mut on = 0;
+            for _ in 0..8 * TICK_HZ {
+                let mut k = keys::FWD;
+                if b.ground {
+                    on += 1;
+                    k |= if on <= n { keys::CROUCH } else { keys::JUMP };
+                    on = if on > n { 0 } else { on };
+                }
+                go(&mut b, k, 0, &map);
+                lap(&mut b);
+            }
+            flat(&b.v)
+        };
+        for n in [6, 8, 14, 16] {
+            let v = rhythm(n);
+            assert!(v > SPRINT && v < SLIDE_BOOST_TO, "{n} ticks a slide: {v}");
+        }
+        // A slide within the cooldown of the last boost is not boosted,
+        // and does not put the next one off.
+        let mut b = plaza(&map);
+        for _ in 0..30 {
+            go(&mut b, keys::FWD | keys::SPRINT, 0, &map);
+            lap(&mut b);
+        }
+        go(&mut b, keys::FWD | keys::CROUCH, 0, &map);
+        assert!(b.slide && b.slide_cd > 0, "boosted: {b:?}");
+        go(&mut b, keys::FWD, 0, &map);
+        let before = flat(&b.v);
+        go(&mut b, keys::FWD | keys::CROUCH, 0, &map);
+        assert!(b.slide && flat(&b.v) < before, "not boosted again: {b:?}");
+        let cd = b.slide_cd;
+        go(&mut b, keys::FWD, 0, &map);
+        assert_eq!(b.slide_cd, cd - 1, "the cooldown runs on");
+    }
+
+    #[test]
+    fn the_sea_drags_at_hops_and_slides() {
+        let map = Map::new(3);
+        // Out in the shallows, east of the island's west shore.
+        let z = 0.0;
+        let x = (0..200)
+            .map(|k| -SHORE - 30.0 + k as f32)
+            .find(|&x| map.height(x, z) < SEA - 0.5 && map.height(x + 25.0, z) < SEA - 0.5)
+            .expect("the sea");
+        let wet = |keys: u16, v: f32| {
+            let mut b = Body {
+                p: [x, map.floor(x, z, SEA).max(SEA - 0.9), z],
+                v: [v, 0.0, 0.0],
+                ground: true,
+                ..Body::default()
+            };
+            for _ in 0..TICK_HZ {
+                let hop = if b.ground { keys & keys::JUMP } else { 0 };
+                go(&mut b, (keys & !keys::JUMP) | hop, 0, &map);
+            }
+            b
+        };
+        let hops = wet(keys::FWD | keys::JUMP, 12.5);
+        assert!(flat(&hops.v) < RUN + 0.5, "hopping in the sea: {hops:?}");
+        let slid = wet(keys::FWD | keys::CROUCH, 10.0);
+        assert!(
+            !slid.slide && flat(&slid.v) < RUN,
+            "no slide in the sea: {slid:?}"
+        );
     }
 }

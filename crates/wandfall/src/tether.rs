@@ -1,14 +1,16 @@
 //! The Tether's pull: a rope of light caught somewhere (`Body::anchor`)
-//! hauls its wizard there, fast, gravity all but gone. Near it, it lets
-//! go with a hop up (onto the ledge it caught); a jump lets go sooner,
-//! keeping every bit of the speed (a slingshot). Part of `motion::step`,
-//! so the page predicts it to the bit.
+//! hauls its wizard there, fast, gravity all but gone; steering square
+//! to the rope swings you about it (round a trunk in the way, or wide of
+//! a foe). Near it, it lets go with a hop up (onto the ledge it caught);
+//! a jump lets go sooner, keeping every bit of the speed (a slingshot).
+//! Part of `motion::step`, so the page predicts it to the bit.
 
 use crate::laws::*;
-use crate::motion::Body;
+use crate::motion::{Body, Wish};
 
-/// One tick of the pull.
-pub fn pull(b: &mut Body) {
+/// One tick of the pull: along the rope, toward its pace; across it, the
+/// swing kept (dying slowly away), and steered.
+pub fn pull(b: &mut Body, w: &Wish) {
     let d = [
         b.anchor[0] - b.p[0],
         b.anchor[1] - b.p[1],
@@ -28,12 +30,24 @@ pub fn pull(b: &mut Body) {
     } else {
         TETHER_SPEED
     };
-    let k = (TETHER_GRIP * DT).min(1.0);
-    for (v, d) in b.v.iter_mut().zip(d) {
-        *v += (d / dist * speed - *v) * k;
+    let rope = d.map(|x| x / dist);
+    let along = dot(b.v, rope);
+    let mut side = [0, 1, 2].map(|k| (b.v[k] - rope[k] * along) * (1.0 - TETHER_SWAY * DT));
+    if w.any {
+        let s = [w.x, 0.0, w.z];
+        let on = dot(s, rope);
+        for (k, x) in side.iter_mut().enumerate() {
+            *x += (s[k] - rope[k] * on) * TETHER_STEER * DT;
+        }
     }
+    let along = along + (speed - along) * (TETHER_GRIP * DT).min(1.0);
+    b.v = [0, 1, 2].map(|k| rope[k] * along + side[k]);
     b.glide = false;
     b.slide = false;
+}
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 /// Let go: a hop up, the speed kept.
@@ -99,5 +113,40 @@ mod tests {
         assert_eq!(b.tether, 0);
         assert!(!b.air_jumped, "the press let go; no air jump spent");
         assert!(b.v[0] > before * 0.95 && b.v[1] > 0.0, "{b:?}");
+    }
+
+    #[test]
+    fn steering_square_to_the_rope_swings_you_off_its_line() {
+        let map = Map::new(11);
+        let swing = |keys: u16| {
+            let mut b = stand(&map);
+            b.p[1] += 3.0;
+            b.ground = false;
+            let z = b.p[2];
+            b.anchor = [b.p[0] + 40.0, b.p[1] + 4.0, z];
+            b.tether = TETHER_TICKS;
+            let mut most: f32 = 0.0;
+            for _ in 0..TETHER_TICKS {
+                step(
+                    &mut b,
+                    &Input {
+                        keys,
+                        ..Input::default()
+                    },
+                    &map,
+                );
+                most = most.max(b.p[2] - z);
+                if b.tether == 0 {
+                    break;
+                }
+            }
+            most
+        };
+        assert!(swing(0) < 0.1, "straight along it, let be");
+        assert!(
+            swing(keys::RIGHT) > 1.5,
+            "swung right: {}",
+            swing(keys::RIGHT)
+        );
     }
 }

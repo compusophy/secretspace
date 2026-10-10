@@ -1,14 +1,15 @@
 //! Gravity, and the move itself: out of anything standing in the way,
 //! onto the ground, a deck or a top underfoot.
 
-use super::{flat, keys, Body, Input};
+use super::{flat, keys, ledge, run, Body, Input, Wish};
 use crate::laws::*;
 use crate::map::Map;
 
 /// Gravity: lighter rising with jump held (not thrown up by a launch
 /// rune: that is the rune's height); a Tether bears most of your weight;
-/// the broom falls slowly.
-pub(super) fn fall(b: &mut Body, i: &Input) {
+/// pushing into a wall you can kick off, you slide down it slowly; the
+/// broom falls slowly, faster diving (and pulls up again, not at once).
+pub(super) fn fall(b: &mut Body, i: &Input, w: &Wish) {
     let pull = if b.v[1] > 0.0 && i.has(keys::JUMP) && b.mantle == 0 && !b.glide {
         GRAVITY_UP
     } else {
@@ -16,8 +17,14 @@ pub(super) fn fall(b: &mut Body, i: &Input) {
     };
     let bear = if b.tether > 0 { TETHER_GRAVITY } else { 1.0 };
     b.v[1] -= pull * bear * DT;
-    if b.glide && b.v[1] < -GLIDE_FALL {
-        b.v[1] = -GLIDE_FALL;
+    if crate::wall::can(b) && crate::wall::into(b, w) {
+        b.v[1] = b.v[1].max(-WALL_SLIDE_FALL);
+    }
+    if b.glide {
+        let most = GLIDE_FALL + (GLIDE_DIVE - GLIDE_FALL) * run::dive(i);
+        if b.v[1] < -most {
+            b.v[1] = (b.v[1] + GLIDE_PULL * DT).min(-most);
+        }
     }
 }
 
@@ -68,6 +75,9 @@ pub(super) fn advance(b: &mut Body, map: &Map) {
         b.v[1] = 0.0;
         if !was {
             b.landed = 0;
+        }
+        if b.mantle > 0 {
+            ledge::over(b);
         }
         b.ground = true;
         b.glide = false;

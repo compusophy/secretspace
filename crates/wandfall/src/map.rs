@@ -250,20 +250,22 @@ impl Map {
 
     /// A ledge to climb onto from feet at `p`, pushing along (`wx`, `wz`):
     /// the top of something that can be stood on, close ahead and within
-    /// reach above the feet (not a cap over the head); its top and middle.
-    pub fn ledge(&self, p: [f32; 3], (wx, wz): (f32, f32)) -> Option<(f32, [f32; 2])> {
+    /// reach above the feet (not a cap over the head); its top, its
+    /// middle, and how far its edge is from the body's side.
+    pub fn ledge(&self, p: [f32; 3], (wx, wz): (f32, f32)) -> Option<(f32, [f32; 2], f32)> {
         self.near(p[0], p[2], RADIUS + MANTLE_NEAR + self.reach)
             .filter_map(|q| {
                 let t = q.top()?;
                 let (dx, dz) = (q.x - p[0], q.z - p[2]);
                 let d = (dx * dx + dz * dz).sqrt().max(1e-4);
                 let over = q.cap().is_some() && d < q.stand_r();
-                if over || d - q.stand_r() >= RADIUS + MANTLE_NEAR {
+                let gap = d - q.stand_r() - RADIUS;
+                if over || gap >= MANTLE_NEAR {
                     return None;
                 }
                 let ahead = (dx * wx + dz * wz) / d;
                 (t > p[1] + MANTLE_LOW && t <= p[1] + MANTLE_REACH && ahead >= MANTLE_AHEAD)
-                    .then_some((t, [q.x, q.z]))
+                    .then_some((t, [q.x, q.z], gap))
             })
             .next()
     }

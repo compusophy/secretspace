@@ -69,7 +69,12 @@ pub const STAMINA_SPEND: u16 = 10;
 pub const STAMINA_BACK: u16 = 15;
 pub const STAMINA_BREATH: u8 = TICK_HZ as u8;
 pub const WINDED_UNTIL: u16 = STAMINA * 2 / 3;
+/// Wading in the sea: this share of the pace; every step in it keeps
+/// this share of the speed over that pace; a jump out of it this share
+/// of a jump.
 pub const WADE: f32 = 0.55;
+pub const WADE_KEEP: f32 = 0.5;
+pub const WADE_JUMP: f32 = 0.75;
 /// Speeding up toward where you steer, on the ground and in the air;
 /// slowing with no keys held; and how fast speed above your pace bleeds
 /// away on the ground (in the air it holds): momentum, so a slide or a
@@ -87,15 +92,19 @@ pub const MOMENTUM_ALONG: (f32, f32) = (0.2, -0.2);
 /// much faster (and less, gentler).
 pub const HILL: f32 = 0.45;
 /// Sliding: crouch while going fast (sprinting, or landing at speed). A
-/// boost (unless the last came within the cooldown, in ticks), friction
-/// on the flat, gravity down a slope, a little steering, a top speed; it
-/// ends below a crouch's pace, or standing up.
+/// boost, from slower than a timed hop's most and up to no faster than
+/// this (once a cooldown, in ticks, has passed since the last); friction
+/// on the flat, gravity down a slope, a little steering, a top speed (and
+/// over it, slowing this fast: m/s a second, more than any hill speeds
+/// it); it ends below a crouch's pace, or standing up.
 pub const SLIDE_MIN: f32 = 7.5;
 pub const SLIDE_BOOST: f32 = 3.0;
+pub const SLIDE_BOOST_TO: f32 = 14.0;
 pub const SLIDE_COOLDOWN: u8 = 30;
 pub const SLIDE_FRICTION: f32 = 4.5;
 pub const SLIDE_STEER: f32 = 1.6;
 pub const SLIDE_MAX: f32 = 18.0;
+pub const SLIDE_OVER: f32 = 18.0;
 /// Falling is quicker than rising; holding jump rises on the lighter
 /// pull, so a held jump goes higher than a tapped one.
 pub const GRAVITY: f32 = 30.0;
@@ -118,13 +127,17 @@ pub const HOP_MAX: f32 = 12.5;
 pub const AIR_JUMP: f32 = 7.0;
 pub const AIR_JUMP_KEEP: f32 = 0.5;
 /// Wall jumps: off a wall touched in the last few ticks, out from it and
-/// up (m/s), keeping a share of the speed along it; so many before you
-/// land.
+/// up (m/s), turned toward where you steer (by this much: 1 would turn a
+/// kick steered along the wall half way to it), keeping a share of the
+/// speed along it; so many before you land. Pushing into a wall you can
+/// still kick off, you slide down it no faster than this (m/s).
 pub const WALL_GRACE: u8 = 6;
 pub const WALL_KICK: f32 = 7.5;
 pub const WALL_JUMP: f32 = 8.5;
-pub const WALL_KEEP: f32 = 0.8;
+pub const WALL_AIM: f32 = 0.8;
+pub const WALL_KEEP: f32 = 0.95;
 pub const WALL_JUMPS: u8 = 3;
+pub const WALL_SLIDE_FALL: f32 = 2.5;
 /// Climbing a ledge (a rock, a pillar, a stone, the altar) in the air,
 /// pushing toward it: its top no more than this far over your feet (and
 /// more than the low mark), its edge this close beyond your body, ahead
@@ -136,6 +149,9 @@ pub const MANTLE_NEAR: f32 = 0.35;
 pub const MANTLE_AHEAD: f32 = 0.5;
 pub const MANTLE_OVER: f32 = 0.35;
 pub const MANTLE_PUSH: f32 = 3.5;
+/// Come at a ledge faster than a run, you go on over it at this share of
+/// that speed (a hop timed to the landing keeps it).
+pub const MANTLE_KEEP: f32 = 0.75;
 /// Launch runes: how many out in the wild (and one by each place), how
 /// wide one is (m), how far apart they lie (m), and how hard one throws
 /// you up (m/s; onto your broom, to glide where you will).
@@ -156,6 +172,23 @@ pub const HEIGHT: f32 = 1.85;
 pub const EYE: f32 = 1.6;
 /// Steps up this high without jumping; sticks to the ground going down.
 pub const STEP: f32 = 0.6;
+/// Chilled by Frost, speed over a chilled run drains this fast (m/s a
+/// second), in the air as on the ground.
+pub const CHILL_DRAG: f32 = 16.0;
+/// On the broom (the drop's, a launch rune's): steering this quick (m/s
+/// a second); let go, speed drifting away this slowly, as speed over its
+/// pace does. Looking straight down it dives, falling this fast and
+/// going this share faster (less, looking less steeply); out of a dive
+/// it pulls up this quickly (m/s a second).
+pub const GLIDE_ACCEL: f32 = 14.0;
+pub const GLIDE_DRAG: f32 = 2.0;
+pub const GLIDE_DIVE: f32 = 20.0;
+pub const GLIDE_DIVE_FAST: f32 = 0.3;
+pub const GLIDE_PULL: f32 = 60.0;
+/// The Tether: steering square to its rope swings you (m/s a second),
+/// and a swing dies away this much a second.
+pub const TETHER_STEER: f32 = 16.0;
+pub const TETHER_SWAY: f32 = 2.0;
 
 // The match.
 pub const MATCH_SIZE: usize = 16;
