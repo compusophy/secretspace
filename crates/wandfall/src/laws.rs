@@ -219,6 +219,12 @@ pub const TETHER_SWAY: f32 = 2.0;
 pub const MATCH_SIZE: usize = 16;
 /// Seconds of lobby once someone is waiting.
 pub const LOBBY_SECS: u32 = 12;
+/// People on the island at most (watching, waiting or playing); whoever
+/// comes past them watches. A page gone mid-fight (a phone between
+/// networks, a reload) has this many seconds to come back to its wizard,
+/// which stands where it was meanwhile.
+pub const MAX_PEOPLE: usize = 3 * MATCH_SIZE;
+pub const RECONNECT_SECS: u32 = 15;
 /// The island's day: each lobby turns it on an hour (dawn, day, dusk,
 /// night, and dawn again), so match after match the light changes; the
 /// range stays at dusk.

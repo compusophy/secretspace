@@ -27,6 +27,10 @@ pub enum Event {
     Open(u32, SyncSender<Vec<u8>>, Who),
     /// It said Hello again: who it is now, and the `Seen` to send it.
     Who(u32, Who, Vec<u8>),
+    /// An answer for the page alone (the room is not told), sent in its
+    /// turn with what the room sends. Only the room holds a page's
+    /// sender, so letting go of it still lets the page go.
+    Tell(u32, Vec<u8>),
     Say(u32, Vec<u8>),
     Close(u32),
 }
@@ -157,6 +161,11 @@ fn step(
                     room.who(conn, &who);
                 }
             }
+            Event::Tell(conn, msg) => {
+                if clients.contains_key(&conn) {
+                    out.send(conn, msg);
+                }
+            }
             Event::Say(conn, bytes) => room.message(conn, &bytes, out),
             Event::Close(conn) => {
                 if clients.remove(&conn).is_some() {
@@ -175,10 +184,15 @@ fn step(
     }
 }
 
-/// Send each message to its browser; the ones that cannot keep up.
+/// Send each message to its browser; the ones that cannot keep up. Once
+/// one cannot take a message it is sent nothing more (it is let go next
+/// tick): a stream with a hole in it is worse than none.
 fn deliver(out: Outbox, clients: &Clients) -> Vec<u32> {
     let mut gone = Vec::new();
     for (conn, msg) in out.0 {
+        if gone.contains(&conn) {
+            continue;
+        }
         if let Some(tx) = clients.get(&conn) {
             if let Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) = tx.try_send(msg) {
                 gone.push(conn);
@@ -382,6 +396,23 @@ mod tests {
             "and keeps ticking"
         );
         assert_eq!(b.state(), "running");
+    }
+
+    #[test]
+    fn a_page_that_falls_behind_is_sent_nothing_more() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(2);
+        let (tx2, rx2) = std::sync::mpsc::sync_channel(8);
+        let clients: Clients = [(1, tx), (2, tx2)].into_iter().collect();
+        let mut out = Outbox::default();
+        for k in 0..4u8 {
+            out.send(1, vec![k]);
+            out.send(2, vec![k]);
+        }
+        // The first room for two: the third is turned away, and so is
+        // the fourth, though by then there may be room again.
+        assert_eq!(deliver(out, &clients), vec![1]);
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), vec![vec![0], vec![1]]);
+        assert_eq!(rx2.try_iter().count(), 4);
     }
 
     #[test]

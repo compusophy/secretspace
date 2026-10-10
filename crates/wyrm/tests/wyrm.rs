@@ -211,5 +211,6 @@ fn a_restart_brings_a_soul_back_to_its_snake() {
         .filter(|s| s.id == id)
         .filter_map(|s| s.new.map(|n| n.0))
         .collect();
-    assert_eq!(names.first().map(String::as_str), Some("zoë"));
+    // Its name, as the font draws it.
+    assert_eq!(names.first().map(String::as_str), Some("zoe"));
 }

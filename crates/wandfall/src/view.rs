@@ -4,7 +4,13 @@
 
 use crate::motion::keys;
 use crate::proto::{flag, fx, BoltSeen, Frame, Loot, Own, Seen};
-use crate::world::{Phase, World};
+use crate::world::{Phase, Player, World};
+
+/// A page's own wizard, which its frame tells it exactly: there while it
+/// is alive. Every page without one is sent the same frame.
+pub fn yours(w: &World, you: u16) -> Option<&Player> {
+    w.find(you).filter(|p| p.alive)
+}
 
 pub fn frame(w: &World, you: u16) -> Frame {
     let storm = w.storm_now();
@@ -18,7 +24,7 @@ pub fn frame(w: &World, you: u16) -> Frame {
         }
         Phase::Fight => storm.secs,
     };
-    let own = w.find(you).filter(|p| p.alive).map(|p| Own {
+    let own = yours(w, you).map(|p| Own {
         body: p.body,
         seq: p.last.seq,
         hp: p.hp.clamp(0, u16::MAX as i32) as u16,

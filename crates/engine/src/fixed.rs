@@ -72,7 +72,8 @@ impl Fx {
         if n == 0 {
             self
         } else {
-            Fx(self.0 / n)
+            // The one quotient that does not fit (the least by -1) saturates.
+            Fx(self.0.saturating_div(n))
         }
     }
     /// The whole part, rounded toward minus infinity.
@@ -220,6 +221,10 @@ mod tests {
         assert_eq!(Fx::ONE.div(Fx::ZERO), Fx::MAX);
         assert_eq!(Fx::int(40_000).mul(Fx::int(40_000)), Fx::MAX);
         assert_eq!(Fx::milli(-1).floor(), -1);
+        assert_eq!(Fx::MIN.div_int(-1), Fx::MAX);
+        assert_eq!(Fx::int(9).div_int(3), Fx::int(3));
+        assert_eq!(Fx::int(-7).div_int(2), Fx(-7 * 65536 / 2));
+        assert_eq!(Fx::int(5).div_int(0), Fx::int(5));
     }
 
     #[test]

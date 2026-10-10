@@ -31,12 +31,18 @@ impl Env {
         Env { gain, attack, half }
     }
 
-    fn at(&self, t: f32) -> f32 {
+    /// Its rise (a straight line, cheap) until `attack`, then `fall`.
+    fn at(&self, t: f32, fall: f32) -> f32 {
         if t < self.attack {
             self.gain * t / self.attack.max(1e-6)
         } else {
-            self.gain * (-(t - self.attack) / self.half.max(1e-6) * std::f32::consts::LN_2).exp()
+            fall
         }
+    }
+
+    /// Its fall, at `t` seconds (an exponential, worked out as a `Curve`).
+    fn fall(&self, t: f32) -> f32 {
+        self.gain * (-(t - self.attack) / self.half.max(1e-6) * std::f32::consts::LN_2).exp()
     }
 }
 
@@ -49,6 +55,48 @@ pub struct Synth {
 fn sweep(a: f32, b: f32, k: f32) -> f32 {
     // Pitch moves evenly in octaves, not in hertz.
     a * (b / a.max(1e-3)).powf(k)
+}
+
+/// A sine wave at `phase` (0 to 1 a turn), to within a thousandth: each
+/// half a parabola, bent toward the true curve. Far cheaper than `sin`,
+/// and no ear can tell.
+fn sine(phase: f32) -> f32 {
+    // Across the turn y goes from -1 to 1, and sin(2πp) is -sin(πy).
+    let y = 2.0 * phase - 1.0;
+    let s = 4.0 * y * (1.0 - y.abs());
+    -s * (0.775 + 0.225 * s.abs())
+}
+
+/// Samples between the points where a voice's slow curves (its pitch
+/// sweeping, its vibrato, its envelope, its filters) are worked out
+/// exactly; between them they go in a straight line. A block is 1.5 ms,
+/// far quicker than any of them moves, and a sound is written many times
+/// faster than with every sample's own powers and exponentials.
+const BLOCK: usize = 32;
+
+/// A curve over a voice's life: `f` of its time in seconds, worked out
+/// exactly every `BLOCK` samples and in a straight line between.
+struct Curve<F: Fn(f32) -> f32> {
+    f: F,
+    from: f32,
+    to: f32,
+}
+
+impl<F: Fn(f32) -> f32> Curve<F> {
+    fn new(f: F) -> Curve<F> {
+        let to = f(0.0);
+        Curve { f, from: to, to }
+    }
+
+    /// Its value at sample `n` of the voice; asked of every sample in turn.
+    fn at(&mut self, n: usize) -> f32 {
+        let j = n % BLOCK;
+        if j == 0 {
+            self.from = self.to;
+            self.to = (self.f)((n + BLOCK) as f32 / RATE as f32);
+        }
+        self.from + (self.to - self.from) * (j as f32 / BLOCK as f32)
+    }
 }
 
 impl Synth {
@@ -77,14 +125,15 @@ impl Synth {
         vib: (f32, f32),
     ) -> &mut Synth {
         let (a, b) = self.span(at, len);
+        let mut hz = Curve::new(|t: f32| {
+            sweep(f.0, f.1, t / len.max(1e-6)) * (1.0 + vib.1 * (TAU * vib.0 * t).sin())
+        });
+        let mut fall = Curve::new(|t| env.fall(t));
         let mut phase = 0.0f32;
-        for i in a..b {
-            let t = (i - a) as f32 / RATE as f32;
-            let k = t / len.max(1e-6);
-            let hz = sweep(f.0, f.1, k) * (1.0 + vib.1 * (TAU * vib.0 * t).sin());
-            phase = (phase + hz / RATE as f32).fract();
+        for (n, i) in (a..b).enumerate() {
+            phase = (phase + hz.at(n) / RATE as f32).fract();
             let v = match wave {
-                Wave::Sine => (TAU * phase).sin(),
+                Wave::Sine => sine(phase),
                 Wave::Triangle => 1.0 - 4.0 * (phase - 0.5).abs(),
                 Wave::Square => {
                     if phase < 0.5 {
@@ -95,7 +144,7 @@ impl Synth {
                 }
                 Wave::Saw => (2.0 * phase - 1.0) * 0.8,
             };
-            self.out[i] += v * env.at(t);
+            self.out[i] += v * env.at(n as f32 / RATE as f32, fall.at(n));
         }
         self
     }
@@ -114,18 +163,20 @@ impl Synth {
         let (a, b) = self.span(at, len);
         let (mut low, mut high) = (0.0f32, 0.0f32);
         let mut gate = 1.0f32;
-        for i in a..b {
-            let t = (i - a) as f32 / RATE as f32;
-            let k = t / len.max(1e-6);
+        // Two one-pole filters: what is under `hi`, less what is under
+        // `lo`, each pole as its edge sweeps.
+        let pole = |hz: f32| 1.0 - (-TAU * hz / RATE as f32).exp();
+        let k = |t: f32| t / len.max(1e-6);
+        let mut hi_pole = Curve::new(|t| pole(sweep(hi.0, hi.1, k(t))));
+        let mut lo_pole = Curve::new(|t| pole(sweep(lo.0, lo.1, k(t))));
+        let mut fall = Curve::new(|t| env.fall(t));
+        for (n, i) in (a..b).enumerate() {
             self.seed ^= self.seed << 13;
             self.seed ^= self.seed >> 17;
             self.seed ^= self.seed << 5;
             let white = (self.seed as f32 / u32::MAX as f32) * 2.0 - 1.0;
-            // Two one-pole filters: what is under `hi`, less what is
-            // under `lo`.
-            let pole = |hz: f32| 1.0 - (-TAU * hz / RATE as f32).exp();
-            high += (white - high) * pole(sweep(hi.0, hi.1, k));
-            low += (high - low) * pole(sweep(lo.0, lo.1, k));
+            high += (white - high) * hi_pole.at(n);
+            low += (high - low) * lo_pole.at(n);
             if grain > 0.0 && i % (RATE as usize / 400) == 0 {
                 gate = if (self.seed >> 8) as f32 / (1u32 << 24) as f32 > grain {
                     1.0
@@ -133,7 +184,8 @@ impl Synth {
                     0.1
                 };
             }
-            self.out[i] += (high - low) * 2.0 * env.at(t) * gate;
+            let loud = env.at(n as f32 / RATE as f32, fall.at(n));
+            self.out[i] += (high - low) * 2.0 * loud * gate;
         }
         self
     }
@@ -232,6 +284,32 @@ mod tests {
         let loud = |p: &[f32]| p.iter().fold(0.0f32, |m, v| m.max(v.abs()));
         assert!(loud(&out[..2000]) > 0.8);
         assert!(loud(&out[out.len() - 2000..]) < 0.01, "and it fades");
+    }
+
+    #[test]
+    fn the_quick_curves_follow_the_exact_ones() {
+        // Every sample worked out exactly, as sounds once were.
+        let (f, len, env, vib) = ((300.0, 1200.0), 0.5, Env::new(0.8, 0.02, 0.1), (6.0, 0.03));
+        let mut s = Synth::new(len);
+        s.tone(Wave::Sine, f, (0.0, len), env, vib);
+        let mut phase = 0.0f32;
+        let exact = (0..s.out.len()).map(|i| {
+            let t = i as f32 / RATE as f32;
+            let hz = sweep(f.0, f.1, t / len) * (1.0 + vib.1 * (TAU * vib.0 * t).sin());
+            phase = (phase + hz / RATE as f32).fract();
+            (TAU * phase).sin() * env.at(t, env.fall(t))
+        });
+        let most = s
+            .out
+            .iter()
+            .zip(exact)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(most < 0.01, "{most}");
+        for k in 0..1000 {
+            let p = k as f32 / 1000.0;
+            assert!((sine(p) - (TAU * p).sin()).abs() < 1.2e-3, "{p}");
+        }
     }
 
     #[test]
