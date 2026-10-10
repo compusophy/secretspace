@@ -347,12 +347,13 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             } else if p.meta.in_game_panel() {
                 menu::settings_panel(&mut p.g.hud, &mut p.spots, ui, &p.set);
             } else if !p.touch && !p.meta.is_open() && !kit::input::locked() && p.orbit.is_none() {
-                // The mouse is free: a word on how to get back to it.
+                // The mouse is free: a word on how to get back to it,
+                // over the crosshair (the cards under it stay clear).
                 let c = &mut p.g.hud;
                 let k = pixels::fit_scale("click to play", c.w - 16 * ui, 2 * ui);
                 c.text_shadowed(
                     (c.w - pixels::text_width("click to play", k)) / 2,
-                    c.h / 2 + 30 * ui,
+                    c.h / 2 - 24 * ui - 7 * k,
                     "click to play",
                     k,
                     pixels::Rgba::rgb(250, 246, 236),
