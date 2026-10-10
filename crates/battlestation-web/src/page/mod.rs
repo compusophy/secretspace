@@ -130,6 +130,8 @@ struct Page {
     skip: u8,
     /// When the menu last opened (ms).
     menu_at: f64,
+    /// The canvas's CSS cursor as last set.
+    cursor: &'static str,
     was_locked: bool,
     touch: bool,
     hooks: Hooks,
@@ -186,6 +188,7 @@ impl Page {
             last_mouse: None,
             skip: 0,
             menu_at: 0.0,
+            cursor: "",
             was_locked: false,
             touch,
             hooks,
@@ -204,7 +207,15 @@ impl Page {
         }
         self.last = now;
         input::input(self, now, dt);
-        CAPTURE.with(|c| c.set(self.seated && !self.meta.is_open()));
+        let playing = self.seated && !self.meta.is_open();
+        CAPTURE.with(|c| c.set(playing));
+        // Your own arrow is hidden only while you sit at the desk (its
+        // arrow is on the monitor); over a menu, or standing, it shows.
+        let cursor = if playing { "none" } else { "default" };
+        if cursor != self.cursor {
+            let _ = self.out.canvas().style().set_property("cursor", cursor);
+            self.cursor = cursor;
+        }
         view::frame(self, now, dt);
     }
 }
@@ -232,14 +243,12 @@ impl Page {
         if grab && !self.touch {
             kit::input::play(self.out.canvas(), !self.hooks.windowed);
         }
-        let _ = self.out.canvas().style().set_property("cursor", "none");
     }
 
     /// Get up: give the mouse, the keys and the screen back.
     fn stand(&mut self) {
         self.seated = false;
         kit::input::release();
-        let _ = self.out.canvas().style().set_property("cursor", "default");
         if let Some(f) = &self.field {
             f.blur();
             f.place(None);
