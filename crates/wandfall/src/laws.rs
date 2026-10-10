@@ -19,6 +19,11 @@ pub const TREES: usize = 400;
 pub const ROCKS: usize = 130;
 pub const SHROOMS: usize = 40;
 pub const RUINS: usize = 8;
+/// A giant mushroom's cap, for every metre the mushroom stands: how wide
+/// (from its middle), and how high its underside and its top are.
+pub const SHROOM_CAP: f32 = 0.44;
+pub const SHROOM_UNDER: f32 = 0.88;
+pub const SHROOM_TOP: f32 = 1.15;
 /// The Spire at the centre: a plaza this high and this wide, falling to
 /// the hills over this far, and its tower.
 pub const PLATEAU_TOP: f32 = 7.0;

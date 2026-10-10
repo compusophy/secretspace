@@ -1,6 +1,6 @@
 use super::*;
 
-fn stand(map: &Map) -> Body {
+pub(super) fn stand(map: &Map) -> Body {
     let [x, z] = map.spot(&mut engine::rng::Rng::new(5));
     Body {
         p: [x, map.height(x, z), z],
@@ -52,7 +52,7 @@ fn runs_where_it_looks_and_lands_from_a_jump() {
 /// Flat open ground (across the Spire's plaza, east of its west
 /// edge, clear of the tower) and a hill to slide down: where each is
 /// (x, z) and which way is downhill.
-fn grounds(map: &Map) -> ([f32; 2], ([f32; 2], [f32; 2])) {
+pub(super) fn grounds(map: &Map) -> ([f32; 2], ([f32; 2], [f32; 2])) {
     let flat = [-17.0, -9.0];
     let mut hill = None;
     let g = |x: f32, z: f32| {
@@ -72,7 +72,7 @@ fn grounds(map: &Map) -> ([f32; 2], ([f32; 2], [f32; 2])) {
     (flat, hill.expect("a hill"))
 }
 
-fn on(map: &Map, at: [f32; 2], v: [f32; 2]) -> Body {
+pub(super) fn on(map: &Map, at: [f32; 2], v: [f32; 2]) -> Body {
     Body {
         p: [at[0], map.height(at[0], at[1]), at[1]],
         v: [v[0], 0.0, v[1]],
@@ -82,7 +82,7 @@ fn on(map: &Map, at: [f32; 2], v: [f32; 2]) -> Body {
     }
 }
 
-fn east(keys: u16) -> Input {
+pub(super) fn east(keys: u16) -> Input {
     Input {
         keys,
         yaw: 0,
@@ -92,7 +92,7 @@ fn east(keys: u16) -> Input {
 
 /// A pillar whose top stands `lo..hi` over open ground just west of
 /// it (where a wizard faces it, looking east): it, and that spot.
-fn pillar(map: &Map, (lo, hi): (f32, f32)) -> (crate::map::Prop, [f32; 2]) {
+pub(super) fn pillar(map: &Map, (lo, hi): (f32, f32)) -> (crate::map::Prop, [f32; 2]) {
     map.props
         .iter()
         .filter(|q| q.kind == crate::map::Kind::Pillar)
@@ -179,7 +179,7 @@ fn a_launch_rune_throws_you_up_onto_your_broom_and_you_glide_down() {
 }
 
 /// A body on the plaza (flat), and a step under `keys` heading `yaw`.
-fn plaza(map: &Map) -> Body {
+pub(super) fn plaza(map: &Map) -> Body {
     let (flat, _) = grounds(map);
     Body {
         p: [flat[0], map.height(flat[0], flat[1]), flat[1]],
@@ -188,7 +188,7 @@ fn plaza(map: &Map) -> Body {
     }
 }
 
-fn go(b: &mut Body, keys: u16, yaw: u16, map: &Map) {
+pub(super) fn go(b: &mut Body, keys: u16, yaw: u16, map: &Map) {
     step(
         b,
         &Input {

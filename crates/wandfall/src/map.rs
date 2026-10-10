@@ -37,13 +37,21 @@ impl Kind {
     pub fn standable(self) -> bool {
         matches!(
             self,
-            Kind::Rock | Kind::Pillar | Kind::Stone | Kind::Altar | Kind::Merlon | Kind::Column
+            Kind::Rock
+                | Kind::Pillar
+                | Kind::Stone
+                | Kind::Altar
+                | Kind::Merlon
+                | Kind::Column
+                | Kind::Shroom
         )
     }
 }
 
 /// One thing standing on the island. Its trunk, body or shaft blocks
-/// wizards and bolts: a cylinder `r` wide and `h` tall from `y`.
+/// wizards and bolts: a cylinder `r` wide and `h` tall from `y`. A giant
+/// mushroom's cap, wider than its stem, holds up wizards come down onto
+/// it (from below they pass through it) and stops bolts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Prop {
     pub kind: Kind,
@@ -59,14 +67,31 @@ pub struct Prop {
 
 impl Prop {
     /// Where feet stand on its top, if they can: a boulder's rounded top
-    /// stands a little over its trunk.
+    /// stands a little over its trunk, a mushroom's cap over its stem.
     pub fn top(&self) -> Option<f32> {
-        let h = if self.kind == Kind::Rock {
-            self.h * ROCK_TOP
-        } else {
-            self.h
+        let h = match self.kind {
+            Kind::Rock => self.h * ROCK_TOP,
+            Kind::Shroom => self.h * SHROOM_TOP,
+            _ => self.h,
         };
         self.kind.standable().then_some(self.y + h)
+    }
+
+    /// How far out from its middle its top holds you up.
+    pub fn stand_r(&self) -> f32 {
+        if self.kind == Kind::Shroom {
+            self.h * SHROOM_CAP
+        } else {
+            self.r
+        }
+    }
+
+    /// Its cap, if it has one: how wide, and from what height to what.
+    pub fn cap(&self) -> Option<(f32, f32, f32)> {
+        (self.kind == Kind::Shroom).then(|| {
+            let top = self.y + self.h * SHROOM_TOP;
+            (self.stand_r(), self.y + self.h * SHROOM_UNDER, top)
+        })
     }
 }
 
@@ -86,6 +111,8 @@ pub struct Map {
     /// (each its middle, on the ground).
     pub pads: Vec<[f32; 3]>,
     grid: Vec<Vec<u16>>,
+    /// How much further than its trunk any prop's top reaches (a cap's).
+    reach: f32,
 }
 
 pub fn smooth(t: f32) -> f32 {
@@ -135,6 +162,7 @@ impl Map {
             decks: Vec::new(),
             pads: Vec::new(),
             grid: vec![Vec::new(); (CELLS * CELLS) as usize],
+            reach: 0.0,
         };
         places::set(&mut m);
         m.scatter();
@@ -207,7 +235,12 @@ impl Map {
                 f = f.max(h);
             }
         }
-        for q in self.near(x, z, 0.0) {
+        for q in self.near(x, z, self.reach) {
+            let (dx, dz) = (q.x - x, q.z - z);
+            let r = q.stand_r();
+            if dx * dx + dz * dz >= r * r {
+                continue;
+            }
             if let Some(t) = q.top().filter(|&t| t <= y + STEP) {
                 f = f.max(t);
             }
@@ -217,13 +250,17 @@ impl Map {
 
     /// A ledge to climb onto from feet at `p`, pushing along (`wx`, `wz`):
     /// the top of something that can be stood on, close ahead and within
-    /// reach above the feet; its top and middle.
+    /// reach above the feet (not a cap over the head); its top and middle.
     pub fn ledge(&self, p: [f32; 3], (wx, wz): (f32, f32)) -> Option<(f32, [f32; 2])> {
-        self.near(p[0], p[2], RADIUS + MANTLE_NEAR)
+        self.near(p[0], p[2], RADIUS + MANTLE_NEAR + self.reach)
             .filter_map(|q| {
                 let t = q.top()?;
                 let (dx, dz) = (q.x - p[0], q.z - p[2]);
                 let d = (dx * dx + dz * dz).sqrt().max(1e-4);
+                let over = q.cap().is_some() && d < q.stand_r();
+                if over || d - q.stand_r() >= RADIUS + MANTLE_NEAR {
+                    return None;
+                }
                 let ahead = (dx * wx + dz * wz) / d;
                 (t > p[1] + MANTLE_LOW && t <= p[1] + MANTLE_REACH && ahead >= MANTLE_AHEAD)
                     .then_some((t, [q.x, q.z]))
@@ -247,6 +284,7 @@ impl Map {
     pub fn put(&mut self, p: Prop) {
         let i = self.props.len() as u16;
         self.props.push(p);
+        self.reach = self.reach.max(p.stand_r() - p.r);
         let c = |v: f32| (((v + MAP_HALF) / CELL).floor() as i32).clamp(0, CELLS - 1);
         for cz in c(p.z - p.r)..=c(p.z + p.r) {
             for cx in c(p.x - p.r)..=c(p.x + p.r) {
@@ -373,13 +411,16 @@ impl Map {
     }
 
     /// Move a wizard at `p` (feet), `tall` metres tall, out of anything
-    /// standing there.
-    pub fn push_out(&self, p: &mut [f32; 3], tall: f32) {
+    /// standing there; not out of a top it can step up onto (`rise`
+    /// above its feet at most).
+    pub fn push_out(&self, p: &mut [f32; 3], tall: f32, rise: f32) {
         let hits: Vec<Prop> = self.near(p[0], p[2], RADIUS).copied().collect();
         for q in hits {
-            // Over its top (or standing on it), or under it: clear.
+            // Over its top (or standing on it), a step below the feet, or
+            // over the head: clear.
             let top = q.top().unwrap_or(q.y + q.h).max(q.y + q.h);
-            if p[1] >= top - 0.02 || p[1] + tall < q.y {
+            let step = q.top().is_some_and(|t| t <= p[1] + rise);
+            if p[1] >= top - 0.02 || step || p[1] + tall < q.y {
                 continue;
             }
             let (dx, dz) = (p[0] - q.x, p[2] - q.z);
@@ -416,29 +457,19 @@ impl Map {
         let len = (d[0] * d[0] + d[2] * d[2]).sqrt();
         let mid = [a[0] + d[0] * 0.5, a[2] + d[2] * 0.5];
         for q in self
-            .near(mid[0], mid[1], len * 0.5 + BOLT_RADIUS)
+            .near(mid[0], mid[1], len * 0.5 + BOLT_RADIUS + self.reach)
             .filter(|q| solid(q))
         {
-            // Circle against the segment, on the ground's plane.
-            let (fx, fz) = (a[0] - q.x, a[2] - q.z);
-            let r = q.r + BOLT_RADIUS;
-            let aa = d[0] * d[0] + d[2] * d[2];
-            let bb = 2.0 * (fx * d[0] + fz * d[2]);
-            let cc = fx * fx + fz * fz - r * r;
-            let t = if cc <= 0.0 {
-                0.0
-            } else {
-                let disc = bb * bb - 4.0 * aa * cc;
-                if aa < 1e-9 || disc < 0.0 {
-                    continue;
-                }
-                (-bb - disc.sqrt()) / (2.0 * aa)
-            };
-            if !(0.0..=1.0).contains(&t) {
-                continue;
+            let top = q.top().unwrap_or(q.y + q.h).max(q.y + q.h);
+            let mut hit = through(a, d, [q.x, q.z], q.r + BOLT_RADIUS, (q.y, top));
+            if let Some((r, lo, hi)) = q.cap() {
+                let cap = through(a, d, [q.x, q.z], r + BOLT_RADIUS, (lo, hi));
+                hit = match (hit, cap) {
+                    (Some(s), Some(c)) => Some(s.min(c)),
+                    (s, c) => s.or(c),
+                };
             }
-            let y = a[1] + d[1] * t;
-            if y >= q.y && y <= q.y + q.h && first.is_none_or(|f| t < f) {
+            if let Some(t) = hit.filter(|&t| first.is_none_or(|f| t < f)) {
                 first = Some(t);
             }
         }
@@ -478,6 +509,42 @@ impl Map {
     }
 }
 
+/// Where along the segment from `a` (along `d`, 0..1) it first is inside
+/// an upright cylinder about `at`, `r` wide, from height `lo` to `hi`: in
+/// through its side, or down (or up) through its top (or bottom).
+fn through(a: [f32; 3], d: [f32; 3], at: [f32; 2], r: f32, (lo, hi): (f32, f32)) -> Option<f32> {
+    // Inside its circle, on the ground's plane...
+    let (fx, fz) = (a[0] - at[0], a[2] - at[1]);
+    let aa = d[0] * d[0] + d[2] * d[2];
+    let cc = fx * fx + fz * fz - r * r;
+    let (t0, t1) = if aa < 1e-9 {
+        if cc > 0.0 {
+            return None;
+        }
+        (0.0, 1.0)
+    } else {
+        let bb = 2.0 * (fx * d[0] + fz * d[2]);
+        let disc = bb * bb - 4.0 * aa * cc;
+        if disc < 0.0 {
+            return None;
+        }
+        let s = disc.sqrt();
+        ((-bb - s) / (2.0 * aa), (-bb + s) / (2.0 * aa))
+    };
+    // ...and inside its height, at once.
+    let (y0, y1) = if d[1].abs() < 1e-9 {
+        if a[1] < lo || a[1] > hi {
+            return None;
+        }
+        (0.0, 1.0)
+    } else {
+        let (u, w) = ((lo - a[1]) / d[1], (hi - a[1]) / d[1]);
+        (u.min(w), u.max(w))
+    };
+    let (enter, exit) = (t0.max(y0).max(0.0), t1.min(y1).min(1.0));
+    (enter <= exit).then_some(enter)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,7 +575,7 @@ mod tests {
             assert_eq!(m.height(0.0, 0.0), PLATEAU_TOP);
             assert_eq!(m.height(PLATEAU - 1.0, 0.0), PLATEAU_TOP);
             let mut p = [0.5, PLATEAU_TOP, 0.0];
-            m.push_out(&mut p, HEIGHT);
+            m.push_out(&mut p, HEIGHT, 0.0);
             assert!(p[0] >= TOWER_RADIUS + RADIUS - 1e-3, "the tower blocks");
             for q in &m.pois {
                 assert!(m.land(q.x, q.z), "seed {seed}: {:?} on land", q.place);
@@ -566,7 +633,7 @@ mod tests {
         let m = Map::new(3);
         let q = *m.props.iter().find(|p| p.kind == Kind::Rock).unwrap();
         let mut p = [q.x + 0.1, q.y + 0.2, q.z];
-        m.push_out(&mut p, HEIGHT);
+        m.push_out(&mut p, HEIGHT, 0.0);
         let d = ((p[0] - q.x).powi(2) + (p[2] - q.z).powi(2)).sqrt();
         assert!(d >= q.r + RADIUS - 1e-4);
         let a = [q.x - 3.0, q.y + q.h * 0.5, q.z];
@@ -575,5 +642,39 @@ mod tests {
         assert!(t > 0.2 && t < 0.6, "{t}");
         let up = [q.x - 3.0, q.y + q.h + 20.0, q.z];
         assert!(m.strikes(up, [q.x + 3.0, up[1], q.z]).is_none(), "over it");
+    }
+
+    #[test]
+    fn a_bolt_coming_down_onto_a_top_strikes_the_top() {
+        let m = Map::new(11);
+        let tops = m.props.iter().filter(|q| {
+            matches!(
+                q.kind,
+                Kind::Pillar | Kind::Rock | Kind::Column | Kind::Stone
+            )
+        });
+        let mut n = 0;
+        for q in tops {
+            let top = q.top().unwrap();
+            // Past its side over it and down in through its top; and
+            // straight down onto its middle.
+            let rays = [
+                (
+                    [q.x - q.r - 1.0, top + 1.0, q.z],
+                    [q.x + q.r * 0.5, top - 1.0, q.z],
+                ),
+                ([q.x, top + 4.0, q.z], [q.x, q.y, q.z]),
+            ];
+            for (a, b) in rays {
+                let t = m.strikes(a, b).expect("it strikes");
+                let y = a[1] + (b[1] - a[1]) * t;
+                // Unless something else stood in the way first.
+                if (y - top).abs() > 0.05 {
+                    assert!(y > top, "{q:?}: struck at {y}, under its top {top}");
+                }
+                n += 1;
+            }
+        }
+        assert!(n > 100, "{n}");
     }
 }
