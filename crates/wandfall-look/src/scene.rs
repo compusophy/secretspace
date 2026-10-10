@@ -162,7 +162,9 @@ pub fn draw(
             st.dust.push((now, s.p, 0.25));
         }
         // Far off, the coarser wizard.
-        let frames = look.rig.wizard(d, s.id, s.p, yaw, a, &pose, far(s.p, cam.eye));
+        let frames = look
+            .rig
+            .wizard(d, s.id, s.p, yaw, a, &pose, far(s.p, cam.eye));
         drawn.push(Drawn {
             id: s.id,
             feet: s.p,
@@ -196,7 +198,8 @@ pub fn draw(
     // The knocked out fall, and burst into sparks.
     for &(when, at, who, yaw, _) in &st.falls {
         let age = (clock.age(when) / 1000.0) as f32;
-        look.rig.fallen(d, who, (at, far(at, cam.eye)), trig::radians(yaw), age);
+        look.rig
+            .fallen(d, who, (at, far(at, cam.eye)), trig::radians(yaw), age);
     }
     let falls: Vec<_> = st.falls.iter().map(|f| (f.0, f.1, f.2)).collect();
     fx::falls(look, d, &falls, clock);

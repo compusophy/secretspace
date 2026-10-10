@@ -191,7 +191,7 @@ pub fn ao(msaa: bool) -> String {
     } else {
         "texture_2d<f32>"
     };
-    format!("{AO}{}", super::IGN)
+    format!("{}{}", AO, super::IGN)
         .replace("DEPTH_TYPE", super::depth_type(msaa))
         .replace("PICTURE_TYPE", picture)
 }

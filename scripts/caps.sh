@@ -33,9 +33,10 @@ chars=$(wc -c < CLAUDE.md)
 # The core is deterministic: what a page predicts (Wandfall's movement and
 # the island it moves over) must come out bit for bit as the server's, so
 # that code calls crate::trig, never the platform's float functions (sqrt,
-# exact everywhere, is fine). Tests may use them.
+# exact everywhere, is fine). Tests may use them (after a #[cfg(test)],
+# or in a tests.rs).
 for f in crates/wandfall/src/{motion,tether,wall,predict,map,places}.rs \
-  $(find crates/wandfall/src/motion crates/wandfall/src/predict -name '*.rs' 2>/dev/null); do
+  $(find crates/wandfall/src/motion crates/wandfall/src/predict -name '*.rs' ! -name tests.rs 2>/dev/null); do
   [ -f "$f" ] || continue
   hits=$(sed '/#\[cfg(test)\]/,$d' -- "$f" | grep -nE '\.(sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|sin_cos|powf|exp|exp2|exp_m1|ln|ln_1p|log|log2|log10|hypot|cbrt)\(' || true)
   [ -z "$hits" ] || say "$f calls the platform's float functions (use crate::trig): $hits"

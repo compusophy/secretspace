@@ -61,7 +61,7 @@ fn shafts_fs(i: Out) -> @location(0) vec4<f32> {
 
 /// The shafts' module, for a depth that is many-sampled (`msaa`) or not.
 pub fn shafts(msaa: bool) -> String {
-    format!("{SHAFTS}{}", super::IGN)
+    format!("{}{}", SHAFTS, super::IGN)
         .replace("DEPTH_TYPE", super::depth_type(msaa))
         .replace("SHAFT_STEPS", &format!("{}", crate::laws::SHAFT_STEPS))
         .replace("SHAFT_DECAY", &format!("{:.4}", crate::laws::SHAFT_DECAY))
