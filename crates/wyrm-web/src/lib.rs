@@ -58,6 +58,8 @@ struct Page {
     boost_finger: Option<i32>,
     /// What was last sent: angle, boost, when.
     sent: (u16, bool, f64),
+    /// The snake last steered: a new one is sent its heading at once.
+    you: u16,
     /// Play was pressed; join as soon as the server is there.
     joining: bool,
     beat_at: f64,
@@ -114,6 +116,9 @@ fn receive(p: &mut Page, now: f64, bytes: &[u8]) {
             p.taken = true;
             p.joining = false;
             p.renaming = false;
+            // Back to the name it has, or every reconnect asks again.
+            let keep = p.seen.clone().unwrap_or_else(|| p.session.name());
+            p.link.set_hello(p.session.hello(&keep, false));
             return;
         }
         // The stored name wins over what this browser last typed.
@@ -194,6 +199,7 @@ fn tick(p: &mut Page, now: f64) {
         u: p.screen.ui(),
         steer: p.steer,
         boost: boost_button(p).map(|b| (b, p.boost_finger.is_some())),
+        hold: p.joining && !p.st.playing(),
     };
     let (css, scale) = (p.screen.css, p.screen.scale);
     render::frame(&mut p.screen.px, &mut p.st, css, scale, now, &hud);
@@ -257,13 +263,25 @@ fn tick(p: &mut Page, now: f64) {
     }
     p.screen.present();
 
-    if p.st.playing() {
-        let you = p.st.mirror.snakes.get(&p.st.mirror.you);
-        let angle = p.steer.or(you.map(|s| s.angle)).unwrap_or(0.0);
+    let you = p.st.live.mirror.you;
+    // A new snake (or one taken up again) heads where the mouse is now,
+    // not where it pointed in the last life; on a phone, and before the
+    // mouse is seen, its own way until the first drag.
+    let fresh = you != p.you;
+    if fresh && you != 0 {
+        p.steer = None;
+        if let (Some((x, y)), false) = (p.pointer, p.touch) {
+            aim(p, x, y);
+        }
+    }
+    p.you = you;
+    if you != 0 {
+        let mine = p.st.live.mirror.snakes.get(&you);
+        let angle = p.steer.or(mine.map(|s| s.angle)).unwrap_or(0.0);
         let a = angle_to_u16(angle);
         let boost = p.boost_mouse || p.boost_key || p.boost_finger.is_some();
         let turned = (a.wrapping_sub(p.sent.0) as i16).unsigned_abs() > 60;
-        if (turned || boost != p.sent.1) && now - p.sent.2 >= STEER_EVERY {
+        if fresh || ((turned || boost != p.sent.1) && now - p.sent.2 >= STEER_EVERY) {
             send(p, &Up::Steer { angle: a, boost });
             p.sent = (a, boost, now);
         }
@@ -347,6 +365,7 @@ pub fn start() -> Result<(), JsValue> {
             boost_key: false,
             boost_finger: None,
             sent: (0, false, 0.0),
+            you: 0,
             joining: false,
             beat_at: 0.0,
             menu: false,

@@ -30,7 +30,9 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
     let (w, h) = (c.w as f32, c.h as f32);
     c.fill_rect(0, 0, c.w, c.h, Rgba(7, 10, 18, 150));
     let narrow = w / uf < 420.0;
-    let t = (now / 1000.0) as f32;
+    // Seconds, wrapped to the title's colour cycle so it stays smooth on a
+    // page left open for days.
+    let t = ((now / 1000.0) % 9.0) as f32;
 
     // The shared menu (Esc; on a phone, this button, here between lives
     // only): feedback, leaving the game.

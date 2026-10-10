@@ -1,12 +1,16 @@
 //! How wyrm looks, pixel by pixel: a dark field with a faint grid and a
-//! glowing edge, pulsing food, striped snakes eased along their paths
-//! between the server's frames, and bursts where they die. The game's page
-//! and the hub's live preview both draw with this, so they look the same.
+//! glowing edge, pulsing food, glossy striped snakes eased along their
+//! paths between the server's frames, and bursts where they die. The
+//! game's page and the hub's live preview both draw with this, so they
+//! look the same; `live` keeps what they are sent.
 
-use std::collections::VecDeque;
+pub mod live;
+mod snake;
+
+pub use live::{ease, Live, BURST_MS, CAMERA_MS, GULP_MS, ZOOM_MS};
 
 use pixels::{Canvas, Rgba};
-use wyrm::laws::{food_radius, radius};
+use wyrm::laws::food_radius;
 use wyrm::mirror::{Mirror, Pellet, Seen};
 
 pub const BG: Rgba = Rgba::rgb(7, 10, 18);
@@ -32,23 +36,45 @@ pub fn hue(h: u8) -> f32 {
     h as f32 * 360.0 / 256.0
 }
 
-/// The point `i` places along a body, between its points.
-pub fn along(body: &VecDeque<(f32, f32)>, i: f32) -> (f32, f32) {
-    let n = body.len();
+/// Where a wave `period_ms` long is at `now`, in radians. Worked out in
+/// f64 first, so a page left open for days still moves smoothly.
+pub fn phase(now: f64, period_ms: f64) -> f32 {
+    ((now / period_ms) % std::f64::consts::TAU) as f32
+}
+
+/// How a snake is drawn now, `alpha` of the way to the next frame: how
+/// many points behind its newest head it starts, and how many points long
+/// it is.
+pub fn drawn(s: &Seen, alpha: f32) -> (f32, f32) {
+    let k = 1.0 - alpha.clamp(0.0, 1.0);
+    (s.lag * k, (s.body.len() as f32 - s.short * k).max(1.0))
+}
+
+/// The point `i` places along a snake, between its points: along its body
+/// and on into the trail just cut off it.
+pub fn along(s: &Seen, i: f32) -> (f32, f32) {
+    let (nb, n) = (s.body.len(), s.body.len() + s.trail.len());
     if n == 0 {
         return (0.0, 0.0);
     }
+    let at = |k: usize| {
+        let k = k.min(n - 1);
+        if k < nb {
+            s.body[k]
+        } else {
+            s.trail[k - nb]
+        }
+    };
     let i = i.max(0.0);
-    let k = (i.floor() as usize).min(n - 1);
+    let k = i.floor() as usize;
     let t = i - k as f32;
-    let a = body[k];
-    let b = body[(k + 1).min(n - 1)];
+    let (a, b) = (at(k), at(k + 1));
     (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t)
 }
 
 /// Where a snake's head is drawn now, `alpha` of the way to the next frame.
 pub fn head(s: &Seen, alpha: f32) -> (f32, f32) {
-    along(&s.body, (1.0 - alpha) * s.moved as f32)
+    along(s, drawn(s, alpha).0)
 }
 
 /// Where a watcher's camera should be: the head of the snake nearest the
@@ -111,7 +137,7 @@ pub fn world(c: &mut Canvas, v: &View, sc: &Scene, now: f64) {
     let mut order: Vec<&Seen> = m.snakes.values().collect();
     order.sort_by_key(|s| (s.mass, s.id == m.you));
     for s in order {
-        snake(c, v, s, sc, s.id == m.you, now);
+        snake::draw(c, v, s, sc, s.id == m.you, now);
     }
     bursts(c, v, sc.bursts, now);
 }
@@ -155,26 +181,28 @@ fn ground(c: &mut Canvas, v: &View, arena: f32) {
 }
 
 fn food(c: &mut Canvas, v: &View, sc: &Scene, now: f64) {
+    let beat = phase(now, 380.0);
     for (id, p) in &sc.mirror.food {
         let (x, y) = v.at((p.x, p.y));
         if !v.sees((x, y), 12.0) {
             continue;
         }
-        let pulse = 1.0 + 0.18 * ((now / 380.0) as f32 + (*id % 97) as f32).sin();
+        let pulse = 1.0 + 0.18 * (beat + (*id % 97) as f32).sin();
         let r = (food_radius(p.value) * v.k * pulse).max(1.0);
         c.glow(x, y, r * 2.6, Rgba::hsl(hue(p.hue), 1.0, 0.6).fade(0.55));
         c.circle(x, y, r, Rgba::hsl(hue(p.hue), 1.0, 0.68));
     }
-    // Food on its way into a mouth.
+    // Food on its way into a mouth, faster as it nears.
     for g in sc.gulps {
         let Some(s) = sc.mirror.snakes.get(&g.by) else {
             continue;
         };
-        let to = s.body.front().copied().unwrap_or_default();
-        let t = ((now - g.at) / 250.0).clamp(0.0, 1.0) as f32;
+        let to = head(s, sc.alpha);
+        let t = ((now - g.at) / GULP_MS).clamp(0.0, 1.0) as f32;
+        let tt = t * t;
         let p = (
-            g.pellet.x + (to.0 - g.pellet.x) * t,
-            g.pellet.y + (to.1 - g.pellet.y) * t,
+            g.pellet.x + (to.0 - g.pellet.x) * tt,
+            g.pellet.y + (to.1 - g.pellet.y) * tt,
         );
         let (x, y) = v.at(p);
         let r = food_radius(g.pellet.value) * v.k * (1.0 - t);
@@ -187,108 +215,63 @@ fn food(c: &mut Canvas, v: &View, sc: &Scene, now: f64) {
     }
 }
 
-fn snake(c: &mut Canvas, v: &View, s: &Seen, sc: &Scene, mine: bool, now: f64) {
-    let lag = (1.0 - sc.alpha) * s.moved as f32;
-    let n = s.body.len();
-    if n == 0 {
-        return;
-    }
-    let r = radius(s.mass as f32) * v.k;
-    let pts: Vec<(f32, f32)> = (0..n)
-        .map(|k| v.at(along(&s.body, k as f32 + lag)))
-        .collect();
-    if !pts.iter().step_by(4).any(|&p| v.sees(p, r + 40.0)) {
-        return;
-    }
-    // Close points on a fat snake overlap anyway: draw fewer.
-    let gap = wyrm::laws::STEP * v.k;
-    let every = ((r * 0.6) / gap.max(0.1)).floor().max(1.0) as usize;
-    let see = |p: (f32, f32)| v.sees(p, r + 2.0);
-    let a = if s.ghost {
-        0.35 + 0.2 * ((now / 120.0) as f32).sin()
-    } else {
-        1.0
-    };
-    let h = hue(s.hue);
-
-    if s.boosting {
-        let flicker = 0.35 + 0.15 * ((now / 60.0) as f32).sin();
-        for &p in pts.iter().rev().step_by(every * 3) {
-            if see(p) {
-                c.glow(p.0, p.1, r * 2.6, Rgba::hsl(h, 1.0, 0.65).fade(flicker * a));
-            }
-        }
-    }
-    // Outline under everything, then the body from the tail up, in bands
-    // that stay put on the body as it moves.
-    let outline = Rgba::hsl(h, 0.7, 0.16).fade(a);
-    for (k, &p) in pts.iter().enumerate().rev() {
-        if (k % every == 0 || k == 0) && see(p) {
-            c.circle(p.0, p.1, r + 1.2, outline);
-        }
-    }
-    for (k, &p) in pts.iter().enumerate().rev() {
-        if (k % every == 0 || k == 0) && see(p) {
-            let band = (s.seq.wrapping_sub(k as u32) / 5).is_multiple_of(2);
-            let l = if band { 0.6 } else { 0.5 };
-            c.circle(p.0, p.1, r, Rgba::hsl(h, 0.88, l).fade(a));
-        }
-    }
-
-    // Eyes, looking where it heads (yours: where you point).
-    let (hx, hy) = pts[0];
-    let look = if mine {
-        sc.steer.unwrap_or(s.angle)
-    } else {
-        s.angle
-    };
-    for side in [-1.0f32, 1.0] {
-        let e = s.angle + side * 0.75;
-        let (ex, ey) = (hx + e.cos() * r * 0.55, hy + e.sin() * r * 0.55);
-        c.circle(
-            ex,
-            ey,
-            (r * 0.38).max(1.2),
-            Rgba::rgb(255, 255, 255).fade(a),
-        );
-        c.circle(
-            ex + look.cos() * r * 0.15,
-            ey + look.sin() * r * 0.15,
-            (r * 0.2).max(0.7),
-            Rgba::rgb(11, 13, 20).fade(a),
-        );
-    }
-
-    // Names over other snakes.
-    if let (Some(u), false) = (sc.names, mine) {
-        let y = (hy - r) as i32 - 10 * u;
-        c.text_centred(hx as i32, y, &s.name, u, Rgba(255, 255, 255, 180));
-    }
+/// A number from 0 to 1 made from a few others, the same every time.
+fn hash(a: u32, b: u32, k: u32) -> f32 {
+    let mut h = a
+        .wrapping_mul(0x9e37_79b1)
+        .wrapping_add(b.wrapping_mul(0x85eb_ca77))
+        .wrapping_add(k.wrapping_mul(0xc2b2_ae3d));
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2c1b_3c6d);
+    h ^= h >> 12;
+    (h & 0xffff) as f32 / 65535.0
 }
 
-/// A burst: a ring flying out and sparks, where a snake ran into someone.
+/// A burst: a flash of its colour, a ring flying out, and sparks streaking
+/// away, each its own size and speed, slowing as they go.
 fn bursts(c: &mut Canvas, v: &View, bursts: &[Burst], now: f64) {
+    const SPARKS: u32 = 18;
+    let hot = Rgba::rgb(255, 250, 235);
     for b in bursts {
-        let t = ((now - b.at) / 700.0).clamp(0.0, 1.0) as f32;
+        let t = ((now - b.at) / BURST_MS).clamp(0.0, 1.0) as f32;
         let (x, y) = v.at((b.x, b.y));
+        if !v.sees((x, y), b.r * v.k * 9.0) {
+            continue;
+        }
         let r = b.r * v.k;
         let fade = 1.0 - t;
+        let out = 1.0 - fade * fade * fade;
         let h = hue(b.hue);
+        let colour = Rgba::hsl(h, 1.0, 0.66);
+        if t < 0.35 {
+            let f = 1.0 - t / 0.35;
+            c.glow(x, y, r * (3.0 + 3.0 * t), colour.fade(0.7 * f));
+            c.glow(x, y, r * 1.6, hot.fade(0.9 * f * f));
+        }
         c.ring(
             x,
             y,
-            r * (1.0 + 5.0 * t),
-            2.0 * fade + 1.0,
-            Rgba::hsl(h, 1.0, 0.7).fade(0.8 * fade),
+            r * (1.0 + 5.0 * out),
+            3.5 * fade * fade + 1.0,
+            colour.mix(hot, 0.4 * fade).fade(0.85 * fade),
         );
-        for k in 0..12 {
-            let a = k as f32 / 12.0 * std::f32::consts::TAU + (b.at % 1.0) as f32;
-            let d = r * (1.0 + 7.0 * t);
-            c.circle(
-                x + a.cos() * d,
-                y + a.sin() * d,
-                (r * 0.25 * fade).max(1.0),
-                Rgba::hsl(h, 1.0, 0.75).fade(fade),
+        let (sx, sy) = (b.x.to_bits(), b.y.to_bits());
+        let ink = hot.mix(colour, (t * 2.5).min(1.0)).fade(fade);
+        for k in 0..SPARKS {
+            let a = (k as f32 + hash(sx, sy, k)) / SPARKS as f32 * std::f32::consts::TAU;
+            let speed = 0.3 + 0.7 * hash(sy, sx, k + 99);
+            let size = r * (0.08 + 0.1 * hash(sx ^ sy, k, 7)) * (0.4 + 0.6 * fade);
+            // A streak from where it was a moment ago to where it is.
+            let d1 = r * (1.0 + 7.0 * speed * out);
+            let d0 = (d1 - r * (0.5 + 2.5 * speed) * fade).max(r * 0.8);
+            let (ca, sa) = (a.cos(), a.sin());
+            c.line(
+                x + ca * d0,
+                y + sa * d0,
+                x + ca * d1,
+                y + sa * d1,
+                (2.0 * size).max(1.0),
+                ink,
             );
         }
     }
