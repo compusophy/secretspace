@@ -153,28 +153,8 @@ impl Watch {
             self.buf
                 .text_centred(w / 2, h / 2 - 4 * u, msg, u, Rgba(244, 241, 255, 120));
         }
-        // LIVE, with a beating dot.
         if live {
-            let p = (4 * u) as f32;
-            let beat = 0.55 + 0.45 * ((now / 400.0) as f32).sin().abs();
-            self.buf.round_rect(
-                Rect::new(p, p, (31 * u) as f32, (11 * u) as f32),
-                3.0 * u as f32,
-                Rgba(7, 10, 18, 170),
-            );
-            self.buf.circle(
-                p + 5.5 * u as f32,
-                p + 5.5 * u as f32,
-                2.5 * u as f32,
-                Rgba(255, 70, 90, 255).fade(beat),
-            );
-            self.buf.text(
-                (p as i32) + 10 * u,
-                (p as i32) + 2 * u,
-                "LIVE",
-                u,
-                Rgba(244, 241, 255, 230),
-            );
+            crate::tag::tag(&mut self.buf, 0, "LIVE", true, u, now);
         }
         into.blit(&self.buf, at.x as i32, at.y as i32, corner);
     }

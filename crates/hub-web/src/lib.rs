@@ -7,6 +7,7 @@
 //! till the game is left.
 //! Every pixel is drawn here, in Rust.
 
+mod tag;
 mod wand;
 mod watch;
 
