@@ -5,10 +5,11 @@ use super::{flat, keys, Body, Input};
 use crate::laws::*;
 use crate::map::Map;
 
-/// Gravity: lighter rising with jump held; a Tether bears most of your
-/// weight; the broom falls slowly.
+/// Gravity: lighter rising with jump held (not thrown up by a launch
+/// rune: that is the rune's height); a Tether bears most of your weight;
+/// the broom falls slowly.
 pub(super) fn fall(b: &mut Body, i: &Input) {
-    let pull = if b.v[1] > 0.0 && i.has(keys::JUMP) && b.mantle == 0 {
+    let pull = if b.v[1] > 0.0 && i.has(keys::JUMP) && b.mantle == 0 && !b.glide {
         GRAVITY_UP
     } else {
         GRAVITY
@@ -209,5 +210,22 @@ mod tests {
         let (a, c) = ([q.x + r * 0.5, top + 3.0, q.z], [q.x + r * 0.5, q.y, q.z]);
         let t = map.strikes(a, c).expect("the cap stops it");
         assert!((a[1] + (c[1] - a[1]) * t - top).abs() < 0.05, "{t}");
+    }
+
+    #[test]
+    fn a_launch_rune_throws_you_as_high_with_jump_held_or_not() {
+        let map = Map::new(11);
+        let q = map.pads[0];
+        let peak = |keys: u16| {
+            let mut b = on(&map, [q[0], q[2]], [0.0, 0.0]);
+            let mut top: f32 = b.p[1];
+            for _ in 0..200 {
+                step(&mut b, &east(keys), &map);
+                top = top.max(b.p[1]);
+            }
+            top - q[1]
+        };
+        let (held, not) = (peak(keys::JUMP), peak(0));
+        assert!((held - not).abs() < 0.5, "held {held}, not {not}");
     }
 }

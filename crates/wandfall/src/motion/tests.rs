@@ -462,17 +462,21 @@ fn crouching_is_lower_and_slower_and_jumps_forgive() {
         best - stand(&map).p[1]
     };
     assert!(top(true) > top(false) * 1.2, "{} {}", top(true), top(false));
-    // Pressed a moment before landing, it still jumps on landing.
+    // Pressed a moment before landing, it jumps on landing (and is not
+    // the air jump).
     let mut b = stand(&map);
-    b.p[1] += 0.15;
+    b.p[1] += 0.3;
+    b.v[1] = -4.0;
     b.ground = false;
     step(&mut b, &go(keys::JUMP), &map);
+    assert!(!b.air_jumped && b.v[1] < 0.0, "{b:?}");
     let mut jumped = false;
     for _ in 0..JUMP_BUFFER {
+        let was = b.ground;
         step(&mut b, &go(0), &map);
-        jumped |= b.v[1] > 1.0;
+        jumped |= was && b.v[1] > 1.0;
     }
-    assert!(jumped, "the early press counted");
+    assert!(jumped && !b.air_jumped, "the early press counted: {b:?}");
     // Just off an edge (in the air, no longer on the ground), it still
     // jumps.
     let mut b = stand(&map);
@@ -481,6 +485,11 @@ fn crouching_is_lower_and_slower_and_jumps_forgive() {
     b.v[1] = 0.0;
     step(&mut b, &go(keys::JUMP), &map);
     assert!(b.v[1] > 1.0, "coyote time");
+    // Crouched in the air it only tucks its legs: no smaller to hit.
+    for _ in 0..3 {
+        step(&mut b, &go(keys::CROUCH), &map);
+    }
+    assert!(!b.ground && b.crouch && b.tall() == HEIGHT, "{b:?}");
 }
 
 #[test]

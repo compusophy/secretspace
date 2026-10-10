@@ -4,12 +4,18 @@
 
 use super::{flat, keys, Body, Input, Under, Wish};
 use crate::laws::*;
+use crate::map::smooth;
 
-fn toward(v: f32, want: f32, step: f32) -> f32 {
-    if v < want {
-        (v + step).min(want)
+/// A velocity across the ground toward `want`, by at most `step` (the
+/// same whichever way it faces).
+fn toward(v: &mut [f32; 3], want: [f32; 2], step: f32) {
+    let (dx, dz) = (want[0] - v[0], want[1] - v[2]);
+    let d = (dx * dx + dz * dz).sqrt();
+    if d <= step {
+        (v[0], v[2]) = (want[0], want[1]);
     } else {
-        (v - step).max(want)
+        v[0] += dx / d * step;
+        v[2] += dz / d * step;
     }
 }
 
@@ -44,12 +50,15 @@ pub(super) fn stance(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
         && !b.winded;
 }
 
-/// Sprinting spends stamina; a breath after, it comes back.
+/// Sprinting spends stamina (on the ground: in the air it is neither
+/// spent nor got back); a breath after, it comes back.
 pub(super) fn stamina(b: &mut Body) {
     if b.sprint {
-        b.spent = (b.spent + STAMINA_SPEND).min(STAMINA);
-        b.breath = 0;
-        b.winded = b.spent >= STAMINA;
+        if b.ground {
+            b.spent = (b.spent + STAMINA_SPEND).min(STAMINA);
+            b.breath = 0;
+            b.winded = b.spent >= STAMINA;
+        }
     } else {
         b.breath = b.breath.saturating_add(1);
         if b.breath >= STAMINA_BREATH {
@@ -129,17 +138,20 @@ fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
     } else {
         BRAKE
     } * DT;
-    // Faster than your pace, still steering: the speed holds in the
-    // air and bleeds slowly away on the ground (momentum).
+    // Faster than your pace, still steering more or less its way: the
+    // speed holds in the air (steering curves it) and bleeds away on the
+    // ground, slowly while you steer along it, quicker as you turn
+    // (momentum).
     let sp = flat(&b.v);
     let along = if sp > 1e-4 {
         (b.v[0] * w.x + b.v[2] * w.z) / sp
     } else {
         0.0
     };
+    let (on, off) = MOMENTUM_ALONG;
     if air && !w.any {
         // Nothing held in the air: it drifts on as it was going.
-    } else if sp > speed && w.any && along > 0.2 && !b.glide {
+    } else if sp > speed && w.any && along > if air { AIR_ALONG } else { off } && !b.glide {
         let (mut dx, mut dz) = (b.v[0] / sp, b.v[2] / sp);
         dx += w.x * accel / sp;
         dz += w.z * accel / sp;
@@ -147,12 +159,60 @@ fn run(b: &mut Body, i: &Input, w: &Wish, u: &Under) {
         let keep = if air {
             sp
         } else {
-            (sp - OVERSPEED * DT).max(speed)
+            let bleed = OVERSPEED + (ACCEL_GROUND - OVERSPEED) * smooth((on - along) / (on - off));
+            (sp - bleed * DT).max(speed)
         };
         b.v[0] = dx / d * keep;
         b.v[2] = dz / d * keep;
     } else {
-        b.v[0] = toward(b.v[0], w.x * speed, accel);
-        b.v[2] = toward(b.v[2], w.z * speed, accel);
+        toward(&mut b.v, [w.x * speed, w.z * speed], accel);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::{go, plaza};
+    use super::super::{flat, keys};
+    use crate::laws::*;
+    use crate::map::Map;
+
+    #[test]
+    fn it_speeds_up_and_stops_alike_whichever_way_it_faces() {
+        let map = Map::new(3);
+        let ticks = |yaw: u16| {
+            let mut b = plaza(&map);
+            let mut up = 0;
+            while flat(&b.v) < RUN * 0.95 {
+                go(&mut b, keys::FWD, yaw, &map);
+                up += 1;
+            }
+            let mut stop = 0;
+            while flat(&b.v) > 0.05 {
+                go(&mut b, 0, yaw, &map);
+                stop += 1;
+            }
+            (up, stop)
+        };
+        // East, a sixteenth of a turn round, an eighth.
+        let all = [0, 4096, 8192].map(ticks);
+        assert!(all.iter().all(|&t| t == all[0]), "{all:?}");
+    }
+
+    #[test]
+    fn steering_square_to_it_in_the_air_curves_it_and_keeps_its_speed() {
+        let map = Map::new(3);
+        let mut b = plaza(&map);
+        b.p[1] += 30.0;
+        b.ground = false;
+        b.v = [12.5, 0.0, 0.0];
+        for _ in 0..10 {
+            go(&mut b, keys::RIGHT, 0, &map);
+        }
+        assert!(flat(&b.v) > 12.4 && b.v[2] > 1.0, "curved, kept: {b:?}");
+        // Pulling back still brakes it.
+        for _ in 0..10 {
+            go(&mut b, keys::BACK, 0, &map);
+        }
+        assert!(flat(&b.v) < 11.0, "{b:?}");
     }
 }

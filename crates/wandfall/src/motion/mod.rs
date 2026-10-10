@@ -103,9 +103,10 @@ pub struct Body {
 }
 
 impl Body {
-    /// How tall it stands (crouching or not), and where its eyes are.
+    /// How tall it stands, and where its eyes are: lower crouched on the
+    /// ground or sliding (in the air, a crouch is only tucked legs).
     pub fn tall(&self) -> f32 {
-        if self.crouch {
+        if self.low() {
             CROUCH_HEIGHT
         } else {
             HEIGHT
@@ -113,11 +114,15 @@ impl Body {
     }
 
     pub fn eye(&self) -> f32 {
-        if self.crouch {
+        if self.low() {
             CROUCH_EYE
         } else {
             EYE
         }
+    }
+
+    fn low(&self) -> bool {
+        self.crouch && (self.ground || self.slide)
     }
 }
 
@@ -198,7 +203,7 @@ pub fn step(b: &mut Body, i: &Input, map: &Map) {
     run::stamina(b);
     run::steer(b, i, &w, &u);
     b.chill = b.chill.saturating_sub(1);
-    jump::jump(b, i, &w);
+    jump::jump(b, i, &w, map);
     ledge::rune(b, map);
     ledge::mantle(b, map, &w);
     collide::fall(b, i);

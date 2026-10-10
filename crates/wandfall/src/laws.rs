@@ -78,6 +78,11 @@ pub const ACCEL_GROUND: f32 = 48.0;
 pub const ACCEL_AIR: f32 = 16.0;
 pub const BRAKE: f32 = 36.0;
 pub const OVERSPEED: f32 = 5.0;
+/// Momentum holds steering more or less its way (a cosine): in the air
+/// more than this; on the ground, bleeding at OVERSPEED steering more
+/// than the first, and as fast as it speeds up by the second.
+pub const AIR_ALONG: f32 = -0.3;
+pub const MOMENTUM_ALONG: (f32, f32) = (0.2, -0.2);
 /// Hills: walking up a slope of 1 (45°) this much slower, down it this
 /// much faster (and less, gentler).
 pub const HILL: f32 = 0.45;
@@ -108,8 +113,10 @@ pub const HOP_WINDOW: u8 = 3;
 pub const HOP_BOOST: f32 = 0.6;
 pub const HOP_MAX: f32 = 12.5;
 /// Once in the air, a second jump (magic): this fast up, the way you
-/// steer; it costs stamina, so not when winded.
+/// steer; it costs stamina, so not when winded. Turned straight back, it
+/// keeps this share of the speed it had over a run (more, turned less).
 pub const AIR_JUMP: f32 = 7.0;
+pub const AIR_JUMP_KEEP: f32 = 0.5;
 /// Wall jumps: off a wall touched in the last few ticks, out from it and
 /// up (m/s), keeping a share of the speed along it; so many before you
 /// land.

@@ -55,10 +55,10 @@ mod tests {
         let q = *map
             .props
             .iter()
-            .find(|q| q.kind == Kind::Pillar && q.h > 3.0)
+            .find(|q| q.kind == Kind::Pillar && q.h > 4.0)
             .expect("a tall pillar");
-        // In the air beside it, a little off the ground, running at it.
-        let start = [q.x - q.r - 1.5, q.y + 0.8, q.z];
+        // In the air beside it, well off the ground, running at it.
+        let start = [q.x - q.r - 1.5, q.y + 2.0, q.z];
         let mut b = Body {
             p: start,
             v: [4.0, 2.0, 0.0],
