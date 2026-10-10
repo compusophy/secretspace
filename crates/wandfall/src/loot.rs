@@ -23,15 +23,21 @@ pub fn max_hp(level: u8) -> i32 {
     HEALTH + HEALTH_PER_LEVEL * (level.max(1) as i32 - 1)
 }
 
-/// Damage as a level deals it.
-pub fn level_scale(level: u8, v: i32) -> i32 {
-    v * (100 + POWER_PER_LEVEL * (level.max(1) as i32 - 1)) / 100
+/// The health a level gained heals: its share of the rise (to the
+/// nearest whole).
+pub fn level_heal() -> i32 {
+    (HEALTH_PER_LEVEL * LEVEL_HEAL + 50) / 100
 }
 
-/// A spell's power at a rank.
+/// Damage as a level deals it (to the nearest whole).
+pub fn level_scale(level: u8, v: i32) -> i32 {
+    (v * (100 + POWER_PER_LEVEL * (level.max(1) as i32 - 1)) + 50) / 100
+}
+
+/// A spell's power at a rank (to the nearest whole).
 pub fn power(spell: u8, rank: u8) -> i32 {
     let s = &SPELLS[spell as usize % SPELLS.len()];
-    s.power * (100 + RANK_POWER * (rank.max(1) as i32 - 1)) / 100
+    (s.power * (100 + RANK_POWER * (rank.max(1) as i32 - 1)) + 50) / 100
 }
 
 /// A spell's cooldown at a rank (ticks).
@@ -48,9 +54,15 @@ pub fn slots_of(spell: u8) -> [usize; 2] {
     }
 }
 
-/// XP for `who`: levels gained raise health with them.
+/// XP for `who`: a level gained raises its health, and heals it by a
+/// share of the rise (a practice dummy never levels).
 pub fn gain(w: &mut World, who: u16, xp: u32, ev: &mut Vec<Event>) {
-    let Some(p) = w.players.iter_mut().find(|p| p.id == who && p.alive) else {
+    let range = w.practice.is_some();
+    let Some(p) = w
+        .players
+        .iter_mut()
+        .find(|p| p.id == who && p.alive && !(range && p.bot))
+    else {
         return;
     };
     if p.level >= MAX_LEVEL || w.phase != Phase::Fight {
@@ -60,7 +72,7 @@ pub fn gain(w: &mut World, who: u16, xp: u32, ev: &mut Vec<Event>) {
     while p.xp >= XP_PER_LEVEL && p.level < MAX_LEVEL {
         p.xp -= XP_PER_LEVEL;
         p.level += 1;
-        p.hp += HEALTH_PER_LEVEL;
+        p.hp += level_heal();
         ev.push(Event::Level {
             who,
             level: p.level,
@@ -121,7 +133,7 @@ pub fn scatter(w: &mut World) {
         } else if !ruins.is_empty() && cached.len().is_multiple_of(3) {
             let r = ruins[(w.rng.next_u64() % ruins.len() as u64) as usize];
             let a = unit(w) * std::f32::consts::TAU;
-            [r[0] + a.cos() * 2.5, r[2] + a.sin() * 2.5]
+            [r[0] + a.cos() * CACHE_RUIN, r[2] + a.sin() * CACHE_RUIN]
         } else {
             w.map.spot(&mut w.rng)
         };
@@ -132,7 +144,7 @@ pub fn scatter(w: &mut World) {
         }
         if cached
             .iter()
-            .any(|c| (c[0] - x).powi(2) + (c[1] - z).powi(2) < 100.0)
+            .any(|c| (c[0] - x).powi(2) + (c[1] - z).powi(2) < CACHE_APART * CACHE_APART)
         {
             continue;
         }
@@ -199,19 +211,21 @@ pub fn learn(p: &mut Player, spell: u8, rank: u8) {
     let [a, b] = slots_of(spell);
     if let Some(k) = [a, b].into_iter().find(|&k| p.slots[k].is_none()) {
         p.slots[k] = Some(Slot { spell, rank: now });
-        p.cds[k] = 0;
+        p.cds[k] = p.spell_cds[i];
     } else if p.bot {
         let rank_of = |k: usize| p.slots[k].map_or(0, |s| s.rank);
         let k = if rank_of(a) <= rank_of(b) { a } else { b };
         if rank_of(k) < now {
             p.slots[k] = Some(Slot { spell, rank: now });
+            p.cds[k] = p.spell_cds[i];
         }
     }
 }
 
 /// The spellbook: put a spell you know in a slot of its kind (if it is
 /// in the other slot, the two trade places). A spell put in waits a
-/// moment before it can be cast.
+/// moment before it can be cast, or out its own cooldown if that is
+/// longer (it keeps it from slot to slot).
 pub fn equip(p: &mut Player, slot: usize, spell: u8) -> bool {
     let i = spell as usize;
     if slot > 3 || i >= SPELLS.len() || p.book[i] == 0 || !slots_of(spell).contains(&slot) {
@@ -229,7 +243,7 @@ pub fn equip(p: &mut Player, slot: usize, spell: u8) -> bool {
         p.cds.swap(k, slot);
     } else {
         p.slots[slot] = held;
-        p.cds[slot] = p.cds[slot].max(EQUIP_COOLDOWN);
+        p.cds[slot] = p.spell_cds[i].max(EQUIP_COOLDOWN);
     }
     true
 }
@@ -239,9 +253,11 @@ pub fn touch(w: &mut World, ev: &mut Vec<Event>) {
     if w.phase != Phase::Fight {
         return;
     }
+    let range = w.practice.is_some();
     for k in 0..w.players.len() {
         let p = &w.players[k];
-        if !p.alive || !p.entrant || p.body.glide {
+        // Practice dummies leave the cubes to you.
+        if !p.alive || !p.entrant || p.body.glide || (range && p.bot) {
             continue;
         }
         let (at, id) = (p.body.p, p.id);
@@ -299,6 +315,30 @@ mod tests {
     }
 
     #[test]
+    fn a_spell_keeps_its_cooldown_from_slot_to_slot() {
+        let mut w = World::new(3);
+        let id = w.join("t", 0);
+        let k = w.players.iter().position(|p| p.id == id).unwrap();
+        let p = &mut w.players[k];
+        p.book = [0; SPELLS.len()];
+        p.slots = [None; 4];
+        learn(p, spell::MEND, 1);
+        learn(p, spell::BLINK, 1);
+        learn(p, spell::WARD, 1);
+        assert_eq!(p.slots[2].map(|s| s.spell), Some(spell::MEND));
+        let aim = crate::spells::Aim::of(p);
+        crate::spells::cast(&mut w, k, 2, aim, &mut Vec::new());
+        let p = &mut w.players[k];
+        let mend = cooldown(spell::MEND, 1);
+        assert_eq!(p.cds[2], mend);
+        // Ward into Mend's slot, then Mend into the other.
+        assert!(equip(p, 2, spell::WARD));
+        assert_eq!(p.cds[2], EQUIP_COOLDOWN, "Ward is not charged Mend's");
+        assert!(equip(p, 3, spell::MEND));
+        assert_eq!(p.cds[3], mend, "and Mend still cools down");
+    }
+
+    #[test]
     fn the_fallen_drop_every_spell_they_knew() {
         let mut w = World::new(3);
         let id = w.join("t", 0);
@@ -322,5 +362,23 @@ mod tests {
         assert!(power(spell::LANCE, MAX_RANK) > power(spell::LANCE, 1));
         assert!(cooldown(spell::LANCE, MAX_RANK) < cooldown(spell::LANCE, 1));
         assert_eq!(power(spell::WARD, 3), 60, "a rank is a quarter more");
+        // Small numbers grow too: rounded, not cut off.
+        let shard = power(spell::FROST, 1);
+        assert!(level_scale(4, shard) > level_scale(1, shard));
+        // A level gained heals its share of the rise, rounded.
+        assert!(
+            (level_heal() * 100 - HEALTH_PER_LEVEL * LEVEL_HEAL).abs() <= 50,
+            "{} of {HEALTH_PER_LEVEL} at {LEVEL_HEAL}%",
+            level_heal()
+        );
+        let mut w = World::new(3);
+        let id = w.join("t", 0);
+        w.phase = Phase::Fight;
+        let k = w.players.iter().position(|p| p.id == id).unwrap();
+        w.players[k].hp = HEALTH / 2;
+        gain(&mut w, id, XP_PER_LEVEL, &mut Vec::new());
+        let p = &w.players[k];
+        assert_eq!((p.level, p.max_hp()), (2, max_hp(2)));
+        assert_eq!(p.hp, HEALTH / 2 + level_heal(), "healed by the level");
     }
 }

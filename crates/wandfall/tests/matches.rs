@@ -8,10 +8,11 @@ use wandfall::predict::Predict;
 use wandfall::view;
 use wandfall::world::{Event, Phase, World};
 
+/// A match of bots, watched (a person in it who is knocked out sends
+/// everyone back to the lobby soon after).
 #[test]
 fn a_match_runs_to_a_winner_and_starts_again() {
     let mut w = World::new(42);
-    let me = w.join("tester", 0);
     assert_eq!(w.phase, Phase::Lobby);
     let hour = w.hour;
     let (mut began, mut winner, mut shot, mut storm, mut lobby) = (false, None, 0, 0, false);
@@ -83,7 +84,6 @@ fn a_match_runs_to_a_winner_and_starts_again() {
         lobby && w.players.iter().all(|p| !p.bot),
         "back to the lobby, bots gone"
     );
-    assert!(w.find(me).is_some());
     assert_eq!(w.hour, (hour + 1) % HOURS, "the island's day turns an hour");
     assert!(opened >= 8, "cubes are picked up: {opened}");
     assert!(casts >= 10, "spells are cast: {casts}");
@@ -140,7 +140,9 @@ fn the_page_predicts_its_wizard_exactly() {
                 pitch: 0,
                 keys: (rng.next_u64() as u16)
                     & (keys::FWD
+                        | keys::BACK
                         | keys::LEFT
+                        | keys::RIGHT
                         | keys::JUMP
                         | keys::AIM
                         | keys::SPRINT
@@ -164,15 +166,16 @@ fn the_page_predicts_its_wizard_exactly() {
     assert_eq!(worst, 0.0, "the prediction never moved");
 }
 
-/// Balance, as bots play it: over a few matches every spell lands, spells
-/// are the big moments (a fair share of the hurt), and none of them, nor
-/// the wand, does all the work.
+/// Balance, as bots play it: over enough matches that a change to how
+/// wizards move (which plays every seeded match out anew) does not tip
+/// it, every attack spell does a real share of the hurt (the floor leaves
+/// room under the least, Lightning), spells are the big moments, and none
+/// of them, nor the wand, does all the work.
 #[test]
 fn every_spell_has_its_place() {
     let mut by_what = [0i64; 256];
-    for seed in [7u64, 8, 9] {
+    for seed in 7u64..31 {
         let mut w = World::new(seed);
-        w.join("tester", 0);
         let mut lobby = false;
         for _ in 0..TICK_HZ * 60 * 6 {
             for e in w.step() {
@@ -196,13 +199,14 @@ fn every_spell_has_its_place() {
     }
     println!("{:>10} {wand:>3}%", "wand");
     for &k in &spell::OFFENSE {
-        assert!(by_what[k as usize] > 0, "{} lands", SPELLS[k as usize].name);
-        assert!(
-            share(k as usize) < 35,
-            "{} does not rule",
-            SPELLS[k as usize].name
-        );
+        let name = SPELLS[k as usize].name;
+        let s = share(k as usize);
+        assert!(s >= 3, "{name} does its share: {s}%");
+        assert!(s < 30, "{name} does not rule: {s}%");
     }
-    assert!(spells >= 25, "spells are the moments: {spells}%");
-    assert!(wand < 70, "the wand is not everything: {wand}%");
+    assert!(spells >= 35, "spells are the moments: {spells}%");
+    assert!(
+        (35..65).contains(&wand),
+        "the wand is the heartbeat, not everything: {wand}%"
+    );
 }
