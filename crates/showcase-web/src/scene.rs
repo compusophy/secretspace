@@ -239,7 +239,7 @@ impl Scene {
             clouds: 0.5,
             stars: 0.4,
             exposure: 1.25,
-            bloom: 0.08,
+            bloom: 0.16,
             vignette: 0.3,
             sea: Some(WATER - 0.9),
             water: rgb(10, 40, 60),

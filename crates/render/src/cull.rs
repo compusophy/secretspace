@@ -17,13 +17,7 @@ use gpu::wgpu;
 
 use crate::buffers::Grow;
 
-/// How far past its box a cascade takes what casts (a share of its half
-/// width): it is laid out again once its box has moved this far.
-const SLACK: f32 = 0.2;
-/// How much wider than the eye's the view's cone is (radians), and how
-/// far the eye may go before it is laid again (m).
-const VIEW_SLACK: f32 = 0.35;
-pub(crate) const EYE_SLACK: f32 = 6.0;
+use crate::laws::{CAST_SLACK as SLACK, EYE_SLACK, VIEW_SLACK};
 
 pub(crate) struct Cull {
     /// The statics as the eye has them (near or far), and all coarse;

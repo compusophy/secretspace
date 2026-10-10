@@ -22,33 +22,7 @@ pub struct Shafts {
 
 impl Shafts {
     pub fn new(device: &wgpu::Device, msaa: u32) -> Shafts {
-        let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty,
-            count: None,
-        };
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("shafts"),
-            entries: &[
-                entry(
-                    0,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: msaa > 1,
-                    },
-                ),
-                entry(
-                    1,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                ),
-            ],
-        });
+        let layout = crate::slots::layout(device, "shafts", &crate::slots::shafts(msaa > 1));
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shafts"),
             source: wgpu::ShaderSource::Wgsl(shaders::shafts::shafts(msaa > 1).into()),

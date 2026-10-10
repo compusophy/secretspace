@@ -42,7 +42,7 @@ fn shine(uv: vec2<f32>) -> f32 {
 @fragment
 fn shafts_fs(i: Out) -> @location(0) vec4<f32> {
     let uv = i.clip.xy / sh.size.zw;
-    let steps = 40;
+    let steps = SHAFT_STEPS;
     let toward = (sh.sun.xy - uv) / f32(steps);
     // A turn of the starting point, pixel by pixel, so the steps do not
     // band (the finish blurs it as it scales it up).
@@ -52,7 +52,7 @@ fn shafts_fs(i: Out) -> @location(0) vec4<f32> {
     var sum = 0.0;
     for (var k = 0; k < steps; k = k + 1) {
         sum = sum + shine(p) * fade;
-        fade = fade * 0.955;
+        fade = fade * SHAFT_DECAY;
         p = p + toward;
     }
     return vec4<f32>(sum / f32(steps) * sh.sun.z, 0.0, 0.0, 1.0);
@@ -61,5 +61,8 @@ fn shafts_fs(i: Out) -> @location(0) vec4<f32> {
 
 /// The shafts' module, for a depth that is many-sampled (`msaa`) or not.
 pub fn shafts(msaa: bool) -> String {
-    format!("{SHAFTS}{}", super::IGN).replace("DEPTH_TYPE", super::depth_type(msaa))
+    format!("{SHAFTS}{}", super::IGN)
+        .replace("DEPTH_TYPE", super::depth_type(msaa))
+        .replace("SHAFT_STEPS", &format!("{}", crate::laws::SHAFT_STEPS))
+        .replace("SHAFT_DECAY", &format!("{:.4}", crate::laws::SHAFT_DECAY))
 }

@@ -17,7 +17,7 @@ use gpu::wgpu;
 
 /// How far the eye goes before the statics are laid again (near and far
 /// meshes chosen anew).
-const STILL_RELAY: f32 = crate::cull::EYE_SLACK;
+const STILL_RELAY: f32 = laws::EYE_SLACK;
 
 /// What the last frame cost.
 #[derive(Clone, Copy, Debug, Default)]
@@ -211,8 +211,8 @@ impl Renderer {
         self.statics_dirty = true;
     }
 
-    /// The ground's heights and grass, for the GPU (grass, the sea's
-    /// shallows).
+    /// The ground's heights, grass and openness to the sky, for the GPU
+    /// (grass, the sea's shallows, the light in its hollows).
     pub fn terrain(&mut self, t: &Terrain) {
         let n = t.n as u32;
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -225,17 +225,15 @@ impl Renderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rg32Float,
+            format: wgpu::TextureFormat::Rgba32Float,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let bytes: Vec<u8> = t
-            .heights
-            .iter()
-            .zip(&t.lush)
-            .flat_map(|(h, l)| [h.to_le_bytes(), l.to_le_bytes()])
-            .flatten()
-            .collect();
+        let open = t.openness();
+        let mut bytes = Vec::with_capacity(t.heights.len() * 16);
+        for (k, h) in t.heights.iter().enumerate() {
+            put_f32s(&mut bytes, &[*h, t.lush[k], open[k], 0.0]);
+        }
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &tex,
@@ -246,7 +244,7 @@ impl Renderer {
             &bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(n * 8),
+                bytes_per_row: Some(n * 16),
                 rows_per_image: Some(n),
             },
             wgpu::Extent3d {
@@ -461,25 +459,22 @@ impl Renderer {
             pass.set_pipeline(&pipes.opaque);
             runs_of(pass, meshes, moving, &runs[Pass::Opaque as usize], stats);
         };
+        // What is see-through, what glows, sparks: where the depth can be
+        // read, each fading into what stands behind it.
         let lit = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
-            match soft.filter(|_| ssr) {
+            let (faint, glow, sparks) = match soft {
                 Some(group) => {
-                    pass.set_pipeline(&pipes.faint_ssr);
                     pass.set_bind_group(1, group, &[]);
+                    (&pipes.faint_soft, &pipes.glow_soft, &pipes.sparks_soft)
                 }
-                None => pass.set_pipeline(&pipes.faint),
-            }
+                None => (&pipes.faint, &pipes.glow, &pipes.sparks),
+            };
+            pass.set_pipeline(faint);
             runs_of(pass, meshes, moving, &runs[Pass::Faint as usize], stats);
-            pass.set_pipeline(&pipes.glow);
+            pass.set_pipeline(glow);
             runs_of(pass, meshes, moving, &runs[Pass::Glow as usize], stats);
             if !f.sparks.is_empty() {
-                match soft {
-                    Some(group) => {
-                        pass.set_pipeline(&pipes.soft_sparks);
-                        pass.set_bind_group(1, group, &[]);
-                    }
-                    None => pass.set_pipeline(&pipes.sparks),
-                }
+                pass.set_pipeline(sparks);
                 pass.set_vertex_buffer(0, self.spark_buf.buf.slice(..));
                 pass.draw(0..6, 0..f.sparks.len() as u32);
                 stats.draws += 1;

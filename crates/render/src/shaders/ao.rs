@@ -2,16 +2,21 @@
 //! (after HBAO): each pixel's place and facing found from the depth about
 //! it, then a few ways out across the screen (turned pixel by pixel), a
 //! few steps each; whatever rises over the surface within reach shades
-//! it, the more the steeper and the nearer. Then a blur that keeps to its own depth, and a pass that lays it over
-//! the picture (multiplied), each pixel taking its nearer neighbours' so
-//! edges stay sharp.
+//! it, the more the steeper and the nearer. It is laid over the finished
+//! picture, so it is eased where most of the light is the sun's (a
+//! surface facing it) and where the air between hides the surface (fog
+//! is not occluded). Then a blur that keeps to its own depth, and a pass
+//! that lays it over the picture (multiplied), each pixel taking its
+//! nearer neighbours' so edges stay sharp.
 
 const AO: &str = r#"
 struct Ao {
     proj: vec4<f32>,   // x f/aspect, y f, z near, w reach (metres)
     size: vec4<f32>,   // xy the screen, zw half of it (pixels)
     k: vec4<f32>,      // x power, y slack (a slope), z ways, w fade (metres)
-    m: vec4<f32>,      // x strength, yzw unused
+    m: vec4<f32>,      // x strength, yzw how far up the camera's right, up and forward go
+    air: vec4<f32>,    // x the eye's height, y fog a metre, z its falloff with height, w how much the sun eases it
+    sun: vec4<f32>,    // xyz toward the sun, seen from the eye; w 1 if it is up
 };
 
 @group(0) @binding(0) var depth: DEPTH_TYPE;
@@ -104,7 +109,26 @@ fn ao_fs(i: Out) -> @location(0) vec4<f32> {
     }
     let open = clamp(1.0 - shut / f32(ways * 4) * ao.m.x, 0.0, 1.0);
     let fade = smoothstep(ao.k.w, ao.k.w * 0.6, far);
-    return vec4<f32>(mix(1.0, pow(open, ao.k.x), fade), 0.0, 0.0, 1.0);
+    var a = mix(1.0, pow(open, ao.k.x), fade);
+    // Facing the sun, most of its light is the sun's, which the
+    // occlusion does not shut out.
+    a = mix(a, 1.0, ao.air.w * ao.sun.w * max(dot(n, ao.sun.xyz), 0.0));
+    return vec4<f32>(mix(1.0, a, through_air(p)), 0.0, 0.0, 1.0);
+}
+
+/// How much of a surface at `p` (seen from the eye) shows through the
+/// air between, as the scene's fog has it (`air` in the scene's shaders).
+fn through_air(p: vec3<f32>) -> f32 {
+    let dist = length(p);
+    let rise = (p.x * ao.m.y + p.y * ao.m.z - p.z * ao.m.w) / max(dist, 1e-3);
+    let falloff = ao.air.z;
+    let base = ao.air.y * exp(-falloff * max(ao.air.x, 0.0));
+    var optical = base * dist;
+    let k = falloff * rise * dist;
+    if (abs(k) > 0.001) {
+        optical = base * (1.0 - exp(-k)) / (falloff * rise);
+    }
+    return exp(-max(optical, 0.0));
 }
 
 /// Four by four, each kept to its own depth.

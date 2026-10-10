@@ -14,6 +14,14 @@ pub mod world;
 /// Bytes of `Globals`: five mat4s and twenty-one vec4s.
 pub const GLOBALS: u64 = 5 * 64 + 21 * 16;
 
+/// `Globals`' fields in their order (what `globals.rs` writes; the tests
+/// hold both the WGSL and the writer to it).
+pub const FIELDS: [&str; 23] = [
+    "vp", "shadow", "eye", "fwd", "right", "up", "sun_dir", "sun", "sky", "low", "zenith",
+    "horizon", "deep", "grid", "view", "splits", "bias", "offset", "island", "terrain", "wind",
+    "water", "grass",
+];
+
 /// A number in 0..1 that shifts from pixel to pixel with little pattern
 /// (interleaved gradient noise, after Jimenez): what the passes that
 /// march or dither turn their start by, so a blur or the eye evens it out.
@@ -48,7 +56,17 @@ pub fn scene(msaa: bool, ssr: u32) -> String {
         .replace("GRASS_THIN", &format!("{:.3}", crate::laws::GRASS_THIN))
         .replace("SHADOW_SOFT", &format!("{:.3}", crate::laws::SHADOW_SOFT))
         .replace("SHADOW_BAND", &format!("{:.3}", crate::laws::SHADOW_BAND))
+        .replace("SSR_ON", if ssr > 0 { "true" } else { "false" })
         .replace("SSR_STEPS", &format!("{steps}"))
+        .replace("SOFT_FADE", &format!("{:.3}", crate::laws::SOFT_FADE))
+        .replace("SPARK_MIN_PX", &format!("{:.3}", crate::laws::SPARK_MIN_PX))
+        .replace(
+            "SPARK_FAR_FLOOR",
+            &format!("{:.3}", crate::laws::SPARK_FAR_FLOOR),
+        )
+        .replace("SEA_DEEP", &format!("{:.3}", crate::laws::SEA_DEEP))
+        .replace("GRASS_ROOT", &format!("{:.3}", crate::laws::GRASS_ROOT))
+        .replace("LEAF_GRAIN", &format!("{:.3}", crate::laws::LEAF_GRAIN))
         .replace("SSR_GROW", &format!("{grow:.5}"))
 }
 
@@ -57,5 +75,5 @@ pub fn shadow() -> String {
 }
 
 pub fn post() -> String {
-    format!("{}{IGN}", post::POST)
+    format!("{}{IGN}", post::POST).replace("TONE_MAP", crate::laws::TONE_MAP)
 }

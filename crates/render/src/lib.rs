@@ -13,6 +13,7 @@ pub mod laws;
 pub mod sculpt;
 pub mod shaders;
 pub mod shadow;
+pub mod slots;
 pub mod terrain;
 
 mod ao;
@@ -269,9 +270,10 @@ pub fn perspective(fov: f32, aspect: f32) -> M4 {
     m
 }
 
-/// How the world looks: the sun, the sky, the air, the sea. Colours are
-/// as people pick them (sRGB); the sun's and the sky's light are linear
-/// and may be brighter than 1 (the picture is HDR, tone mapped at the end).
+/// How the world looks: the sun, the sky, the air, the sea. Its lights
+/// and the sky's colours (sun, sky, low, zenith, horizon, deep) are
+/// linear and may be brighter than 1 (the picture is HDR, tone mapped at
+/// the end); only the sea's colour (`water`) is as people pick it (sRGB).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
     /// Toward the sun (or moon), its light, its disc's size (radians).
@@ -292,12 +294,13 @@ pub struct Look {
     /// Cloud cover 0 (clear) to 1 (overcast); stars (0 by day).
     pub clouds: f32,
     pub stars: f32,
-    /// Exposure, bloom (0..0.2), the vignette (0..1).
+    /// Exposure; bloom (the share of the picture that is a blur of it,
+    /// 0..0.4); the vignette (0..1).
     pub exposure: f32,
     pub bloom: f32,
     pub vignette: f32,
-    /// The sea's level, if there is one, and its deep colour; how high
-    /// its waves read.
+    /// The sea's level, if there is one, and its deep colour (sRGB); how
+    /// high its waves read.
     pub sea: Option<f32>,
     pub water: V3,
     pub waves: f32,
@@ -462,48 +465,10 @@ impl Quality {
         (at(size.0), at(size.1))
     }
 
-    pub const HIGH: Quality = Quality {
-        scale: 1.0,
-        msaa: 4,
-        cascades: 3,
-        shadow_size: 2048,
-        grass_spacing: 0.24,
-        grass_reach: 42.0,
-        bloom_levels: 6,
-        ao: 6,
-        shafts: true,
-        ssr: 16,
-        decals: true,
-        lights: 48,
-    };
-    pub const MEDIUM: Quality = Quality {
-        scale: 0.8,
-        msaa: 4,
-        cascades: 2,
-        shadow_size: 1536,
-        grass_spacing: 0.34,
-        grass_reach: 28.0,
-        bloom_levels: 5,
-        ao: 4,
-        shafts: true,
-        ssr: 10,
-        decals: true,
-        lights: 16,
-    };
-    pub const LOW: Quality = Quality {
-        scale: 0.65,
-        msaa: 1,
-        cascades: 1,
-        shadow_size: 1024,
-        grass_spacing: 0.0,
-        grass_reach: 0.0,
-        bloom_levels: 4,
-        ao: 0,
-        shafts: false,
-        ssr: 0,
-        decals: false,
-        lights: 8,
-    };
+    /// The tiers (`laws`).
+    pub const HIGH: Quality = laws::HIGH;
+    pub const MEDIUM: Quality = laws::MEDIUM;
+    pub const LOW: Quality = laws::LOW;
 }
 
 /// Everything one frame draws besides the statics.

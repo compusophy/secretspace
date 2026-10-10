@@ -24,6 +24,9 @@ struct WorldOut {
     @location(2) col: vec4<f32>,
     @location(3) tint: vec4<f32>,
     @location(4) extra: vec4<f32>,
+    // Where it is from the thing's own middle (world scale): energy's
+    // noise rides with what it is on.
+    @location(5) rel: vec3<f32>,
 };
 
 const PLAIN: i32 = 0;
@@ -61,31 +64,70 @@ fn world_vs(v: WorldIn) -> WorldOut {
     o.col = v.col;
     o.tint = v.tint;
     o.extra = v.extra;
+    o.rel = w.xyz - v.m3.xyz;
     return o;
 }
 
-/// The surface's own small bumps: the normal tipped by noise.
+/// How wide a pixel is on a surface at `pos` facing `n` (metres): wider
+/// far off, and wider still seen edge on.
+fn footprint(pos: vec3<f32>, n: vec3<f32>) -> f32 {
+    let to = g.eye.xyz - pos;
+    let d = length(to);
+    return d / g.up.w / max(abs(dot(n, to / max(d, 1e-4))), 0.2);
+}
+
+/// How much of a detail `cell` metres across to keep where a pixel is
+/// `foot` wide: all of it while four pixels or more cover a cell, none
+/// once two do (finer, it would only shimmer).
+fn detail(cell: f32, foot: f32) -> f32 {
+    return 1.0 - smoothstep(cell * 0.25, cell * 0.5, foot);
+}
+
+/// The surface's own small bumps: the normal tipped by noise (`f` cells
+/// a metre), smoothed away far off.
 fn bump(pos: vec3<f32>, n: vec3<f32>, k: f32, f: f32) -> vec3<f32> {
+    let keep = detail(1.0 / f, footprint(pos, n));
+    if (keep <= 0.0) {
+        return n;
+    }
     let e = 0.12;
     let c = noise3(pos * f);
     let gx = noise3((pos + vec3<f32>(e, 0.0, 0.0)) * f) - c;
     let gy = noise3((pos + vec3<f32>(0.0, e, 0.0)) * f) - c;
     let gz = noise3((pos + vec3<f32>(0.0, 0.0, e)) * f) - c;
     let grad = vec3<f32>(gx, gy, gz) / e;
-    return normalize(n - k * (grad - dot(grad, n) * n));
+    return normalize(n - k * keep * (grad - dot(grad, n) * n));
+}
+
+/// The ground's grass where it is: lush or dry by the broad noise `n1`,
+/// mottled by the finer `n2` and `n3` (what the blades grown on it are
+/// coloured by too).
+fn meadow(n1: f32, n2: f32, n3: f32) -> vec3<f32> {
+    let lush = mix(vec3<f32>(0.045, 0.11, 0.022), vec3<f32>(0.09, 0.17, 0.035), n1 + n3 * 0.15);
+    let dry = vec3<f32>(0.20, 0.18, 0.07);
+    return mix(lush, dry, smoothstep(0.58, 0.78, n1 + n2 * 0.12));
+}
+
+/// A noise `cell` metres across at `p`, faded to its middle where a pixel
+/// spans it (`foot` metres).
+fn fine(p: vec3<f32>, cell: f32, foot: f32) -> f32 {
+    let keep = detail(cell, foot);
+    if (keep <= 0.0) {
+        return 0.5;
+    }
+    return mix(0.5, noise3(p / cell), keep);
 }
 
 /// The ground's colour and roughness where it is: grass, dry grass,
-/// rock on the slopes, sand by the sea, darker where wet.
-fn earth(pos: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
+/// rock on the slopes, sand by the sea, darker where wet; its fine
+/// mottling smoothed where a pixel spans it (`foot` metres).
+fn earth(pos: vec3<f32>, n: vec3<f32>, foot: f32) -> vec4<f32> {
     let slope = 1.0 - n.y;
     let h = pos.y - g.deep.w;
     let n1 = fbm3(pos * 0.06);
-    let n2 = noise3(pos * 0.8);
-    let n3 = noise3(pos * 3.1);
-    let lush = mix(vec3<f32>(0.045, 0.11, 0.022), vec3<f32>(0.09, 0.17, 0.035), n1 + n3 * 0.15);
-    let dry = vec3<f32>(0.20, 0.18, 0.07);
-    var c = mix(lush, dry, smoothstep(0.58, 0.78, n1 + n2 * 0.12));
+    let n2 = fine(pos, 1.25, foot);
+    let n3 = fine(pos, 0.32, foot);
+    var c = meadow(n1, n2, n3);
     let rock = mix(vec3<f32>(0.11, 0.105, 0.10), vec3<f32>(0.22, 0.21, 0.19), n2 * 0.7 + n3 * 0.3);
     let r = smoothstep(0.26, 0.42, slope + (n2 - 0.5) * 0.15);
     c = mix(c, rock, r);
@@ -139,17 +181,23 @@ fn sea_shade(pos: vec3<f32>, alpha: f32, n: vec3<f32>, mirror: vec4<f32>) -> vec
     let v = normalize(g.eye.xyz - pos);
     let nv = max(dot(n, v), 0.0);
     let fres = 0.02 + 0.98 * pow(1.0 - nv, 5.0);
-    let refl = mix(sky(reflect(-v, n)), mirror.rgb, mirror.a);
-    let depth = max(pos.y - ground(p), 0.0);
+    // The sky in it and its clouds (fewer octaves: only mirrored), or
+    // what of the scene it mirrors.
+    let rd = reflect(-v, n);
+    let refl = mix(clouded(sky(rd), rd, cloud(rd, 2)), mirror.rgb, mirror.a);
+    // Past the terrain there is no bed at all: as deep as can be.
+    let depth = select(1e4, max(pos.y - ground(p), 0.0), on_terrain(p));
     let light = g.sky.rgb * 0.9 + g.sun.rgb * max(g.sun_dir.y, 0.0) * 0.3;
-    let body = mix(vec3<f32>(0.03, 0.22, 0.20), g.water.rgb, smoothstep(0.0, 6.0, depth)) * light;
+    let body = mix(vec3<f32>(0.03, 0.22, 0.20), g.water.rgb, smoothstep(0.0, SEA_DEEP, depth)) * light;
     let lit = sunlit(pos, vec3<f32>(0.0, 1.0, 0.0));
     let glint = ggx(n, v, g.sun_dir.xyz, clamp(0.08 + dist * 0.004, 0.08, 0.4), vec3<f32>(0.02)) * g.sun.rgb * max(dot(n, g.sun_dir.xyz), 0.0) * lit;
     var c = mix(body, refl, fres) + glint;
     let foam = (1.0 - smoothstep(0.0, 0.8, depth)) * smoothstep(0.4, 0.75, noise2(p * 1.2 + vec2<f32>(t * 0.25, -t * 0.2)));
     c = mix(c, vec3<f32>(0.9, 0.93, 0.95) * light * 1.4, foam * 0.75);
-    // Where it mirrors the land, it shows less of its own body.
-    let a = clamp(mix(0.6, 1.0, max(fres, mirror.a * 0.5)) * smoothstep(0.0, 0.3, depth) + foam * 0.6, 0.0, 1.0);
+    // Where it mirrors the land, it shows less of its own body; deep, it
+    // shows nothing of its bed (so where the bed ends does not show).
+    let clear = mix(0.6, 1.0, max(fres, mirror.a * 0.5));
+    let a = clamp(max(clear, smoothstep(SEA_DEEP * 0.4, SEA_DEEP, depth)) * smoothstep(0.0, 0.3, depth) + foam * 0.6, 0.0, 1.0);
     return vec4<f32>(air(c, pos), a * alpha);
 }
 
@@ -222,7 +270,7 @@ fn energy(i: WorldOut, n: vec3<f32>) -> vec4<f32> {
     let edge = 1.0 - facing;
     let rim = clamp(i.extra.y, 0.0, 1.0);
     let t = g.eye.w;
-    let q = i.pos * select(2.2, i.extra.w, i.extra.w > 0.0);
+    let q = i.rel * select(2.2, i.extra.w, i.extra.w > 0.0);
     let n1 = fbm3(q + vec3<f32>(t * 0.3, -t * 1.9, t * 0.2));
     let n2 = noise3(q * 2.6 + vec3<f32>(t * 0.9, -t * 2.6, -t * 0.6));
     let fire = clamp(n1 * 1.3 + n2 * 0.55 - 0.45 + mix(facing * 0.45 - 0.1, edge * 0.3, rim), 0.0, 1.0);
@@ -243,18 +291,49 @@ fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
     return world(i, front);
 }
 
+/// How much of what is drawn at `clip` shows in front of what stands
+/// behind it: none where it meets it, all from `SOFT_FADE` metres before
+/// it, so what glows or is see-through cuts no hard line into the
+/// ground and the walls.
+fn soft(clip: vec4<f32>) -> f32 {
+    let d = textureLoad(scene_depth, vec2<i32>(clip.xy), 0);
+    if (d <= 0.0) {
+        return 1.0;
+    }
+    let me = NEAR_PLANE / max(clip.z, 1e-7);
+    return clamp((NEAR_PLANE / d - me) / SOFT_FADE, 0.0, 1.0);
+}
+
 /// What is see-through, in the pass after the solid one: the sea mirrors
-/// what stands about it (`mirror`); the rest as ever.
+/// what stands about it (`mirror`, when the tier has reflections); the
+/// rest fades into what is behind it.
 @fragment
 fn faint_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     if (i32(i.extra.z + 0.5) == WATER) {
         let n = sea_normal(i.pos);
+        if (!SSR_ON) {
+            return sea_shade(i.pos, i.tint.a, n, vec4<f32>(0.0));
+        }
         let v = normalize(g.eye.xyz - i.pos);
         // Off waves calmed a little, so the reflection does not shimmer.
         let r = reflect(-v, normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.65)));
         return sea_shade(i.pos, i.tint.a, n, mirror(i.pos, r));
     }
-    return world(i, front);
+    let c = world(i, front);
+    return vec4<f32>(c.rgb, c.a * soft(i.clip));
+}
+
+/// What glows, in the pass after the solid one: fading into what is
+/// behind it; a shield or a ring brighter just where it meets it, as
+/// energy touching the ground.
+@fragment
+fn glow_soft_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = world(i, front);
+    let k = soft(i.clip);
+    if (i32(i.extra.z + 0.5) == RIM) {
+        return vec4<f32>(c.rgb, c.a * mix(k, 1.6, k * (1.0 - k) * 4.0));
+    }
+    return vec4<f32>(c.rgb, c.a * k);
 }
 
 fn world(i: WorldOut, front: bool) -> vec4<f32> {
@@ -287,13 +366,21 @@ fn world(i: WorldOut, front: bool) -> vec4<f32> {
     }
     if (mat == TERRAIN) {
         // The ground, and the game's paint over it (alpha is how much).
-        let m = earth(i.pos, n);
+        let m = earth(i.pos, n, footprint(i.pos, n));
         let paint = linear(i.col.rgb) * (0.8 + 0.4 * noise3(i.pos * 0.9));
         base = mix(m.rgb, paint, clamp(i.col.a, 0.0, 1.0)) * linear(i.tint.rgb);
         rough = mix(m.a, 0.8, clamp(i.col.a, 0.0, 1.0));
         glow = i.extra.x + max(i.col.a - 1.0, 0.0) * (0.7 + 0.6 * noise3(i.pos * 1.3 + g.eye.w * 0.2));
         n = bump(i.pos, n, 0.35, 0.9);
     } else if (mat == FOLIAGE) {
+        // Its edge broken into leaves where it turns away (not a smooth
+        // blob against the sky), its face clumped.
+        let v = normalize(g.eye.xyz - i.pos);
+        let edge = 1.0 - abs(dot(n, v));
+        if (noise3(i.pos * LEAF_GRAIN) < edge * 1.2 - 0.5) {
+            discard;
+        }
+        n = bump(i.pos, n, 0.6, 3.0);
         through = 0.45;
         base = base * (0.75 + 0.5 * noise3(i.pos * 1.7));
         ao = 0.8;
@@ -326,29 +413,25 @@ fn sky_vs(@builtin(vertex_index) i: u32) -> SkyOut {
 @fragment
 fn sky_fs(i: SkyOut) -> @location(0) vec4<f32> {
     let d = normalize(g.fwd.xyz + i.ndc.x * g.fwd.w * g.right.xyz + i.ndc.y * g.right.w * g.up.xyz);
-    var c = sky(d);
-    // Clouds: a layer high above, drifting, lit by the sun.
-    let cover = g.zenith.w;
-    if (d.y > 0.0 && cover > 0.0) {
-        let t = (1800.0 - g.eye.y) / max(d.y, 0.02);
-        let p = g.eye.xz + d.xz * t;
-        let q = p * 0.0006 + vec2<f32>(g.eye.w * 0.004, g.eye.w * 0.0015);
-        let dens = fbm3(vec3<f32>(q.x * 2.5, g.eye.w * 0.002, q.y * 2.5));
-        let k = smoothstep(1.0 - cover, 1.0 - cover + 0.3, dens);
-        let mu = max(dot(d, g.sun_dir.xyz), 0.0);
-        let lit = g.sun.rgb * (0.16 + 0.25 * pow(mu, 6.0)) + g.sky.rgb * 0.75;
-        let shade = mix(1.0, 0.65, smoothstep(0.6, 1.0, dens));
-        c = mix(c, lit * shade, k * smoothstep(0.0, 0.2, d.y) * 0.92);
-    }
-    // The sun's disc.
+    let bare = sky(d);
+    // Clouds: a layer high above, drifting, lit by the sun; the sun's
+    // disc and the stars only where they leave the sky clear.
+    let cl = cloud(d, 4);
+    var c = clouded(bare, d, cl);
+    let clear = 1.0 - cl.x;
     let mu = dot(d, g.sun_dir.xyz);
-    c = c + g.sun.rgb * 12.0 * smoothstep(g.sun_dir.w, g.sun_dir.w + 0.00012, mu);
-    // Stars, at night.
+    c = c + g.sun.rgb * 12.0 * smoothstep(g.sun_dir.w, g.sun_dir.w + 0.00012, mu) * clear;
+    // Stars, at night: round points (a ball in each lit cell of space,
+    // met by the sky's sphere), gone where the sky is bright.
     if (g.sun.w > 0.0) {
-        let h = hash3(floor(d * 260.0));
+        let cell = d * 260.0;
+        let h = hash3(floor(cell));
         if (h > 0.997) {
+            let f = fract(cell) - 0.5;
             let tw = 0.65 + 0.35 * sin(g.eye.w * 2.0 + h * 500.0);
-            c = c + vec3<f32>(1.0, 0.95, 0.85) * (h - 0.997) / 0.003 * tw * g.sun.w * smoothstep(0.0, 0.15, d.y);
+            let dark = 1.0 - smoothstep(0.08, 0.25, dot(bare, vec3<f32>(0.2126, 0.7152, 0.0722)));
+            let star = (h - 0.997) / 0.003 * exp(-dot(f, f) * 8.0) * 1.6;
+            c = c + vec3<f32>(1.0, 0.95, 0.85) * star * tw * g.sun.w * smoothstep(0.0, 0.15, d.y) * clear * dark;
         }
     }
     return vec4<f32>(c, 1.0);
@@ -386,7 +469,12 @@ fn spark_vs(@builtin(vertex_index) i: u32, @location(0) ps: vec4<f32>, @location
     // flame or a puff let grow to a share of the screen.
     let kind = i32(floor(vk.w) + 0.5);
     let most = select(SPARK_MAX_PX, PUFF_MAX * g.view.y, kind == FLAME || kind == SMOKE);
-    let r = clamp(ps.w * g.up.w / max(head.w, 0.05), 1.0, most) * 0.5;
+    let size = ps.w * g.up.w / max(head.w, 0.05) * 0.5;
+    let r = clamp(size, SPARK_MIN_PX, most * 0.5);
+    // Drawn larger than it is, it is dimmed to keep its light (so far off
+    // it does not blaze and twinkle), never below a floor (a far fight
+    // still shows).
+    let dim = max(min(size / r, 1.0) * min(size / r, 1.0), SPARK_FAR_FLOOR);
     // A streak runs on screen from where it was (its tail) to its head.
     var mid = head;
     var dir = vec2<f32>(1.0, 0.0);
@@ -411,7 +499,7 @@ fn spark_vs(@builtin(vertex_index) i: u32, @location(0) ps: vec4<f32>, @location
     o.clip = clip;
     o.uv = vec2<f32>(c.x * (half + r) / r, c.y);
     // Fading out right by the eye.
-    o.col = vec4<f32>(col.rgb, col.a * smoothstep(SPARK_NEAR * 0.5, SPARK_NEAR, head.w));
+    o.col = vec4<f32>(col.rgb, col.a * dim * smoothstep(SPARK_NEAR * 0.5, SPARK_NEAR, head.w));
     o.shape = vec3<f32>(floor(vk.w), half / r, fract(vk.w));
     o.far = vec2<f32>(mid.w, max(ps.w * 0.5, 0.15));
     return o;
@@ -519,20 +607,25 @@ fn grass_vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
         return o;
     }
     let here = terrain_at(xz);
-    let gh = here.x;
+    let gh = here.h;
     // Off the screen, root and tallest tip: none.
     let foot = g.vp * vec4<f32>(xz.x, gh, xz.y, 1.0);
     let top = g.vp * vec4<f32>(xz.x, gh + 0.75, xz.y, 1.0);
     if (off_screen(foot, top, 1.2)) {
         return o;
     }
+    // Where little grows, fewer blades (not a carpet of stubs): how much
+    // is how many, and a little how tall.
+    if (cell_hash(cell, 5u) > here.lush * 1.25) {
+        return o;
+    }
     let r3 = cell_hash(cell, 3u);
     let height = (0.28 + 0.42 * r3)
         * (1.0 - smoothstep(reach * 0.7, reach, dist))
-        * (1.0 - smoothstep(0.35, 0.6, length(here.zw)))
+        * (1.0 - smoothstep(0.35, 0.6, length(here.slope)))
         * smoothstep(g.deep.w + 0.7, g.deep.w + 1.4, gh)
         * smoothstep(0.2, 0.45, noise2(xz * 0.09))
-        * here.y;
+        * mix(0.6, 1.0, here.lush);
     if (height < 0.04) {
         return o;
     }
@@ -545,9 +638,12 @@ fn grass_vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     let p = vec3<f32>(xz.x + across.x * k.x * width + lean.x, gh + k.y * height, xz.y + across.y * k.x * width + lean.y);
     o.clip = g.vp * vec4<f32>(p, 1.0);
     o.pos = p;
+    // The colour of the ground it grows from at its root, so it melts
+    // into it; lighter and a little yellower toward its tip.
+    let soil = meadow(fbm(vec3<f32>(xz.x, gh, xz.y) * 0.06, 3), 0.5, 0.5);
     let tone = noise2(xz * 0.05);
-    let root = mix(vec3<f32>(0.03, 0.08, 0.015), vec3<f32>(0.06, 0.10, 0.02), tone);
-    let tipc = mix(vec3<f32>(0.10, 0.20, 0.035), vec3<f32>(0.24, 0.24, 0.07), tone * tone);
+    let root = soil * 0.85;
+    let tipc = soil * (1.35 + 0.35 * tone) + vec3<f32>(0.025, 0.02, 0.0) * tone;
     o.col = mix(root, tipc, k.y);
     o.tip = k.y;
     o.side = vec3<f32>(-across.y, 0.0, across.x);
@@ -562,7 +658,7 @@ fn grass_fs(i: GrassOut, @builtin(front_facing) front: bool) -> @location(0) vec
         s = -s;
     }
     let n = normalize(vec3<f32>(0.0, 1.0, 0.0) + s * 0.35);
-    let c = shade(i.pos, n, i.col, 0.85, 0.0, 0.0, mix(0.45, 1.0, i.tip), 0.6, PLAIN);
+    let c = shade(i.pos, n, i.col, 0.85, 0.0, 0.0, mix(GRASS_ROOT, 1.0, i.tip), 0.6, PLAIN);
     return vec4<f32>(air(c, i.pos), 1.0);
 }
 "#;

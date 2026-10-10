@@ -1,8 +1,9 @@
 //! After the scene: its targets (an HDR picture, multisampled and
 //! resolved, and its depth), ambient occlusion (`ao`), bloom (halve it,
 //! again and again, then back up, each step a little wider, added
-//! together), and the finish into the screen (exposure, tone mapping, a
-//! vignette, sRGB, the grade).
+//! together, the finer weighing more, and averaged: a blur of the
+//! picture, not a sum of blurs), and the finish into the screen
+//! (exposure, tone mapping, a vignette, sRGB, the grade).
 
 use gpu::wgpu;
 
@@ -10,7 +11,7 @@ use crate::ao::Ao;
 use crate::buffers::bytes;
 use crate::fullscreen;
 use crate::shafts::{Shafts, SHAFT};
-use crate::{shaders, Camera, Look, Quality};
+use crate::{laws, shaders, Camera, Look, Quality};
 
 pub const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Bloom's chain, where the device can draw into it: half the bytes of
@@ -188,50 +189,8 @@ impl Post {
         } else {
             HDR
         };
-        let tex = |binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        };
-        let common = [
-            tex(0),
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ];
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("post"),
-            entries: &common,
-        });
-        let mut with_bloom = common.to_vec();
-        with_bloom.push(tex(3));
-        with_bloom.push(wgpu::BindGroupLayoutEntry {
-            binding: 4,
-            ..common[2]
-        });
-        with_bloom.push(tex(5));
-        let finish_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("finish"),
-            entries: &with_bloom,
-        });
+        let layout = crate::slots::layout(device, "post", &crate::slots::POST);
+        let finish_layout = crate::slots::layout(device, "finish", &crate::slots::FINISH);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("post"),
             source: wgpu::ShaderSource::Wgsl(shaders::post().into()),
@@ -311,7 +270,7 @@ impl Post {
         look: &Look,
     ) -> bool {
         if let Some(ao) = &self.ao {
-            ao.run(encoder, queue, cam);
+            ao.run(encoder, queue, cam, look);
         }
         self.shafts
             .as_ref()
@@ -388,6 +347,9 @@ impl Post {
             } else {
                 (&self.chain[l - 1], sizes[l - 1])
             };
+            // The first halving weighs bright specks down (so a spark
+            // crossing a pixel does not make the bloom pulse).
+            let first = if l == 0 { 1.0 } else { 0.0 };
             let buf = uniform(
                 device,
                 queue,
@@ -396,7 +358,7 @@ impl Post {
                     1.0 / s.1 as f32,
                     0.0,
                     0.0,
-                    0.0,
+                    first,
                     0.0,
                     0.0,
                     1.0,
@@ -410,6 +372,7 @@ impl Post {
         }
         for l in (0..self.levels as usize - 1).rev() {
             let s = sizes[l + 1];
+            // Each wider level added at a share of the finer one.
             let buf = uniform(
                 device,
                 queue,
@@ -418,7 +381,7 @@ impl Post {
                     1.0 / s.1 as f32,
                     0.0,
                     0.0,
-                    0.0,
+                    laws::BLOOM_FALLOFF,
                     0.0,
                     0.0,
                     1.0,
@@ -482,6 +445,11 @@ impl Post {
         shafts: bool,
     ) {
         let sun = if shafts { look.sun } else { [0.0; 3] };
+        // The levels added (each a share of the one before) come to this
+        // many pictures: the finish divides by it.
+        let all: f32 = (0..self.levels)
+            .map(|l| laws::BLOOM_FALLOFF.powi(l as i32))
+            .sum();
         let k = [
             sun[0],
             sun[1],
@@ -490,7 +458,7 @@ impl Post {
             look.bloom,
             look.exposure,
             look.vignette,
-            1.0,
+            1.0 / all,
         ];
         queue.write_buffer(&self.finish_buf, 0, &bytes(&k));
         let g = &look.grade;

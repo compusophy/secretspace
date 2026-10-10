@@ -10,7 +10,7 @@ use crate::buffers::bytes;
 use crate::fullscreen;
 use crate::pipes::{pipeline, Kind, Shared};
 use crate::post::texture;
-use crate::{laws, shaders, Camera};
+use crate::{geo, laws, shaders, Camera, Look};
 
 const AO: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
@@ -31,41 +31,7 @@ impl Ao {
     /// Occlusion looking `ways` ways out from each pixel, over a picture
     /// of `msaa` samples.
     pub fn new(device: &wgpu::Device, msaa: u32, ways: u32) -> Ao {
-        let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty,
-            count: None,
-        };
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("ao"),
-            entries: &[
-                entry(
-                    0,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: msaa > 1,
-                    },
-                ),
-                entry(
-                    1,
-                    wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                ),
-                entry(
-                    2,
-                    wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                ),
-            ],
-        });
+        let layout = crate::slots::layout(device, "ao", &crate::slots::ao(msaa > 1));
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("ao"),
             source: wgpu::ShaderSource::Wgsl(shaders::ao::ao(msaa > 1).into()),
@@ -114,7 +80,7 @@ impl Ao {
             layout,
             buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("ao"),
-                size: 64,
+                size: 96,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
@@ -165,14 +131,25 @@ impl Ao {
         self.views = Some(views);
     }
 
-    /// The occlusion as `cam` sees the scene (at half size, blurred), to
-    /// be laid over it (`apply`).
-    pub fn run(&self, encoder: &mut wgpu::CommandEncoder, queue: &wgpu::Queue, cam: &Camera) {
+    /// The occlusion as `cam` sees the scene under `look` (at half size,
+    /// blurred), to be laid over it (`apply`).
+    pub fn run(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        cam: &Camera,
+        look: &Look,
+    ) {
         let (Some(views), Some(groups)) = (&self.views, &self.groups) else {
             return;
         };
         let f = 1.0 / (cam.fov / 2.0).tan();
         let half = self.half();
+        // The camera's axes (how far up each goes), for where a pixel is
+        // in the air; the sun, seen from the eye.
+        let (_, right, up) = cam.matrices(cam.fov);
+        let fwd = cam.forward();
+        let sun = geo::norm(look.sun_dir);
         let k = [
             f / cam.aspect,
             f,
@@ -187,9 +164,17 @@ impl Ao {
             self.ways as f32,
             laws::AO_FADE,
             laws::AO_STRENGTH,
-            0.0,
-            0.0,
-            0.0,
+            right[1],
+            up[1],
+            fwd[1],
+            cam.eye[1],
+            look.fog,
+            look.fog_falloff,
+            laws::AO_SUN,
+            geo::dot(sun, right),
+            geo::dot(sun, up),
+            -geo::dot(sun, fwd),
+            if sun[1] > 0.0 { 1.0 } else { 0.0 },
         ];
         queue.write_buffer(&self.buf, 0, &bytes(&k));
         let white = wgpu::LoadOp::Clear(wgpu::Color::WHITE);

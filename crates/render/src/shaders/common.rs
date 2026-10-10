@@ -1,7 +1,8 @@
 //! What every scene shader shares: the globals, the lights' grid, the
-//! sun's shadow, the terrain's heights, noise, the sky, the air between
-//! (aerial perspective), and the light a surface gives back (GGX, and
-//! cloth's sheen).
+//! sun's shadow, the terrain (its heights, grass and how open it is to the
+//! sky), noise, the sky and its clouds, the air between (aerial
+//! perspective), and the light a surface gives back (GGX, and cloth's
+//! sheen).
 
 pub const COMMON: &str = r#"
 struct Globals {
@@ -79,25 +80,43 @@ fn noise2(x: vec2<f32>) -> f32 {
     return noise3(vec3<f32>(x.x, 0.5, x.y));
 }
 
-fn fbm3(x: vec3<f32>) -> f32 {
+/// Noise in `octaves` layers, each finer and fainter, on the same scale
+/// however many (fewer for what only mirrors it).
+fn fbm(x: vec3<f32>, octaves: i32) -> f32 {
     var a = 0.5;
     var s = 0.0;
+    var all = 0.0;
     var p = x;
-    for (var i = 0; i < 4; i = i + 1) {
+    for (var i = 0; i < octaves; i = i + 1) {
         s = s + a * noise3(p);
+        all = all + a;
         p = p * 2.03 + vec3<f32>(1.7, 9.2, 3.1);
         a = a * 0.5;
     }
-    return s;
+    return s * 0.9375 / all;
 }
 
-/// The terrain at (x, z), between its samples: x its height, y how much
-/// grass grows there (0 to 1, as the game painted it), zw its slope (the
-/// rise a metre along x and along z).
-fn terrain_at(xz: vec2<f32>) -> vec4<f32> {
+fn fbm3(x: vec3<f32>) -> f32 {
+    return fbm(x, 4);
+}
+
+/// The terrain at a point, between its samples: its height, how much
+/// grass grows there (0 to 1, as the game painted it), its slope (the
+/// rise a metre along x and along z), and how open it is to the sky (1
+/// on a crest, less down in a hollow or under a cliff).
+struct Ground {
+    h: f32,
+    lush: f32,
+    slope: vec2<f32>,
+    open: f32,
+};
+
+/// The terrain at (x, z); past its edge, the edge's (and its far side:
+/// no ground at all, for the sea).
+fn terrain_at(xz: vec2<f32>) -> Ground {
     let n = i32(g.terrain.w);
     if (n < 2) {
-        return vec4<f32>(-1000.0, 0.0, 0.0, 0.0);
+        return Ground(-1000.0, 0.0, vec2<f32>(0.0), 1.0);
     }
     let f = clamp((xz - g.terrain.xy) / g.terrain.z, vec2<f32>(0.0), vec2<f32>(f32(n - 1) - 0.001));
     let i = vec2<i32>(floor(f));
@@ -109,12 +128,19 @@ fn terrain_at(xz: vec2<f32>) -> vec4<f32> {
     let here = mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
     let sx = mix(b.r - a.r, d.r - c.r, t.y) / g.terrain.z;
     let sz = mix(c.r - a.r, d.r - b.r, t.x) / g.terrain.z;
-    return vec4<f32>(here.r, here.g, sx, sz);
+    return Ground(here.r, here.g, vec2<f32>(sx, sz), here.b);
 }
 
 /// The terrain's height at (x, z), between its samples.
 fn ground(xz: vec2<f32>) -> f32 {
-    return terrain_at(xz).x;
+    return terrain_at(xz).h;
+}
+
+/// Whether (x, z) lies over the terrain at all.
+fn on_terrain(xz: vec2<f32>) -> bool {
+    let f = (xz - g.terrain.xy) / g.terrain.z;
+    let last = g.terrain.w - 1.0;
+    return g.terrain.w >= 2.0 && all(f >= vec2<f32>(0.0)) && all(f <= vec2<f32>(last));
 }
 
 /// How much of the sun reaches `pos` in layer `c` of the shadow map
@@ -215,6 +241,31 @@ fn sky(d: vec3<f32>) -> vec3<f32> {
     return c;
 }
 
+/// The cloud layer high above, seen along `d` (looking up): how much it
+/// covers there (0 clear, 1 thick) and how dense it is, of `octaves`
+/// layers of noise (fewer for what only mirrors it).
+fn cloud(d: vec3<f32>, octaves: i32) -> vec2<f32> {
+    let cover = g.zenith.w;
+    if (d.y <= 0.0 || cover <= 0.0) {
+        return vec2<f32>(0.0);
+    }
+    let t = (1800.0 - g.eye.y) / max(d.y, 0.02);
+    let p = g.eye.xz + d.xz * t;
+    let q = p * 0.0006 + vec2<f32>(g.eye.w * 0.004, g.eye.w * 0.0015);
+    let dens = fbm(vec3<f32>(q.x * 2.5, g.eye.w * 0.002, q.y * 2.5), octaves);
+    let k = smoothstep(1.0 - cover, 1.0 - cover + 0.3, dens) * smoothstep(0.0, 0.2, d.y);
+    return vec2<f32>(k, dens);
+}
+
+/// The clouds over the sky seen along `d`, lit by the sun (`cl`: their
+/// cover and density there, from `cloud`).
+fn clouded(c: vec3<f32>, d: vec3<f32>, cl: vec2<f32>) -> vec3<f32> {
+    let mu = max(dot(d, g.sun_dir.xyz), 0.0);
+    let lit = g.sun.rgb * (0.16 + 0.25 * pow(mu, 6.0)) + g.sky.rgb * 0.75;
+    let shade = mix(1.0, 0.65, smoothstep(0.6, 1.0, cl.y));
+    return mix(c, lit * shade, cl.x * 0.92);
+}
+
 /// The air between the eye and `pos`: thicker low and far, the colour of
 /// the sky behind it.
 fn air(c: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
@@ -291,7 +342,12 @@ fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, 
     }
     // Light through leaves and blades, from behind.
     c = c + diffuse * g.sun.rgb * max(-nl, 0.0) * through * lit;
-    let amb = mix(g.low.rgb, g.sky.rgb, n.y * 0.5 + 0.5);
+    // The sky's and the ground's light; near the ground, only as much of
+    // the sky as the terrain leaves open there (a hollow, a cliff's foot).
+    let under = terrain_at(pos.xz);
+    let near = 1.0 - smoothstep(0.5, 4.0, pos.y - under.h);
+    let open = mix(1.0, under.open, near);
+    let amb = mix(g.low.rgb, g.sky.rgb, n.y * 0.5 + 0.5) * open;
     c = c + diffuse * amb * ao;
     let nv = max(dot(n, v), 0.0);
     if (cloth) {
@@ -303,7 +359,7 @@ fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, 
         c = c + tone * amb * pow(1.0 - nv, 3.0) * ao * 2.5;
     } else {
         let fr = f0 + (max(vec3<f32>(1.0 - rough), f0) - f0) * pow(1.0 - nv, 5.0);
-        c = c + fr * sky(reflect(-v, n)) * (1.0 - rough * 0.8) * ao * 0.5;
+        c = c + fr * sky(reflect(-v, n)) * (1.0 - rough * 0.8) * ao * open * 0.5;
     }
     let side = i32(g.grid.w);
     let gc = vec2<i32>(floor((pos.xz - g.grid.xy) / g.grid.z));

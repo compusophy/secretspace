@@ -74,14 +74,7 @@ impl Shadows {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
-        let caster_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("caster"),
-            entries: &[crate::pipes::buffer(
-                0,
-                wgpu::BufferBindingType::Uniform,
-                wgpu::ShaderStages::VERTEX,
-            )],
-        });
+        let caster_layout = crate::slots::layout(device, "caster", &crate::slots::CASTER);
         let casters = (0..count)
             .map(|_| {
                 let buf = make(

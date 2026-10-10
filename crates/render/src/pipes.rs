@@ -6,13 +6,14 @@
 use crate::buffers::{INST, SPARK};
 use crate::decals::Decals;
 use crate::post::{DEPTH, HDR};
-use crate::{geo, shaders, Quality};
+use crate::{geo, shaders, slots, Quality};
 use gpu::wgpu;
 
 /// Every pipeline the scene draws with: the world's by pass (solid,
 /// see-through, glowing), the sky, sparks, grass; and those of the pass
-/// that reads the depth (soft sparks, the sea mirroring, decals) and the
-/// layout of the group they read it by.
+/// that reads the depth (what is see-through, what glows and sparks,
+/// each fading into what is behind it, the sea mirroring; decals) and
+/// the layout of the group they read it by.
 pub(crate) struct Pipes {
     pub opaque: wgpu::RenderPipeline,
     pub faint: wgpu::RenderPipeline,
@@ -22,8 +23,9 @@ pub(crate) struct Pipes {
     pub grass: wgpu::RenderPipeline,
     /// A blade's two triangles and its tip, over its five corners.
     pub blade: wgpu::Buffer,
-    pub soft_sparks: wgpu::RenderPipeline,
-    pub faint_ssr: wgpu::RenderPipeline,
+    pub faint_soft: wgpu::RenderPipeline,
+    pub glow_soft: wgpu::RenderPipeline,
+    pub sparks_soft: wgpu::RenderPipeline,
     pub decals: Decals,
     pub soft_layout: wgpu::BindGroupLayout,
 }
@@ -148,7 +150,21 @@ impl Pipes {
                 buf.unmap();
                 buf
             },
-            soft_sparks: pipeline(
+            faint_soft: pipeline(
+                &soft,
+                Kind {
+                    entry: ("world_vs", "faint_fs"),
+                    ..world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None)
+                },
+            ),
+            glow_soft: pipeline(
+                &soft,
+                Kind {
+                    entry: ("world_vs", "glow_soft_fs"),
+                    ..world_kind(Some(add), false, None)
+                },
+            ),
+            sparks_soft: pipeline(
                 &soft,
                 Kind {
                     entry: ("spark_vs", "spark_soft_fs"),
@@ -156,13 +172,6 @@ impl Pipes {
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     depth: (false, GreaterEqual),
                     cull: None,
-                },
-            ),
-            faint_ssr: pipeline(
-                &soft,
-                Kind {
-                    entry: ("world_vs", "faint_fs"),
-                    ..world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None)
                 },
             ),
             decals: Decals::new(&soft),
@@ -229,65 +238,10 @@ pub(crate) fn pipeline(s: &Shared, k: Kind) -> wgpu::RenderPipeline {
         })
 }
 
-/// A buffer's entry in a layout.
-pub(crate) fn buffer(
-    binding: u32,
-    ty: wgpu::BufferBindingType,
-    visibility: wgpu::ShaderStages,
-) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility,
-        ty: wgpu::BindingType::Buffer {
-            ty,
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    }
-}
-
 /// The scene's own group: the globals, the lights and their grid, the
-/// sun's shadow and its sampler, the ground's heights.
+/// sun's shadow and its sampler, the ground's heights (`slots::SCENE`).
 pub(crate) fn scene_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    let frag = wgpu::ShaderStages::FRAGMENT;
-    let both = wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT;
-    let storage = wgpu::BufferBindingType::Storage { read_only: true };
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("engine"),
-        entries: &[
-            buffer(0, wgpu::BufferBindingType::Uniform, both),
-            buffer(1, storage, frag),
-            buffer(2, storage, frag),
-            buffer(3, storage, frag),
-            wgpu::BindGroupLayoutEntry {
-                binding: 4,
-                visibility: frag,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Depth,
-                    view_dimension: wgpu::TextureViewDimension::D2Array,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: frag,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 6,
-                visibility: both,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-        ],
-    })
+    slots::layout(device, "engine", &slots::SCENE)
 }
 
 /// The scene's own group (`scene_layout`): the `globals`, the lights'
@@ -366,39 +320,8 @@ pub(crate) fn soft_group(
 }
 
 /// What the pass after the solid one reads (a second group): the depth
-/// (soft sparks fade into it), a copy of the picture so far and a sampler
-/// for it (the sea's reflections).
+/// (what glows and is see-through fades into it), a copy of the picture
+/// so far and a sampler for it (the sea's reflections).
 fn soft_layout(device: &wgpu::Device, msaa: bool) -> wgpu::BindGroupLayout {
-    let frag = wgpu::ShaderStages::FRAGMENT;
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("soft"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: frag,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Depth,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: msaa,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: frag,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: frag,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ],
-    })
+    slots::layout(device, "soft", &slots::soft(msaa))
 }
