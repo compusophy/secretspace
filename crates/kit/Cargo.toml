@@ -44,6 +44,7 @@ features = [
   "Location",
   "Navigator",
   "MediaQueryList",
+  "VisualViewport",
   "WebSocket",
   "BinaryType",
   "CloseEvent",

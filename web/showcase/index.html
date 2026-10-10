@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>showcase · secretspace</title>
 <meta name="description" content="The secretspace engine's test page: what the renderer draws, on WebGPU.">
 <meta name="theme-color" content="#0b0d1a">
@@ -12,7 +12,8 @@
 <meta name="server" content="">
 <style>
   html, body { margin: 0; height: 100%; background: #0b0d1a; overflow: hidden; }
-  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; image-rendering: pixelated; touch-action: none; }
+  /* kit sizes the canvas in CSS pixels: on a phone 100vh is taller than what shows. */
+  canvas { position: fixed; left: 0; top: 0; display: block; image-rendering: pixelated; touch-action: none; }
 </style>
 </head>
 <body>

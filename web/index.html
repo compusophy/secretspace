@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>secretspace</title>
 <meta name="description" content="Tiny games, everyone in them. Pick one and play with whoever is here.">
 <meta name="theme-color" content="#070a12">
@@ -14,7 +14,8 @@
 <meta name="server" content="">
 <style>
   html, body { margin: 0; height: 100%; background: #070a12; overflow: hidden; }
-  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; image-rendering: pixelated; touch-action: none; }
+  /* kit sizes the canvas in CSS pixels: on a phone 100vh is taller than what shows. */
+  canvas { position: fixed; left: 0; top: 0; display: block; image-rendering: pixelated; touch-action: none; }
 </style>
 </head>
 <body>

@@ -30,7 +30,7 @@ use std::rc::Rc;
 
 use pixels::Canvas;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen::{Clamped, JsCast};
+use wasm_bindgen::{Clamped, JsCast, JsValue};
 use web_sys::{
     CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement, HtmlInputElement,
     ImageData, Window,
@@ -57,13 +57,15 @@ pub fn on(target: &web_sys::EventTarget, event: &str, f: impl FnMut(web_sys::Eve
     c.forget();
 }
 
-/// Call `f` with the time on every animation frame, forever.
+/// Call `f` with the time on every animation frame, forever: the frame's
+/// own time (when the browser began it, on `now`'s clock), the same for
+/// everything drawn in it, so steps between frames come out even.
 pub fn frames(mut f: impl FnMut(f64) + 'static) {
-    type Loop = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
+    type Loop = Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>;
     let raf: Loop = Rc::new(RefCell::new(None));
     let again = raf.clone();
-    *raf.borrow_mut() = Some(Closure::new(move || {
-        f(now());
+    *raf.borrow_mut() = Some(Closure::new(move |t: f64| {
+        f(t);
         if let Some(c) = again.borrow().as_ref() {
             let _ = window().request_animation_frame(c.as_ref().unchecked_ref());
         }
@@ -72,6 +74,65 @@ pub fn frames(mut f: impl FnMut(f64) + 'static) {
         let _ = window().request_animation_frame(c.as_ref().unchecked_ref());
     }
     std::mem::forget(raf);
+}
+
+/// Call `f` whenever the screen changes under the page: the window's size,
+/// the part of it a phone shows (its toolbars, which do not always resize
+/// the window), or its pixels (dragged to another monitor, or zoomed).
+pub fn on_resize(f: impl FnMut() + 'static) {
+    let f: Rc<RefCell<dyn FnMut()>> = Rc::new(RefCell::new(f));
+    let g = f.clone();
+    on(&window(), "resize", move |_| (g.borrow_mut())());
+    if let Some(v) = window().visual_viewport() {
+        let g = f.clone();
+        on(&v, "resize", move |_| (g.borrow_mut())());
+    }
+    on_new_pixels(f);
+}
+
+/// `f` once the device's pixels per CSS pixel change, and each time after.
+fn on_new_pixels(f: Rc<RefCell<dyn FnMut()>>) {
+    let q = format!("(resolution: {}dppx)", window().device_pixel_ratio());
+    let Ok(Some(m)) = window().match_media(&q) else {
+        return;
+    };
+    let c = Closure::once(move |_: web_sys::Event| {
+        (f.borrow_mut())();
+        on_new_pixels(f);
+    });
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_once(true);
+    let _ = m.add_event_listener_with_callback_and_add_event_listener_options(
+        "change",
+        c.as_ref().unchecked_ref(),
+        &opts,
+    );
+    c.forget();
+}
+
+/// The window's size in CSS pixels: the part of it the page is shown in
+/// (on a phone, between its toolbars).
+pub fn window_css() -> (f64, f64) {
+    let w = window();
+    let px = |v: Result<JsValue, JsValue>, or: f64| v.ok().and_then(|v| v.as_f64()).unwrap_or(or);
+    (px(w.inner_width(), 800.0), px(w.inner_height(), 600.0))
+}
+
+/// Size `el` (a canvas, a frame) to `w` by `h` CSS pixels: set here,
+/// never by the page's style, whose `100vh` on a phone is the screen with
+/// its toolbars hidden, taller than what shows.
+pub fn place(el: &HtmlElement, w: f64, h: f64) {
+    let s = el.style();
+    let _ = s.set_property("width", &format!("{w}px"));
+    let _ = s.set_property("height", &format!("{h}px"));
+}
+
+/// CSS pixels per buffer pixel near `scale` that make each buffer pixel a
+/// whole number of the device's pixels (`dpr` of them per CSS pixel), so
+/// every stroke of the font is as thick as every other.
+pub fn snap(scale: f64, dpr: f64) -> f64 {
+    let dpr = if dpr.is_finite() { dpr.max(0.25) } else { 1.0 };
+    (scale * dpr).round().max(1.0) / dpr
 }
 
 pub fn load(key: &str) -> Option<String> {
@@ -179,7 +240,7 @@ pub fn room_url(room: &str, query: &str) -> String {
 }
 
 /// The canvas, and the pixels drawn into it: one buffer pixel is `scale`
-/// CSS pixels, shown sharp.
+/// CSS pixels (a whole number of the device's), shown sharp.
 pub struct Screen {
     canvas: HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
@@ -188,6 +249,7 @@ pub struct Screen {
     pub scale: f64,
     /// The window, in CSS pixels.
     pub css: (f64, f64),
+    ui: i32,
 }
 
 impl Screen {
@@ -209,6 +271,7 @@ impl Screen {
             px: Canvas::new(1, 1),
             scale: 1.0,
             css: (1.0, 1.0),
+            ui: 2,
         };
         s.fit();
         s
@@ -216,17 +279,20 @@ impl Screen {
 
     /// Match the window: pick the pixel size, size the buffer.
     pub fn fit(&mut self) {
-        let (w, h) = Self::window_css();
+        let (w, h) = window_css();
         // About 960 buffer pixels across, at most: big screens get bigger
         // pixels, a phone gets one per CSS pixel.
-        self.size((w / 960.0).ceil().clamp(1.0, 4.0), w, h);
+        let pick = (w / 960.0).ceil().clamp(1.0, 4.0);
+        // Text reads the same size whichever way that is snapped.
+        self.ui = if pick >= 2.0 { 1 } else { 2 };
+        self.size(snap(pick, window().device_pixel_ratio()), w, h);
     }
 
     /// Match the window as `fit` does, but with pixels small enough to leave
     /// at least `min_short` buffer pixels on the short side whenever the
     /// window allows: a game that must show so much of its world.
     pub fn fit_view(&mut self, min_short: f64) {
-        let (w, h) = Self::window_css();
+        let (w, h) = window_css();
         let s = (w / 960.0).ceil().min((w.min(h) / min_short).floor());
         self.size(s.clamp(1.0, 4.0), w, h);
     }
@@ -241,29 +307,14 @@ impl Screen {
         self.px.resize(bw, bh);
         self.canvas.set_width(bw as u32);
         self.canvas.set_height(bh as u32);
-    }
-
-    fn window_css() -> (f64, f64) {
-        let w = window()
-            .inner_width()
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(800.0);
-        let h = window()
-            .inner_height()
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(600.0);
-        (w, h)
+        // Exactly `scale` CSS pixels a buffer pixel: what spills past the
+        // window's edge (less than one) is cut off.
+        place(&self.canvas, bw as f64 * scale, bh as f64 * scale);
     }
 
     /// The text scale that reads the same size on any screen.
     pub fn ui(&self) -> i32 {
-        if self.scale >= 2.0 {
-            1
-        } else {
-            2
-        }
+        self.ui
     }
 
     /// A CSS point as a buffer point.
@@ -359,5 +410,34 @@ impl TextField {
                 let _ = style.set_property("display", "none");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snap;
+
+    #[test]
+    fn every_buffer_pixel_is_whole_device_pixels() {
+        // A laptop at 125%, a 4K screen at 150%, Androids at 2.625 and
+        // 2.75, a phone at 3, a desktop at 1, a page zoomed out to 90%.
+        for (pick, dpr) in [
+            (2.0, 1.25),
+            (3.0, 1.5),
+            (1.0, 2.625),
+            (1.0, 2.75),
+            (1.0, 3.0),
+            (2.0, 1.0),
+            (1.0, 0.9),
+        ] {
+            let s = snap(pick, dpr);
+            let dev = s * dpr;
+            assert!((dev - dev.round()).abs() < 1e-9, "{pick} at {dpr}: {dev}");
+            // Near what was picked: never more than half a device pixel off.
+            assert!((dev - pick * dpr).abs() <= 0.5 + 1e-9, "{pick} at {dpr}");
+        }
+        assert_eq!(snap(2.0, 1.0), 2.0);
+        assert_eq!(snap(1.0, 3.0), 1.0);
+        assert_eq!(snap(1.0, f64::NAN), 1.0);
     }
 }

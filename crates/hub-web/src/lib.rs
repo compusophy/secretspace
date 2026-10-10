@@ -397,7 +397,7 @@ pub fn start() -> Result<(), JsValue> {
             with(|h| draw(h, now));
         }
     });
-    kit::on(&kit::window(), "resize", |_| {
+    kit::on_resize(|| {
         with(|h| h.screen.fit());
     });
     kit::on(&canvas, "pointerdown", |e| {
