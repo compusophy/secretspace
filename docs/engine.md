@@ -147,6 +147,12 @@ crates/luciphon-web  Moves onto `render` in Phase 1. Its `scene/` (WebGL2)
   that wording to WGSL in `CLAUDE.md`).
 - Tuning numbers live in `laws.rs` (rule 3): the engine's tiers and budgets
   go in `crates/render/src/laws.rs`; a game's look goes in its own `laws.rs`.
+  Done: the tiers are `laws::HIGH`, `MEDIUM` and `LOW` (`Quality::*` names
+  them), with the shadows', bloom's, occlusion's, grass's, sea's, sparks'
+  and shafts' numbers, put into the WGSL as it is built.
+  `crates/render/src/slots.rs` holds the bind-group tables every layout
+  is built from, and the tests check every shader's bindings against
+  them.
 
 ### 2.2 wgpu, and its versions (do this first)
 
@@ -206,6 +212,16 @@ r.draw(&Camera { eye, yaw, pitch, fov }, &Viewmodel { .. }, &hud_canvas, now);
     frame time exceeds budget; step up after 10 s comfortably under it.
   - `?q=gl|low|medium|high|ultra` forces a tier; `?gpu=0` forces GL.
   - Add a graphics setting to each game's menu; remember it in localStorage.
+- **Built (October 2026):** Low, Medium and High. Each draws the scene at
+  a share of the screen (`Quality::scale`: 1.0, 0.8, 0.65; never more
+  than 2.5 million pixels, `laws::SCENE_PIXELS`; `?scale=` sets it), and
+  the finish scales it up under a sharp HUD (no TAAU yet). Each has its
+  own shadow cascades (below). Software adapters start on Low, touch
+  screens on Medium, the rest on High. Stepping down (Wandfall: frames
+  over 30 ms for 2.5 s) first shrinks the scene to the next tier's
+  scale, then drops the tier; `Renderer::set_quality` makes again only
+  what depends on the tier (pipelines, the shadow map, the targets), so
+  no mesh is built again. Not yet: stepping back up.
 
 ### 2.5 Determinism hooks for testing (Phase 0)
 
@@ -228,8 +244,14 @@ Done, across phases, in `crates/render`:
   materials: plain, terrain, foliage, water, metal), the light grid, sky,
   air, the see-through and glowing passes, sparks, the viewmodel layer.
   Geometry: smooth spheres (icosahedral, bumped), lathed shapes, smoothing.
-- Phase 2: HDR (rgba16float) with 4x MSAA, bloom (a 13-tap halving chain
-  and tent upsampling), ACES, a vignette, sRGB; GGX specular with a sky
+  Normals are turned by the model's cofactor (right for stretched and
+  mirrored models too). The light grid lists in each cell the nearest
+  lights that reach it, at most 48 on High, 16 on Medium, 8 on Low, and a
+  pixel skips any whose reach misses it. A mesh's id is never used again.
+  The shaders' clock wraps at 16,384 s, so it stays precise.
+- Phase 2: HDR (rgba16float) with 4x MSAA (none on Low), bloom (a 13-tap
+  halving chain and tent upsampling, in rg11b10 where the device can
+  draw into it), ACES, a vignette, sRGB; GGX specular with a sky
   reflection for ambient sheen; procedural surface detail (noise bumps)
   instead of textures; the terrain material (grass, dry grass, rock by
   slope, sand and wet sand by the sea). A grade after tone mapping
@@ -247,8 +269,20 @@ Done, across phases, in `crates/render`:
   over the sky's reflection, fading at the screen's edge and far off.
   What glows is drawn after the copy, so it is not mirrored yet.
   `Look::wet` (rain): the ground and stone darker and glossier, the sea
-  pocked with drops near the eye. Not yet:
-  auto exposure, DoF, IBL.
+  pocked with drops near the eye. Bloom, since: only what is past white
+  once exposed blooms (`BLOOM_WHITE` 1, eased over a knee of
+  `BLOOM_KNEE` 0.5 either side), so a spell, a lamp or the sun glows
+  about itself and the rest of the picture is not veiled; the first
+  halving weighs each group of taps down by its brightness (Karis, half
+  at `BLOOM_KARIS` 4), so a speck does not flicker it and a thin beam
+  still throws a halo; each wider level counts 0.75 of the one finer
+  (`BLOOM_FALLOFF`), the levels averaged, then added at `Look::bloom`.
+  That changed what `Look::bloom` means: about 1 now (Wandfall's hours
+  1.3 to 2.0, the showcase 1.2), where it was a share near 0.1; a game
+  that sets it needs new values, and its exposure may want raising
+  (Wandfall's went up about 1.45 times). Khronos's PBR Neutral tone map
+  is there behind `laws::TONE_MAP`; ACES stays, as fire read pink-red
+  under Neutral. Not yet: auto exposure, DoF, IBL.
 - Phase 5 (part): sparks with shapes (`Shape`: a glow, a licking flame,
   a puff of smoke laid over rather than added, a four-rayed glint), each
   stretched along its motion into a streak (`Spark::v`), flames and
@@ -257,27 +291,74 @@ Done, across phases, in `crates/render`:
   ragged at its edges, or plasma, bright at its rim). Soft sparks: in
   the pass after what is solid (depth only read), each fades as it
   nears what stands behind it, over half its size, so a puff meeting
-  the ground does not cut a line (Medium and High). Not yet: GPU
+  the ground does not cut a line (Medium and High). What glows and what
+  is see-through fades the same way, over 0.45 m (`SOFT_FADE`), and a
+  `Rim` gets a bright line where it meets what stands there. A spark
+  under a pixel's radius on screen is drawn that big and dimmed to keep
+  its light (never below 15% of it). The `Energy` noise flows in the
+  thing's own space, so it moves with it. Not yet: GPU
   simulation, ribbons. Shafts of sunlight (`shafts.rs`):
   from the depth at a quarter of the screen, each pixel marches toward
   the sun on screen over the open sky near it, dimming as it goes; the
   finish adds them in the sun's colour before tone mapping (High and
-  Medium; `?shafts=0` turns them off).
-- Phase 3: the sun's cascaded shadows (3 x 2048 on High, PCF 3x3, snapped
-  to texels). Not yet: static caster caching, point shadows, froxels.
+  Medium; `?shafts=0` turns them off). They fade as cloud covers the
+  sky (`Look::clouds`, whole to 0.55, gone at 0.95), and with none to
+  add the march is skipped.
+- Phase 3: the sun's cascaded shadows, snapped to texels: 3 x 2048 on
+  High (ending 14, 48 and 150 m ahead), 2 x 1536 on Medium (20, 85 m),
+  1 x 1024 on Low (14 m); past the last, **the island's layer**, one
+  more layer over all that stands still at its coarse meshes, drawn
+  again only when the statics change or the sun turns 0.5°, so every
+  tier has shadows out to the shore. The last of two or more cascades
+  draws only what moves and takes the darker of itself and the island's
+  layer. Each cascade blends into the next over the last 15% of it. The
+  edge is softened over a disc of 8 taps (Vogel's spiral) turned pixel
+  by pixel. The bias is 4 cm in every layer, growing on surfaces edge on
+  to the sun (by the tangent of their angle, up to `SHADOW_TILT` 5) so
+  nothing speckles itself; the lookup is 1.5 texels out along the
+  normal. Not yet: PCSS, point shadows, froxels.
 - Phase 4 (part): ambient occlusion (`ao.rs`, `shaders/ao.rs`), HBAO
   from the depth at half res: the facing rebuilt from the depth, 6 ways
   out (4 on Medium, none on Low) a pixel, 4 steps each, turned by
   interleaved gradient noise; a 4x4 blur kept to its depth; then a
-  depth-aware upsample multiplied into the picture once what is solid is
-  drawn, before what is see-through, glows and the viewmodel. `?ao=0`
-  turns it off; its numbers are in `laws.rs` (`AO_*`). The sea (waves,
-  fresnel sky, shallows from the terrain's heights, glints, foam). Phase 5 (part): the sky (gradient, sun glow,
-  disc, drifting clouds) and height fog that takes the sky's colour.
+  depth-aware upsample multiplied into the picture as the first draw of
+  the pass that lays what is see-through and what glows over what is
+  solid (before the viewmodel). It shades only the sky's light: the
+  solid pass writes into the picture's alpha how much of each pixel's
+  light comes straight (the sun where it reaches, a light's, its own
+  glow), and the occlusion leaves 85% of that alone (`AO_DIRECT`), so
+  ground in a cast shadow keeps all its contact shading and a glow is
+  not darkened. Fog between the eye and a surface fades it. `?ao=0`
+  turns it off; its numbers are in `laws.rs` (`AO_*`). The frame's
+  passes, since: the view pass lets go of the MSAA samples once
+  resolved, the sea's copy is resolved at the end of the last solid
+  pass, and the empty pass between is gone, so the many-sampled picture
+  is stored and loaded fewer times a frame. The sea (waves, fresnel sky,
+  shallows from the terrain's heights, glints, foam; wholly its own deep
+  colour, showing nothing of its bed, past 4 m deep or past the
+  terrain's end). Phase 5 (part): the sky (gradient, sun glow,
+  disc, drifting clouds; the sun's disc and the stars hidden as cloud
+  covers them, stars round and fading out of a bright sky, the sea
+  mirroring the clouds) and height fog that takes the sky's colour.
 - Phase 6 (part): GPU grass (100k+ blades about the eye, wind, rooted on
-  the heights texture, none on sand, rock or steep ground).
-- Tiers: `Quality::{HIGH, MEDIUM, LOW}`; `?q=` forces one; software
-  adapters get Low, touch screens Medium.
+  the heights texture, none on sand, rock or steep ground). Since: a
+  blade takes its colour from the ground's own (so it blends into it),
+  its root 70% lit; far off it thins (`GRASS_THIN`) and the rest is
+  drawn wider; every cull runs before anything is fetched; 5 vertices a
+  blade. The terrain's openness to the sky (8 ways, out to 40 m) is
+  baked into its heights texture at load and dims ambient light and the
+  sky's reflection in hollows; its fine noise fades far off, against
+  shimmer. Foliage: leaves are a soft bump in clumps (`LEAF_BUMP` 0.18,
+  `LEAF_GRAIN` 3 a metre, smoothed away where a pixel spans a clump),
+  and nothing in the solid pass discards a pixel, so the GPU keeps its
+  early depth test (`what_is_solid_never_discards`).
+- Tiers: `Quality::{HIGH, MEDIUM, LOW}` (`laws.rs`); `?q=` forces one;
+  software adapters get Low, touch screens Medium; each with its scale
+  and cascades (§2.4), its decals (Medium and High) and its lights a
+  cell.
+- `gpu::Health` (on `Gpu` and `Offscreen`): whether the device was lost,
+  and how many errors no one caught (the first logged); no frame is
+  begun on a lost device.
 
 Every phase:
 1. Keep all gates green (`CLAUDE.md` § Commands).
@@ -292,7 +373,8 @@ Every phase:
       composite (`layer.rs`: one fullscreen triangle, `textureLoad`, so the
       layer stays sharp). The adapter is asked for before the canvas is
       touched, so a failure leaves it free for WebGL2. Optional features
-      (timestamps, f16, filterable f32, RG11B10 targets) come when offered.
+      come when offered; only RG11B10 targets are asked for now (bloom's
+      chain), as nothing uses the others yet.
       *Native device: not yet* (off the web the crate builds its shaders
       only); it comes with golden images in Phase 1.
 - [x] `crates/showcase-web` + `web/showcase/index.html` + a `page` line in
@@ -315,8 +397,12 @@ Every phase:
       *Left: real GPUs, Safari and Firefox.*
 - [ ] Native tests: an empty frame offscreen (skip if no adapter) *(with
       the native device)*, and Naga validation of every WGSL string *(done:
-      `crates/gpu/tests/wgsl.rs`, `crates/showcase-web/tests/wgsl.rs`; every
-      new WGSL string gets one)*.
+      `crates/gpu/tests/wgsl.rs`, `crates/render/tests/wgsl.rs`, every
+      entry point and both SSR variants, each module's bindings checked
+      against `render::slots`; every new WGSL string gets one, and
+      `scripts/caps.sh` (`scripts/shaders.awk`) fails when a string with
+      an entry point is not reached from its crate's tests; the
+      showcase's test triangle and its test are gone)*.
 
 ### Phase 1: the engine core, and Luciphon's look on it (3-5 days)
 - [ ] `crates/render`:
@@ -357,6 +443,10 @@ Every phase:
 - [ ] Sun/moon cascaded shadow maps:
   - 3-4 cascades, stable snapping, PCF; PCSS on High and Ultra.
   - **Cache static casters**; re-render only dynamic ones.
+  - *(Done: 1-3 cascades by tier, snapped, an 8-tap PCF disc; statics
+    cached in the island's layer, which the last of two or more cascades
+    leans on, drawing only what moves. Left: PCSS, and caching statics
+    in the nearer cascades.)*
 - [ ] A point-shadow atlas for the N most important lights, with static
       casters cached.
 - [ ] Contact shadows on Ultra.
@@ -365,7 +455,8 @@ Every phase:
 - [ ] Motion vectors (camera, plus per instance from previous transforms).
 - [ ] TAA (jitter, neighbourhood clamp, disocclusion rejection), then TAAU
       (render scale per tier). This is what makes phones possible.
-- [x] AO at half res with a bilateral upsample (HBAO, not yet GTAO).
+- [x] AO at half res with a bilateral upsample (HBAO, not yet GTAO),
+      shading only the sky's light.
 - [ ] SSR (hierarchical depth), falling back to IBL.
 - [ ] Water:
   - normal-mapped ripples;
@@ -395,9 +486,16 @@ Every phase:
       rebuilding where the scene stands from the depth and marking it
       (premultiplied: soot lays over, light adds; light only on the ground
       or what is level). What moves is drawn after, so no wizard is ever
-      painted. Needs the depth readable (medium and high). Wandfall leaves
+      painted. Needs the depth readable (medium and high; `Quality::decals`
+      says which tiers lay them). Wandfall leaves
       a fireball's burn (cracks glowing, a shockwave ringing out), lightning's
-      and the Lance's, and frost's rime, for 25 s (`?fx=scars`).
+      and the Lance's, and frost's rime, for 25 s (`?fx=scars`), and lays
+      its large rings (shockwaves, gusts, dust, falls) as decals, deep
+      enough to cover a 25° slope. A game draws its own mesh where decals
+      are not laid (Wandfall's `Look::marks` repeats the rule: decals only
+      with occlusion or shafts on; a `Renderer` query would spare it).
+      A telegraph a player must read (Lightning's warning) is never a
+      decal alone: from a player's eye height, grass hides it.
 
 ### Phase 6: GPU-driven geometry and foliage (5-8 days)
 - [ ] Instancing everywhere: one mesh per kind with 2-3 LODs (a simple Rust
@@ -417,9 +515,17 @@ Every phase:
       or the sun has turned, so runs stay one a mesh and draws do not grow
       (400 to 360). Past the nearest cascade statics cast at their far
       mesh, and what moves always does (a wizard's shadow from its 7k
-      model, not its 42k one). The ground is cut in 4 by 4 pieces so the
+      model, not its 39k one). The ground is cut in 4 by 4 pieces so the
       cascades take only the near ones. On the range, shadow triangles
-      3,395k to 2,250k; `?perf=1` shows them a cascade at a time.
+      3,395k to 2,250k; `?perf=1` shows them a cascade at a time. With
+      the island's layer (Phase 3, `cull::held`: the last of two or more
+      cascades leaves what stands still to it), shadow triangles a frame
+      at the range's start by day: Low 296k, Medium 714k, High 1,294k
+      (they were 294k, 903k and 1,858k). The sculpted relics and leaves
+      Wandfall added since cost about a quarter more in the nearest
+      cascade (which draws statics at their near meshes) and a tenth more
+      in the others. So: every static there are many of, or that is big,
+      gets a far mesh.
 - [x] The view culled the same way: statics within a cone 20 degrees
       wider than the eye's (or within 6 m), laid again in the frame the
       view turns past that or the eye moves 6 m, so nothing pops; one run
@@ -466,6 +572,13 @@ Every phase:
       proven.
 - [ ] Pipelines created async at load (a progress line), never mid-play.
 - [ ] Device loss: rebuild from the retained scene without crashing.
+      *(Started: `gpu::Health` tells a page its device is lost, and no
+      frame is begun on it; the pages do not rebuild yet.)*
+- [ ] The pixel layer over 3D drawn at whole device pixels. The 2D pages
+      snap their pixel scale so each buffer pixel is a whole number of
+      device pixels (`kit::snap`), but over WebGPU the HUD is laid at
+      its scale times the DPR (Wandfall caps the DPR at 1.5), which need
+      not be whole, so its pixels can be uneven.
 - [ ] GPU memory under 300 MB on Medium and 150 MB on Low.
 
 ---
@@ -556,10 +669,13 @@ images.
 | | Ultra | High | Medium | Low | GL |
 |---|---|---|---|---|---|
 | GPU ms (p95) | 12 | 8 | 14 | 16 | as today |
-| Render scale | 1.0 | 0.8-1.0 | 0.66 | 0.5 | DPR cap |
+| Render scale | 1.0 | 1.0 | 0.8 | 0.65 | DPR cap |
 | Lights after culling | 4,000 | 2,000 | 512 | 256 | 16 |
 | Shadow cascades | 4 | 3 | 2 | 1 | 0 |
 
+- Render scale is what the tiers draw today (§2.4), never over 2.5
+  million pixels, scaled up in the finish; there is no TAAU yet, and no
+  Ultra. Past its cascades every tier has the island's shadow layer.
 - **Targets per machine:**
   - Ultra and High: a mid-range desktop GPU (RTX 3060 / M1 class) at 1440p.
   - Medium: a mid-range phone at DPR 1.5.
@@ -621,6 +737,42 @@ images.
 shooter. Today: WebSocket (TCP), 30 Hz, deltas per entity, interest by
 distance, client prediction (Luciphon), and target rewind by RTT/2 + 66 ms
 (`hits.rs::rewind`). Build `crates/net` from what works:
+
+**What works today (October 2026), to build from:**
+- **Wandfall** (30 Hz): your own body comes back exact (its f32 bits),
+  so the page predicts it to the bit, and eases a correction away over
+  90 ms; everyone else at 1/32 m. An input credit: a page's inputs are
+  stepped one a tick, a backlog past 3 caught up on from a bank of up to
+  a second's steps, so no page moves faster than the clock and a stall
+  of up to a second is made good without a snap back. The Lance,
+  Lightning and the Tether strike where the caster's page drew everyone,
+  at most a third of a second back; each cast is aimed as the input
+  that carried it. A soul's wizard waits 15 s for its page to come back.
+  Pages that have no wizard of their own share one frame a tick.
+- **The server** (std only): a request's head is at most 16 KiB and has
+  10 s to arrive (a feedback body too); at most 2,000 connections, 128
+  WebSockets from one address (from `X-Real-IP`, else the first of
+  `X-Forwarded-For`, else the socket; IPv6 counted by its /64); every
+  socket pinged every 15 s; a page that cannot take a message within
+  10 s is let go, and one that fails to take a message is sent nothing
+  more that tick. Each frame is built in one buffer, and everything
+  waiting goes out in one write. Every Hello is answered: a repeated
+  one is told its last answer, one past the rename budget (3 at once,
+  then one every 2 s) is told Taken with its current name. Names keep
+  printable ASCII only (accents folded: Zoë is Zoe; look-alike letters
+  and hidden marks dropped), and no soul may take a guest's ("wizard
+  7"); at most 10 new souls an hour from one address, 5,000 in all.
+  Snapshots, souls and visits are written whole or not at all (a temp
+  file, synced, renamed); a souls or visits file that does not read is
+  set aside as `.bad-<unix>`, never written over. A room is told its
+  snapshot's schema (`Room::load_snap`).
+- **The page's link** (`kit::Link`): a socket quiet for 5 s, or still
+  connecting after 6 s, is given up on, but not when the page itself
+  stalled; the wait between tries starts over only after a socket that
+  lasted 5 s; a send is dropped while 64 KB are still waiting to go out
+  (it would arrive late). A watcher not
+  polled for 5 s, or any link with 2,048 messages waiting, lets go and
+  connects afresh, so a hidden tab is not sent a backlog.
 
 - [ ] **A tick and snapshot core.**
   - 60 Hz server simulation.
