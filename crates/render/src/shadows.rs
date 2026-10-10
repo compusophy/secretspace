@@ -3,7 +3,7 @@
 //! sampler that compares against it, and the depth-only pipeline that
 //! draws what casts. The cascades are drawn every frame; the island's
 //! layer only when what stands still changes or the sun has turned, so
-//! the cascades past the second need draw only what moves.
+//! the last of two or more cascades need draw only what moves.
 
 use crate::buffers::{bytes, lay, make, runs_of, Grow, MeshBuf, Run, INST};
 use crate::cull::Cull;
@@ -16,16 +16,54 @@ use gpu::wgpu;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// What stands still, as its layer draws it: all of it (the coarser
-/// meshes), its bounding spheres, and the sun it was last drawn for.
+/// meshes), its bounding spheres, its layer, and when that is drawn.
 struct Island {
     buf: Grow,
     runs: Vec<Run>,
     spheres: Vec<(V3, f32)>,
     layer: Option<Layer>,
-    /// The sun its layer holds (None: draw it again), and the one it is
-    /// to be drawn for this frame (the layer holds it once it is).
+    redraw: Redraw,
+}
+
+/// When the island's layer is drawn again: the sun it holds (None: draw
+/// it again), and the one it is to be drawn for this frame. It holds that
+/// sun only once the pass that draws it is recorded, so a frame that
+/// draws nothing leaves it due.
+#[derive(Clone, Copy, Debug, Default)]
+struct Redraw {
     drawn: Option<V3>,
     due: Option<V3>,
+}
+
+impl Redraw {
+    /// A new frame under the sun at `sun` (normalised; None while it is
+    /// down): the sun the layer is to be fitted to and drawn for, when it
+    /// holds none or the sun has turned far enough from the one it holds.
+    fn begin(&mut self, sun: Option<V3>) -> Option<V3> {
+        self.due = None;
+        let sun = sun?;
+        let held = self
+            .drawn
+            .is_some_and(|was| geo::dot(was, sun) >= laws::SHADOW_TURN.cos());
+        (!held).then_some(sun)
+    }
+
+    /// The layer is fitted to `sun`: to be drawn this frame.
+    fn draw(&mut self, sun: V3) {
+        self.due = Some(sun);
+    }
+
+    /// The pass that draws the shadow is recorded: whether the layer is
+    /// drawn in it (it then holds that sun).
+    fn recorded(&mut self) -> bool {
+        self.drawn = self.due.or(self.drawn);
+        self.due.is_some()
+    }
+
+    /// What stands still changed: the layer is to be drawn again.
+    fn forget(&mut self) {
+        self.drawn = None;
+    }
 }
 
 /// The sun's shadow map: its layers (each also a view of its own to draw
@@ -159,8 +197,7 @@ impl Shadows {
                 runs: Vec::new(),
                 spheres: Vec::new(),
                 layer: None,
-                drawn: None,
-                due: None,
+                redraw: Redraw::default(),
             },
         }
     }
@@ -196,7 +233,7 @@ impl Shadows {
         b.clear();
         island.runs = lay(&mut refs, b, 0);
         island.buf.put(device, queue, b);
-        island.drawn = None;
+        island.redraw.forget();
     }
 
     /// The island's layer under the sun at `sun` (None while it is down,
@@ -204,20 +241,16 @@ impl Shadows {
     /// sun has turned far enough from the one it holds.
     pub fn island(&mut self, queue: &wgpu::Queue, sun: Option<V3>) -> Option<Layer> {
         let island = &mut self.island;
-        island.due = None;
-        let sun = geo::norm(sun?);
-        let turned = island
-            .drawn
-            .is_none_or(|was| geo::dot(was, sun) < laws::SHADOW_TURN.cos());
-        if turned {
-            island.layer = crate::shadow::whole(&island.spheres, sun, self.size);
-            island.due = island.layer.map(|_| sun);
+        let sun = sun.map(geo::norm);
+        if let Some(to) = island.redraw.begin(sun) {
+            island.layer = crate::shadow::whole(&island.spheres, to, self.size);
             if let Some(l) = &island.layer {
+                island.redraw.draw(to);
                 let last = self.casters.len() - 1;
                 queue.write_buffer(&self.casters[last].0, 0, &bytes(&l.m));
             }
         }
-        island.layer
+        sun.and(island.layer)
     }
 
     /// Each cascade's matrix, for the pass that draws it.
@@ -244,9 +277,7 @@ impl Shadows {
         stats: &mut Stats,
     ) {
         let last = self.layers.len() - 1;
-        if self.island.due.is_some() {
-            self.island.drawn = self.island.due;
-        }
+        let drawn = self.island.redraw.recorded();
         let island = &self.island;
         let lists = (0..count).map(|c| {
             let lists = [
@@ -255,9 +286,7 @@ impl Shadows {
             ];
             (c, lists.to_vec())
         });
-        let whole = island
-            .due
-            .map(|_| (last, vec![(&island.buf.buf, &island.runs)]));
+        let whole = drawn.then(|| (last, vec![(&island.buf.buf, &island.runs)]));
         for (c, lists) in whole.into_iter().chain(lists) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow"),
@@ -285,5 +314,35 @@ impl Shadows {
                 stats.shadow[c.min(2)] = s.triangles;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_island_is_drawn_again_once_due_until_a_pass_draws_it() {
+        let mut r = Redraw::default();
+        let sun = geo::norm([0.3, 0.8, 0.1]);
+        assert_eq!(r.begin(Some(sun)), Some(sun), "never drawn: due");
+        r.draw(sun);
+        // A frame that never got as far as drawing: still due.
+        assert_eq!(r.begin(Some(sun)), Some(sun), "never recorded");
+        r.draw(sun);
+        assert!(r.recorded(), "drawn in this frame's pass");
+        assert_eq!(r.begin(Some(sun)), None, "it holds this sun");
+        assert!(!r.recorded(), "nothing to draw");
+        // The sun turns a little, then past the turn.
+        let turn = laws::SHADOW_TURN;
+        let near = geo::norm(geo::add(sun, [turn * 0.5, 0.0, 0.0]));
+        assert_eq!(r.begin(Some(near)), None, "turned a little");
+        let far = geo::norm(geo::add(sun, [turn * 4.0, 0.0, 0.0]));
+        assert_eq!(r.begin(Some(far)), Some(far), "turned past it");
+        // The sun down: nothing to draw; what stands still changed: due.
+        assert_eq!(r.begin(None), None);
+        assert!(!r.recorded());
+        r.forget();
+        assert_eq!(r.begin(Some(sun)), Some(sun), "the statics changed");
     }
 }

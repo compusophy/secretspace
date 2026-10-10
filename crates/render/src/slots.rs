@@ -20,6 +20,10 @@ pub enum Slot {
     Float {
         filterable: bool,
     },
+    /// The scene's picture, read a texel at a time: many-sampled or not.
+    Picture {
+        msaa: bool,
+    },
     /// A sampler: one that compares (for a depth) or one that filters.
     Sampler {
         compare: bool,
@@ -35,7 +39,7 @@ pub enum Seen {
 }
 
 use Seen::{Both, Fragment, Vertex};
-use Slot::{Depth, Float, Sampler, Storage, Uniform};
+use Slot::{Depth, Float, Picture, Sampler, Storage, Uniform};
 
 /// The scene's own group: the globals, the lights, their grid's cells
 /// and index, the sun's shadow map and its sampler, the terrain.
@@ -73,6 +77,13 @@ pub fn ao(msaa: bool) -> [(Slot, Seen); 3] {
         (Uniform, Fragment),
         (Float { filterable: false }, Fragment),
     ]
+}
+
+/// What ambient occlusion reads of the picture of what is solid (how much
+/// of its light is direct, in its alpha): a group of its own, so the pass
+/// that lays the occlusion over the picture binds none of it.
+pub fn picture(msaa: bool) -> [(Slot, Seen); 1] {
+    [(Picture { msaa }, Fragment)]
 }
 
 /// The sun's shafts': the scene's depth, their numbers.
@@ -142,6 +153,11 @@ pub(crate) fn layout(
                     sample_type: wgpu::TextureSampleType::Float { filterable },
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: false,
+                },
+                Picture { msaa } => wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: msaa,
                 },
                 Sampler { compare } => wgpu::BindingType::Sampler(if compare {
                     wgpu::SamplerBindingType::Comparison

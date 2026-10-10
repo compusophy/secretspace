@@ -2,7 +2,8 @@
 //! solid is drawn, at half the screen's size, blurred, then multiplied
 //! into the picture (the first draw of the pass that lays what is
 //! see-through and what glows over it, so the many-sampled picture is not
-//! read and written by a pass of its own).
+//! read and written by a pass of its own). Where the picture's light is
+//! direct (its alpha, as the solid pass writes it), it is eased.
 
 use gpu::wgpu;
 
@@ -10,7 +11,7 @@ use crate::buffers::bytes;
 use crate::fullscreen;
 use crate::pipes::{pipeline, Kind, Shared};
 use crate::post::texture;
-use crate::{geo, laws, shaders, Camera, Look};
+use crate::{laws, shaders, Camera, Look};
 
 const AO: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
@@ -25,6 +26,10 @@ pub struct Ao {
     /// The raw occlusion, the blurred, and the groups reading each.
     views: Option<[wgpu::TextureView; 2]>,
     groups: Option<[wgpu::BindGroup; 2]>,
+    /// The picture of what is solid, as the occlusion reads it (how much
+    /// of its light is direct).
+    picture_layout: wgpu::BindGroupLayout,
+    picture: Option<wgpu::BindGroup>,
 }
 
 impl Ao {
@@ -41,8 +46,11 @@ impl Ao {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let half =
-            |entry| fullscreen::pipeline(device, &[&layout], &module, ("ao_vs", entry), AO, None);
+        let picture_layout =
+            crate::slots::layout(device, "ao picture", &crate::slots::picture(msaa > 1));
+        let half = |layouts: &[&wgpu::BindGroupLayout], entry| {
+            fullscreen::pipeline(device, layouts, &module, ("ao_vs", entry), AO, None)
+        };
         // The picture times the occlusion; its alpha kept.
         let times = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -74,19 +82,21 @@ impl Ao {
         );
         Ao {
             ways,
-            ao: half("ao_fs"),
-            blur: half("blur_fs"),
+            ao: half(&[&layout, &picture_layout], "ao_fs"),
+            blur: half(&[&layout], "blur_fs"),
             apply,
             layout,
             buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("ao"),
-                size: 96,
+                size: 80,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
             size: (0, 0),
             views: None,
             groups: None,
+            picture_layout,
+            picture: None,
         }
     }
 
@@ -97,9 +107,22 @@ impl Ao {
         )
     }
 
-    /// Made again with the scene's depth (`size` pixels).
-    pub fn fit(&mut self, device: &wgpu::Device, depth: &wgpu::TextureView, size: (u32, u32)) {
+    /// Made again with the scene's depth and its picture (`size` pixels).
+    pub fn fit(
+        &mut self,
+        device: &wgpu::Device,
+        (depth, picture): (&wgpu::TextureView, &wgpu::TextureView),
+        size: (u32, u32),
+    ) {
         self.size = size;
+        self.picture = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ao picture"),
+            layout: &self.picture_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(picture),
+            }],
+        }));
         let half = self.half();
         let views = [
             texture(device, "ao", half, AO, 1, true),
@@ -140,16 +163,16 @@ impl Ao {
         cam: &Camera,
         look: &Look,
     ) {
-        let (Some(views), Some(groups)) = (&self.views, &self.groups) else {
+        let (Some(views), Some(groups), Some(picture)) = (&self.views, &self.groups, &self.picture)
+        else {
             return;
         };
         let f = 1.0 / (cam.fov / 2.0).tan();
         let half = self.half();
         // The camera's axes (how far up each goes), for where a pixel is
-        // in the air; the sun, seen from the eye.
+        // in the air.
         let (_, right, up) = cam.matrices(cam.fov);
         let fwd = cam.forward();
-        let sun = geo::norm(look.sun_dir);
         let k = [
             f / cam.aspect,
             f,
@@ -170,21 +193,20 @@ impl Ao {
             cam.eye[1],
             look.fog,
             look.fog_falloff,
-            laws::AO_SUN,
-            geo::dot(sun, right),
-            geo::dot(sun, up),
-            -geo::dot(sun, fwd),
-            if sun[1] > 0.0 { 1.0 } else { 0.0 },
+            laws::AO_DIRECT,
         ];
         queue.write_buffer(&self.buf, 0, &bytes(&k));
         let white = wgpu::LoadOp::Clear(wgpu::Color::WHITE);
-        for (view, pipe, group) in [
-            (&views[0], &self.ao, &groups[0]),
-            (&views[1], &self.blur, &groups[1]),
+        for (view, pipe, group, reads) in [
+            (&views[0], &self.ao, &groups[0], Some(picture)),
+            (&views[1], &self.blur, &groups[1], None),
         ] {
             let mut rp = fullscreen::pass(encoder, "ao", view, white);
             rp.set_pipeline(pipe);
             rp.set_bind_group(0, group, &[]);
+            if let Some(picture) = reads {
+                rp.set_bind_group(1, picture, &[]);
+            }
             rp.draw(0..3, 0..1);
         }
     }

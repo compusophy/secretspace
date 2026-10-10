@@ -286,9 +286,24 @@ fn energy(i: WorldOut, n: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(air(c, i.pos), i.tint.a * a);
 }
 
+/// A surface as `world` lights it: its colour (alpha: how much of what is
+/// behind it it covers), and how much of its light is direct (`Shaded`).
+struct Surface {
+    c: vec4<f32>,
+    direct: f32,
+};
+
 @fragment
 fn world_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
-    return world(i, front);
+    return world(i, front).c;
+}
+
+/// What is solid: its alpha (which nothing blends by) is how much of its
+/// light is direct, for the ambient occlusion to leave that alone.
+@fragment
+fn solid_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let s = world(i, front);
+    return vec4<f32>(s.c.rgb, s.direct);
 }
 
 /// How much of what is drawn at `clip` shows in front of what stands
@@ -319,7 +334,7 @@ fn faint_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
         let r = reflect(-v, normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.65)));
         return sea_shade(i.pos, i.tint.a, n, mirror(i.pos, r));
     }
-    let c = world(i, front);
+    let c = world(i, front).c;
     return vec4<f32>(c.rgb, c.a * soft(i.clip));
 }
 
@@ -328,7 +343,7 @@ fn faint_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec
 /// energy touching the ground.
 @fragment
 fn glow_soft_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
-    let c = world(i, front);
+    let c = world(i, front).c;
     let k = soft(i.clip);
     if (i32(i.extra.z + 0.5) == RIM) {
         return vec4<f32>(c.rgb, c.a * mix(k, 1.6, k * (1.0 - k) * 4.0));
@@ -336,24 +351,24 @@ fn glow_soft_fs(i: WorldOut, @builtin(front_facing) front: bool) -> @location(0)
     return vec4<f32>(c.rgb, c.a * k);
 }
 
-fn world(i: WorldOut, front: bool) -> vec4<f32> {
+fn world(i: WorldOut, front: bool) -> Surface {
     var n = normalize(i.nrm);
     if (!front) {
         n = -n;
     }
     let mat = i32(i.extra.z + 0.5);
     if (mat == WATER) {
-        return sea(i.pos, i.tint.a);
+        return Surface(sea(i.pos, i.tint.a), 1.0);
     }
     if (mat == RIM) {
         // Energy: bright where it is seen edge on, clear face on.
         let v = normalize(g.eye.xyz - i.pos);
         let edge = pow(1.0 - abs(dot(n, v)), 2.5);
         let c = linear(i.col.rgb) * linear(i.tint.rgb) * (0.1 + edge * 2.5) * (1.0 + (i.col.a + i.extra.x) * 3.0) * g.wind.w;
-        return vec4<f32>(c, i.tint.a);
+        return Surface(vec4<f32>(c, i.tint.a), 1.0);
     }
     if (mat == ENERGY) {
-        return energy(i, n);
+        return Surface(energy(i, n), 1.0);
     }
     var base = linear(i.col.rgb) * linear(i.tint.rgb);
     var rough = i.extra.y;
@@ -373,14 +388,9 @@ fn world(i: WorldOut, front: bool) -> vec4<f32> {
         glow = i.extra.x + max(i.col.a - 1.0, 0.0) * (0.7 + 0.6 * noise3(i.pos * 1.3 + g.eye.w * 0.2));
         n = bump(i.pos, n, 0.35, 0.9);
     } else if (mat == FOLIAGE) {
-        // Its edge broken into leaves where it turns away (not a smooth
-        // blob against the sky), its face clumped.
-        let v = normalize(g.eye.xyz - i.pos);
-        let edge = 1.0 - abs(dot(n, v));
-        if (noise3(i.pos * LEAF_GRAIN) < edge * 1.2 - 0.5) {
-            discard;
-        }
-        n = bump(i.pos, n, 0.6, 3.0);
+        // Its face clumped into leaves, a little (smoothed away far off);
+        // nothing cut from it, so the solid pass keeps its early depth.
+        n = bump(i.pos, n, LEAF_BUMP, LEAF_GRAIN);
         through = 0.45;
         base = base * (0.75 + 0.5 * noise3(i.pos * 1.7));
         ao = 0.8;
@@ -392,8 +402,8 @@ fn world(i: WorldOut, front: bool) -> vec4<f32> {
         base = base * (1.0 - 0.25 * g.wind.z);
         rough = mix(rough, rough * 0.45, g.wind.z);
     }
-    let c = shade(i.pos, n, base, rough, metal, glow * g.wind.w, ao, through, mat);
-    return vec4<f32>(air(c, i.pos), i.tint.a);
+    let s = shade(i.pos, n, base, rough, metal, glow * g.wind.w, ao, through, mat);
+    return Surface(vec4<f32>(air(s.c, i.pos), i.tint.a), s.direct);
 }
 
 struct SkyOut {
@@ -658,7 +668,8 @@ fn grass_fs(i: GrassOut, @builtin(front_facing) front: bool) -> @location(0) vec
         s = -s;
     }
     let n = normalize(vec3<f32>(0.0, 1.0, 0.0) + s * 0.35);
-    let c = shade(i.pos, n, i.col, 0.85, 0.0, 0.0, mix(GRASS_ROOT, 1.0, i.tip), 0.6, PLAIN);
-    return vec4<f32>(air(c, i.pos), 1.0);
+    let lit = shade(i.pos, n, i.col, 0.85, 0.0, 0.0, mix(GRASS_ROOT, 1.0, i.tip), 0.6, PLAIN);
+    // Solid: its alpha how much of its light is direct (as `solid_fs`).
+    return vec4<f32>(air(lit.c, i.pos), lit.direct);
 }
 "#;

@@ -87,14 +87,18 @@ pub const OPEN_REACH: f32 = 40.0;
 pub const GRASS_THIN: f32 = 0.6;
 /// How much light reaches a blade's root (its tip all of it).
 pub const GRASS_ROOT: f32 = 0.7;
-/// Leaves: how fine (noise cells a metre) the gaps that break a crown's
-/// edge are.
-pub const LEAF_GRAIN: f32 = 7.0;
+/// Leaves: how far their clumps tip a crown's face (a bump's strength,
+/// smoothed away where a pixel spans a clump), and how fine the clumps
+/// are (noise cells a metre).
+pub const LEAF_BUMP: f32 = 0.18;
+pub const LEAF_GRAIN: f32 = 3.0;
 
 /// Where each of the sun's shadow cascades ends (metres ahead of the
 /// eye), for a tier that draws one, two or three; past the last, the
-/// island's own layer.
-pub const CASCADES: [&[f32]; 3] = [&[40.0], &[20.0, 85.0], &[14.0, 48.0, 150.0]];
+/// island's own layer, which also holds what stands still in the last of
+/// two or more (that one draws only what moves). Short, so the tiers
+/// that must be cheap draw few shadows a frame.
+pub const CASCADES: [&[f32]; 3] = [&[14.0], &[20.0, 85.0], &[14.0, 48.0, 150.0]];
 /// How dark the sun's shadow is (1 fully).
 pub const SHADOW_STRENGTH: f32 = 1.0;
 /// The sun's shadow: how much nearer the sun a point must be than what
@@ -129,9 +133,19 @@ pub const SHAFT_DECAY: f32 = 0.955;
 /// response, fitted) or "neutral" (Khronos's, hues kept).
 pub const TONE_MAP: &str = "aces";
 /// Bloom: each wider level is added at this share of the one finer, so
-/// the narrow glow about a bright thing outweighs the wide veil (the
-/// levels then averaged: `Look::bloom` is a share of the picture).
+/// the narrow glow about a bright thing outweighs the wide one (the
+/// levels then averaged, and added at `Look::bloom`).
 pub const BLOOM_FALLOFF: f32 = 0.75;
+/// What blooms: the light past white (1, exposed), eased in over a knee
+/// this wide either side of it, so a spell, a lamp or the sun glows about
+/// itself and the rest of the picture is not veiled.
+pub const BLOOM_WHITE: f32 = 1.0;
+pub const BLOOM_KNEE: f32 = 0.5;
+/// How bright (the picture's light, a luma) a group of texels in bloom's
+/// first halving is when it counts half as much as a dark one: a speck
+/// far brighter does not flicker the bloom as it crosses a pixel, while a
+/// thin glow (a beam, a streak) still throws its halo.
+pub const BLOOM_KARIS: f32 = 4.0;
 /// Ambient occlusion: how far about a point it looks (metres), how much
 /// a surface must rise over another to shade it (a slope), how strongly
 /// and how darkly (a power) it shades, and how far off it fades out
@@ -141,9 +155,11 @@ pub const AO_SLACK: f32 = 0.15;
 pub const AO_STRENGTH: f32 = 2.6;
 pub const AO_POWER: f32 = 2.0;
 pub const AO_FADE: f32 = 70.0;
-/// How much ambient occlusion is eased on what faces the sun (1: none
-/// left where it faces it squarely).
-pub const AO_SUN: f32 = 0.5;
+/// How much of the light that comes straight to a surface (the sun's
+/// where it reaches it, a light's, its own glow) ambient occlusion leaves
+/// alone (1: all of it, as it shades only the sky's light; less keeps a
+/// little of it in the sun, to set what stands there on the ground).
+pub const AO_DIRECT: f32 = 0.85;
 /// Shafts of sunlight: how strong, and how far about the sun on screen
 /// the sky shines into them (a share of the screen's height).
 pub const SHAFTS: f32 = 0.4;

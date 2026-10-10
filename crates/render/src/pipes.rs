@@ -96,7 +96,13 @@ impl Pipes {
             ..shared
         };
         Pipes {
-            opaque: pipeline(&shared, world_kind(None, true, Some(wgpu::Face::Back))),
+            opaque: pipeline(
+                &shared,
+                Kind {
+                    entry: ("world_vs", "solid_fs"),
+                    ..world_kind(None, true, Some(wgpu::Face::Back))
+                },
+            ),
             faint: pipeline(
                 &shared,
                 world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None),

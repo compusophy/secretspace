@@ -299,7 +299,8 @@ pub(super) fn inputs(p: &mut Page, dt: f64) {
 }
 
 /// Too slow for this tier (over 2.5 s of play, frames over 30 ms on
-/// average): one tier down, the island built again on it.
+/// average): a step down (first the scene's size, then the tier),
+/// nothing built again.
 pub(super) fn pace(p: &mut Page, dt: f64) {
     if p.fixed || !p.alive || dt <= 0.0 || !p.set.auto() {
         return;

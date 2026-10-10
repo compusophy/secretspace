@@ -170,11 +170,12 @@ fn island_lit(pos: vec3<f32>, n: vec3<f32>, lean: f32, turn: f32) -> f32 {
     return shadow_in(g.shadow[3], i32(g.island.x), pos, n * (g.offset.w * lean), g.bias.w, turn);
 }
 
-/// Cascade `c` at `pos`; past the second, what stands still there is in
-/// the island's layer (the cascade holds only what moves).
+/// Cascade `c` at `pos`; in the last of two or more, what stands still
+/// there is in the island's layer (the cascade holds only what moves:
+/// `cull::held`).
 fn cascade_lit(c: i32, pos: vec3<f32>, n: vec3<f32>, lean: f32, turn: f32) -> f32 {
     var lit = shadow_in(g.shadow[c], c, pos, n * (g.offset[c] * lean), g.bias[c], turn);
-    if (c >= 2 && g.island.y > 0.5) {
+    if (c >= 1 && c == i32(g.view.w) - 1 && g.island.y > 0.5) {
         lit = min(lit, island_lit(pos, n, lean, turn));
     }
     return lit;
@@ -313,11 +314,19 @@ fn sheen(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, rough: f32) -> f32 {
     return d / (4.0 * (nl + nv - nl * nv));
 }
 
+/// The light a surface gives back (`c`), and how much of it comes
+/// straight from the sun, a light or its own glow (`direct`, 0 to 1): the
+/// rest is the sky's and the ground's, all that ambient occlusion shuts out.
+struct Shaded {
+    c: vec3<f32>,
+    direct: f32,
+};
+
 /// The light a surface gives back: the sun (shadowed), the sky and the
 /// ground's light, the sky in its sheen, the lights near it, its glow.
 /// Cloth takes the light softly and shines at its edges; skin lets it
 /// wrap past the shadow's edge, reddened (`kind`: the world's materials).
-fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, glow: f32, ao: f32, through: f32, kind: i32) -> vec3<f32> {
+fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, glow: f32, ao: f32, through: f32, kind: i32) -> Shaded {
     let v = normalize(g.eye.xyz - pos);
     let l = g.sun_dir.xyz;
     let cloth = kind == CLOTH;
@@ -348,7 +357,7 @@ fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, 
     let near = 1.0 - smoothstep(0.5, 4.0, pos.y - under.h);
     let open = mix(1.0, under.open, near);
     let amb = mix(g.low.rgb, g.sky.rgb, n.y * 0.5 + 0.5) * open;
-    c = c + diffuse * amb * ao;
+    var around = diffuse * amb * ao;
     let nv = max(dot(n, v), 0.0);
     if (cloth) {
         // The sheen's colour: the cloth's own, lighter.
@@ -356,11 +365,12 @@ fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, 
         if (nl > 0.0) {
             c = c + tone * sheen(n, v, l, 0.45) * PI * g.sun.rgb * nl * lit;
         }
-        c = c + tone * amb * pow(1.0 - nv, 3.0) * ao * 2.5;
+        around = around + tone * amb * pow(1.0 - nv, 3.0) * ao * 2.5;
     } else {
         let fr = f0 + (max(vec3<f32>(1.0 - rough), f0) - f0) * pow(1.0 - nv, 5.0);
-        c = c + fr * sky(reflect(-v, n)) * (1.0 - rough * 0.8) * ao * open * 0.5;
+        around = around + fr * sky(reflect(-v, n)) * (1.0 - rough * 0.8) * ao * open * 0.5;
     }
+    c = c + around;
     let side = i32(g.grid.w);
     let gc = vec2<i32>(floor((pos.xz - g.grid.xy) / g.grid.z));
     if (gc.x >= 0 && gc.y >= 0 && gc.x < side && gc.y < side) {
@@ -379,7 +389,9 @@ fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, 
             c = c + (diffuse * (0.25 + 0.75 * ndl) + ggx(n, v, dl, max(rough, 0.3), f0) * ndl) * q.c.rgb * (k * k);
         }
     }
-    return c + base * glow * 4.0;
+    c = c + base * glow * 4.0;
+    let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
+    return Shaded(c, clamp(1.0 - dot(around, luma) / max(dot(c, luma), 1e-6), 0.0, 1.0));
 }
 
 /// sRGB colours (as people pick them) to the linear light shaders sum.

@@ -66,6 +66,7 @@ pub fn scene(msaa: bool, ssr: u32) -> String {
         )
         .replace("SEA_DEEP", &format!("{:.3}", crate::laws::SEA_DEEP))
         .replace("GRASS_ROOT", &format!("{:.3}", crate::laws::GRASS_ROOT))
+        .replace("LEAF_BUMP", &format!("{:.3}", crate::laws::LEAF_BUMP))
         .replace("LEAF_GRAIN", &format!("{:.3}", crate::laws::LEAF_GRAIN))
         .replace("SSR_GROW", &format!("{grow:.5}"))
 }
@@ -75,5 +76,9 @@ pub fn shadow() -> String {
 }
 
 pub fn post() -> String {
-    format!("{}{IGN}", post::POST).replace("TONE_MAP", crate::laws::TONE_MAP)
+    format!("{}{IGN}", post::POST)
+        .replace("TONE_MAP", crate::laws::TONE_MAP)
+        .replace("BLOOM_KARIS", &format!("{:.3}", crate::laws::BLOOM_KARIS))
+        .replace("BLOOM_WHITE", &format!("{:.3}", crate::laws::BLOOM_WHITE))
+        .replace("BLOOM_KNEE", &format!("{:.3}", crate::laws::BLOOM_KNEE))
 }

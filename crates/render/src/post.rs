@@ -1,9 +1,10 @@
 //! After the scene: its targets (an HDR picture, multisampled and
-//! resolved, and its depth), ambient occlusion (`ao`), bloom (halve it,
-//! again and again, then back up, each step a little wider, added
-//! together, the finer weighing more, and averaged: a blur of the
-//! picture, not a sum of blurs), and the finish into the screen
-//! (exposure, tone mapping, a vignette, sRGB, the grade).
+//! resolved, and its depth), ambient occlusion (`ao`), bloom (what of the
+//! picture is past white, halved again and again, then back up, each step
+//! a little wider, added together, the finer weighing more, and averaged:
+//! a glow about what is bright, not a veil over all of it), and the
+//! finish into the screen (the glow added, exposure, tone mapping, a
+//! vignette, sRGB, the grade).
 
 use gpu::wgpu;
 
@@ -127,6 +128,9 @@ pub struct Post {
     pub targets: Option<Targets>,
     chain: Vec<wgpu::TextureView>,
     passes: Vec<Pass>,
+    /// The first halving's numbers (its exposure is the frame's), and
+    /// one texel of what it halves.
+    first: Option<(wgpu::Buffer, [f32; 2])>,
     finish_group: Option<wgpu::BindGroup>,
     finish_buf: wgpu::Buffer,
     grade_buf: wgpu::Buffer,
@@ -233,6 +237,7 @@ impl Post {
             targets: None,
             chain: Vec::new(),
             passes: Vec::new(),
+            first: None,
             finish_group: None,
             finish_buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("finish"),
@@ -294,15 +299,15 @@ impl Post {
         let hdr = texture(device, "hdr", size, HDR, 1, true);
         let read = self.reads;
         let depth = texture(device, "depth", size, DEPTH, self.msaa, read);
-        if let Some(ao) = &mut self.ao {
-            ao.fit(device, &depth, size);
-        }
         if let Some(sh) = &mut self.shafts {
             sh.fit(device, &depth, size);
         }
+        // The many-sampled picture is read only by the occlusion (how much
+        // of its light is direct).
         let targets = if self.msaa > 1 {
+            let read = self.ao.is_some();
             Targets {
-                color: texture(device, "hdr (msaa)", size, HDR, self.msaa, false),
+                color: texture(device, "hdr (msaa)", size, HDR, self.msaa, read),
                 resolve: Some(hdr.clone()),
                 depth,
             }
@@ -313,6 +318,9 @@ impl Post {
                 depth,
             }
         };
+        if let Some(ao) = &mut self.ao {
+            ao.fit(device, (&targets.depth, &targets.color), size);
+        }
         let sizes: Vec<(u32, u32)> = (1..=self.levels)
             .map(|l| ((size.0 >> l).max(1), (size.1 >> l).max(1)))
             .collect();
@@ -348,7 +356,8 @@ impl Post {
                 (&self.chain[l - 1], sizes[l - 1])
             };
             // The first halving weighs bright specks down (so a spark
-            // crossing a pixel does not make the bloom pulse).
+            // crossing a pixel does not make the bloom pulse) and keeps
+            // only what is past white (its exposure written each frame).
             let first = if l == 0 { 1.0 } else { 0.0 };
             let buf = uniform(
                 device,
@@ -359,11 +368,14 @@ impl Post {
                     0.0,
                     0.0,
                     first,
-                    0.0,
+                    1.0,
                     0.0,
                     1.0,
                 ],
             );
+            if l == 0 {
+                self.first = Some((buf.clone(), [1.0 / s.0 as f32, 1.0 / s.1 as f32]));
+            }
             passes.push(Pass {
                 group: group(src, &buf),
                 target: l,
@@ -461,6 +473,11 @@ impl Post {
             1.0 / all,
         ];
         queue.write_buffer(&self.finish_buf, 0, &bytes(&k));
+        // What is past white is judged as the picture will be exposed.
+        if let Some((buf, texel)) = &self.first {
+            let first = [texel[0], texel[1], 0.0, 0.0, 1.0, look.exposure, 0.0, 1.0];
+            queue.write_buffer(buf, 0, &bytes(&first));
+        }
         let g = &look.grade;
         let grade = [
             g.lift[0],

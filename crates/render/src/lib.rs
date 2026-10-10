@@ -294,8 +294,8 @@ pub struct Look {
     /// Cloud cover 0 (clear) to 1 (overcast); stars (0 by day).
     pub clouds: f32,
     pub stars: f32,
-    /// Exposure; bloom (the share of the picture that is a blur of it,
-    /// 0..0.4); the vignette (0..1).
+    /// Exposure; bloom (how much of the glow about what is past white is
+    /// added, about 1); the vignette (0..1).
     pub exposure: f32,
     pub bloom: f32,
     pub vignette: f32,
@@ -359,7 +359,7 @@ impl Default for Look {
             clouds: 0.45,
             stars: 0.0,
             exposure: 1.0,
-            bloom: 0.05,
+            bloom: 0.6,
             vignette: 0.25,
             sea: None,
             water: [0.02, 0.10, 0.16],

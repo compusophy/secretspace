@@ -4,8 +4,8 @@
 //! into each cascade. Of everything that never moves, a cascade draws
 //! only what could reach into its box, seen from the sun (its bounding
 //! sphere within the box, and not beyond its far side, with some slack),
-//! all but the nearest the coarser meshes, and those past the second none
-//! at all when the island's own layer holds them (`shadows`). Laid out
+//! all but the nearest the coarser meshes, and the last of two or more
+//! none at all when the island's own layer holds them (`shadows`). Laid out
 //! again only when a box has moved more than the slack, the sun has
 //! turned, or the statics changed.
 
@@ -106,9 +106,9 @@ impl Cull {
         )
     }
 
-    /// Lay out what casts into each cascade whose box has moved on (past
-    /// the second, nothing that stands still if the island's layer
-    /// holds it: `whole`).
+    /// Lay out what casts into each cascade whose box has moved on (into
+    /// the last of two or more, nothing that stands still if the island's
+    /// layer holds it: `whole`).
     pub fn lay(
         &mut self,
         (device, queue): (&wgpu::Device, &wgpu::Queue),
@@ -117,22 +117,48 @@ impl Cull {
         meshes: &[Option<MeshBuf>],
         bytes: &mut Vec<u8>,
     ) {
-        for (c, l) in cascades.iter().enumerate() {
-            let (m, held) = (&l.m, whole && c >= 2);
-            if self.laid[c].is_some_and(|(l, h)| h == held && near_enough(&l, m)) {
-                continue;
-            }
-            self.laid[c] = Some((*m, held));
+        for (c, held) in due(&mut self.laid, cascades, whole) {
             let from = if c == 0 { &self.near } else { &self.coarse };
-            let mut items: Vec<&Item> = from
-                .iter()
-                .filter(|i| !held && reaches(i, m, meshes))
-                .collect();
+            let mut items = casters(from, &cascades[c].m, held, meshes);
             bytes.clear();
             self.runs[c] = lay(&mut items, bytes, 0);
             self.bufs[c].put(device, queue, bytes);
         }
     }
+}
+
+/// Which cascades are to be laid out again (`laid`: each one's box and
+/// whether the island's layer held its statics, when it last was): those
+/// whose box has moved on, or whose holding changed; marked laid. Each
+/// with whether the island's layer holds its statics now (`held`).
+fn due(laid: &mut [Option<(M4, bool)>], cascades: &[Layer], whole: bool) -> Vec<(usize, bool)> {
+    let mut out = Vec::new();
+    for (c, (l, was)) in cascades.iter().zip(laid.iter_mut()).enumerate() {
+        let held = held(c, cascades.len(), whole);
+        if was.is_some_and(|(m, h)| h == held && near_enough(&m, &l.m)) {
+            continue;
+        }
+        *was = Some((l.m, held));
+        out.push((c, held));
+    }
+    out
+}
+
+/// Whether cascade `c` of `count` leaves what stands still to the
+/// island's layer: the last of two or more, when there is the layer
+/// (`whole`). The first always draws it, sharp about the eye. As
+/// `cascade_lit` in the scene's shaders.
+pub(crate) fn held(c: usize, count: usize, whole: bool) -> bool {
+    whole && c >= 1 && c + 1 == count
+}
+
+/// Of `from`, what throws a shadow into the box `m` sees: none if the
+/// island's layer holds them (`held`).
+fn casters<'a>(from: &'a [Item], m: &M4, held: bool, meshes: &[Option<MeshBuf>]) -> Vec<&'a Item> {
+    if held {
+        return Vec::new();
+    }
+    from.iter().filter(|i| reaches(i, m, meshes)).collect()
 }
 
 impl Cull {
@@ -241,6 +267,41 @@ mod tests {
         assert!(!near_enough(&a, &c), "ten metres: yes");
         let d = shadow::fit(&cam, [0.5, 0.8, 0.2], &[14.0], 2048)[0].m;
         assert!(!near_enough(&a, &d), "the sun turned: yes");
+    }
+
+    #[test]
+    fn the_last_cascade_leaves_what_stands_still_to_the_island_while_it_holds_it() {
+        // One cascade keeps it (sharp about the eye); of two or three,
+        // the last leaves it, while there is the island's layer.
+        assert!(!held(0, 1, true));
+        assert!(!held(0, 2, true) && held(1, 2, true));
+        assert!(!held(1, 3, true) && held(2, 3, true));
+        assert!(!held(2, 3, false));
+        let cam = Camera::default();
+        let sun = crate::geo::norm([0.4, 0.8, 0.2]);
+        let boxes = shadow::fit(&cam, sun, &[14.0, 48.0, 150.0], 2048);
+        let mut laid = vec![None; 3];
+        let meshes: Vec<Option<MeshBuf>> = Vec::new();
+        // Something standing in the middle of the third cascade's stretch.
+        let mid = crate::geo::add(cam.eye, crate::geo::scale(cam.forward(), 100.0));
+        let at = crate::m4::place(mid, 0.0, [1.0; 3]);
+        let still = [Item::new(crate::Mesh(0), at)];
+        let lays = |due: &[(usize, bool)]| {
+            due.iter()
+                .map(|&(c, held)| (c, casters(&still, &boxes[c].m, held, &meshes).len()))
+                .collect::<Vec<_>>()
+        };
+        // The island holds it: the third casts nothing that stands still.
+        let first = due(&mut laid, &boxes, true);
+        assert_eq!(first, [(0, false), (1, false), (2, true)]);
+        assert_eq!(lays(&first)[2], (2, 0));
+        assert!(due(&mut laid, &boxes, true).is_empty(), "nothing moved");
+        // The island's layer gone: the third is laid again, with it.
+        let after = due(&mut laid, &boxes, false);
+        assert_eq!(after, [(2, false)]);
+        assert_eq!(lays(&after), [(2, 1)]);
+        // And back: left out again.
+        assert_eq!(due(&mut laid, &boxes, true), [(2, true)]);
     }
 
     #[test]

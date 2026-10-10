@@ -57,6 +57,10 @@ fn bound(module: &naga::Module) -> Vec<(u32, u32, Slot)> {
                         kind: ScalarKind::Float,
                         multi: false,
                     } if !arrayed => Slot::Float { filterable: true },
+                    ImageClass::Sampled {
+                        kind: ScalarKind::Float,
+                        multi: true,
+                    } if !arrayed => Slot::Picture { msaa: true },
                     other => panic!("{:?}: {other:?}", v.name),
                 },
                 other => panic!("{:?}: {other:?}", v.name),
@@ -67,7 +71,8 @@ fn bound(module: &naga::Module) -> Vec<(u32, u32, Slot)> {
 }
 
 /// Every binding the WGSL has is in its group's table, of its kind (a
-/// float texture may be filterable or not: the sampler decides).
+/// float texture may be filterable or not: the sampler decides; and the
+/// picture, when it is not many-sampled, is one).
 fn binds(name: &str, module: &naga::Module, groups: &[&[(Slot, Seen)]]) {
     for (group, binding, slot) in bound(module) {
         let table = groups
@@ -78,6 +83,7 @@ fn binds(name: &str, module: &naga::Module, groups: &[&[(Slot, Seen)]]) {
             .unwrap_or_else(|| panic!("{name}: no binding {group}.{binding}"));
         let same = match (slot, *want) {
             (Slot::Float { .. }, Slot::Float { .. }) => true,
+            (Slot::Float { .. }, Slot::Picture { msaa: false }) => true,
             (a, b) => a == b,
         };
         assert!(
@@ -98,6 +104,7 @@ fn the_scene_shaders_are_valid_and_bind_what_the_layouts_hold() {
                 &[
                     "world_vs",
                     "world_fs",
+                    "solid_fs",
                     "faint_fs",
                     "glow_soft_fs",
                     "sky_vs",
@@ -113,6 +120,42 @@ fn the_scene_shaders_are_valid_and_bind_what_the_layouts_hold() {
             );
             binds(&name, &m, &[&slots::SCENE, &slots::soft(msaa)]);
         }
+    }
+}
+
+/// Whether `block` may discard: a `discard` in it, or in what it calls.
+fn discards(m: &naga::Module, block: &naga::Block) -> bool {
+    use naga::Statement as S;
+    block.iter().any(|s| match s {
+        S::Kill => true,
+        S::Block(b) => discards(m, b),
+        S::If { accept, reject, .. } => discards(m, accept) || discards(m, reject),
+        S::Switch { cases, .. } => cases.iter().any(|c| discards(m, &c.body)),
+        S::Loop {
+            body, continuing, ..
+        } => discards(m, body) || discards(m, continuing),
+        S::Call { function, .. } => discards(m, &m.functions[*function].body),
+        _ => false,
+    })
+}
+
+/// A shader that may discard turns off early depth for its whole
+/// pipeline (on the tile-based GPUs of phones, all its overdraw is
+/// shaded), so what is solid never does.
+#[test]
+fn what_is_solid_never_discards() {
+    for msaa in [false, true] {
+        let m = module("scene", &render::shaders::scene(msaa, 16));
+        let body = |entry: &str| {
+            let e = m.entry_points.iter().find(|e| e.name == entry);
+            &e.unwrap_or_else(|| panic!("{entry}")).function.body
+        };
+        for entry in ["solid_fs", "grass_fs", "sky_fs"] {
+            assert!(!discards(&m, body(entry)), "{entry} may discard");
+        }
+        // A decal (its own pipeline, over what is drawn) does: the walk
+        // finds it.
+        assert!(discards(&m, body("decal_fs")));
     }
 }
 
@@ -151,7 +194,7 @@ fn the_shadow_and_post_shaders_are_valid_and_bind_what_the_layouts_hold() {
             &render::shaders::ao::ao(msaa),
             &["ao_vs", "ao_fs", "blur_fs", "apply_fs"],
         );
-        binds("ao", &m, &[&slots::ao(msaa)]);
+        binds("ao", &m, &[&slots::ao(msaa), &slots::picture(msaa)]);
         let m = valid(
             "shafts",
             &render::shaders::shafts::shafts(msaa),
