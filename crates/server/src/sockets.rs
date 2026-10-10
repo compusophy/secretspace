@@ -14,7 +14,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use engine::room::Who;
-use engine::who::{Hello, PLATFORM};
+use engine::who::{Hello, Seen, Status, PLATFORM};
 
 use crate::host::{unix, Event, Game};
 use crate::{ws, Shared};
@@ -85,11 +85,17 @@ fn pump(rx: &Receiver<Vec<u8>>, w: &mut impl Write, ping: Duration) -> io::Resul
     }
 }
 
-/// Hellos after the first: the same one again is nothing new; a new one
-/// is honoured `RENAMES` at once and then one every `RENAME_EVERY`, so a
-/// page cannot churn its name (and every page's roster) every tick.
+/// Hellos after the first, each answered with one `Seen` (a page that
+/// asked waits for it). The same one again is told what it was told
+/// before, unless that was "taken" (the name may be free now). A new one
+/// is put to the souls `RENAMES` at once and then one every
+/// `RENAME_EVERY`, so a page cannot churn its name (and every page's
+/// roster) every tick; one too soon is told its name is taken and keeps
+/// the one it has.
 struct Renames {
+    /// The last Hello put to the souls, and what it was told.
     last: Vec<u8>,
+    told: Seen,
     left: u32,
     since: Instant,
 }
@@ -98,15 +104,20 @@ impl Renames {
     fn new(now: Instant) -> Renames {
         Renames {
             last: Vec::new(),
+            told: Seen {
+                status: Status::Ok,
+                name: String::new(),
+            },
             left: RENAMES,
             since: now,
         }
     }
 
-    /// Whether to honour this Hello now.
-    fn allow(&mut self, hello: &[u8], now: Instant) -> bool {
-        if hello == self.last {
-            return false;
+    /// What to tell this Hello without asking the souls; None: ask them
+    /// (and say what they told it, `told`).
+    fn answer(&mut self, hello: &[u8], now: Instant) -> Option<Seen> {
+        if hello == self.last && self.told.status != Status::Taken {
+            return Some(self.told.clone());
         }
         let back = (now.duration_since(self.since).as_millis() / RENAME_EVERY.as_millis()) as u32;
         if back > 0 {
@@ -114,14 +125,22 @@ impl Renames {
             self.since = now;
         }
         if self.left == 0 {
-            return false;
+            return Some(Seen {
+                status: Status::Taken,
+                name: self.told.name.clone(),
+            });
         }
         if self.left == RENAMES {
             self.since = now;
         }
         self.left -= 1;
-        self.last = hello.to_vec();
-        true
+        None
+    }
+
+    /// The souls told `hello` this.
+    fn told(&mut self, hello: Vec<u8>, seen: &Seen) {
+        self.last = hello;
+        self.told = seen.clone();
     }
 }
 
@@ -161,7 +180,7 @@ pub fn play(
                     let (w, seen) = shared.souls().hello(&h, addr, unix(), watch);
                     who = w;
                     let _ = tx.try_send(seen.encode());
-                    renames.last = b;
+                    renames.told(b, &seen);
                 }
                 None => first = Some(b),
             },
@@ -183,15 +202,22 @@ pub fn play(
         listen(reader, |b| {
             if b.first() != Some(&PLATFORM) {
                 let _ = game.events.send(Event::Say(conn, b));
-            } else if let Some(h) = Hello::decode(&b).filter(|_| renames.allow(&b, Instant::now()))
-            {
-                // Hello again: a new name, most likely.
-                let mut souls = shared.souls();
-                let (w, seen) = souls.hello(&h, addr, unix(), watch);
-                souls.enter(conn, soul(&w));
-                drop(souls);
-                let _ = game.events.send(Event::Who(conn, w, seen.encode()));
+                return;
             }
+            let Some(h) = Hello::decode(&b) else {
+                return;
+            };
+            // Hello again: a new name, most likely.
+            if let Some(seen) = renames.answer(&b, Instant::now()) {
+                let _ = game.events.send(Event::Tell(conn, seen.encode()));
+                return;
+            }
+            let mut souls = shared.souls();
+            let (w, seen) = souls.hello(&h, addr, unix(), watch);
+            souls.enter(conn, soul(&w));
+            drop(souls);
+            let _ = game.events.send(Event::Who(conn, w, seen.encode()));
+            renames.told(b, &seen);
         })
     } else {
         Ok(())
@@ -292,28 +318,170 @@ mod tests {
         assert!(pings >= 2, "{pings}");
     }
 
+    fn seen(status: Status, name: &str) -> Seen {
+        Seen {
+            status,
+            name: name.into(),
+        }
+    }
+
     #[test]
     fn a_page_renames_now_and_then_never_every_tick() {
         let t0 = Instant::now();
         let at = |ms: u64| t0 + Duration::from_millis(ms);
         let mut r = Renames::new(t0);
-        r.last = b"first".to_vec();
-        assert!(
-            !r.allow(b"first", at(10)),
-            "the same Hello again is nothing"
-        );
+        // Asked, and told: what the souls said is said again for the
+        // same Hello, and they are not asked.
+        let ask = |r: &mut Renames, hello: &[u8], ms, told: Seen| {
+            let answer = r.answer(hello, at(ms));
+            if answer.is_none() {
+                r.told(hello.to_vec(), &told);
+            }
+            answer
+        };
+        r.told(b"first".to_vec(), &seen(Status::New, "ash"));
+        assert_eq!(r.answer(b"first", at(10)), Some(seen(Status::New, "ash")));
         // A few at once (a name typed, then fixed)...
-        assert!(r.allow(b"a", at(20)));
-        assert!(r.allow(b"b", at(30)));
-        assert!(r.allow(b"c", at(40)));
-        // ...then no more than one every RENAME_EVERY.
-        assert!(!r.allow(b"d", at(50)));
-        assert!(!r.allow(b"d", at(1500)));
-        assert!(r.allow(b"d", at(2100)));
-        assert!(!r.allow(b"e", at(2200)));
+        assert_eq!(ask(&mut r, b"a", 20, seen(Status::Ok, "a")), None);
+        assert_eq!(ask(&mut r, b"b", 30, seen(Status::Ok, "b")), None);
+        assert_eq!(ask(&mut r, b"c", 40, seen(Status::Ok, "c")), None);
+        assert_eq!(r.answer(b"c", at(45)), Some(seen(Status::Ok, "c")));
+        // ...then no more than one every RENAME_EVERY; one too soon is
+        // told no, and keeps its name.
+        let no = Some(seen(Status::Taken, "c"));
+        assert_eq!(r.answer(b"d", at(50)), no);
+        assert_eq!(r.answer(b"d", at(1500)), no);
+        assert_eq!(ask(&mut r, b"d", 2100, seen(Status::Ok, "d")), None);
+        assert!(r.answer(b"e", at(2200)).is_some());
         let flood = (0..1000)
-            .filter(|&k| r.allow(&[k as u8, 1], at(2300 + k * 10)))
+            .filter(|&k| r.answer(&[k as u8, 1], at(2300 + k * 10)).is_none())
             .count();
         assert!(flood <= 6, "{flood} in ten seconds");
+    }
+
+    #[test]
+    fn a_name_refused_is_asked_again_and_never_for_free() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut r = Renames::new(t0);
+        r.told(b"zoe".to_vec(), &seen(Status::Taken, ""));
+        // Taken: it may be free now, so the souls are asked again...
+        assert_eq!(r.answer(b"zoe", at(10)), None);
+        r.told(b"zoe".to_vec(), &seen(Status::Taken, ""));
+        assert_eq!(r.answer(b"zoe", at(20)), None);
+        r.told(b"zoe".to_vec(), &seen(Status::Taken, ""));
+        assert_eq!(r.answer(b"zoe", at(30)), None);
+        r.told(b"zoe".to_vec(), &seen(Status::Taken, ""));
+        // ...as often as a new name may be, and no more.
+        assert_eq!(r.answer(b"zoe", at(40)), Some(seen(Status::Taken, "")));
+    }
+
+    /// A room that says nothing, for a page's socket to talk past.
+    struct Quiet;
+
+    impl engine::room::Room for Quiet {
+        fn id(&self) -> &'static str {
+            "quiet"
+        }
+        fn hz(&self) -> u32 {
+            200
+        }
+        fn open(&mut self, _: u32, _: &Who, _: &mut engine::room::Outbox) {}
+        fn message(&mut self, _: u32, _: &[u8], _: &mut engine::room::Outbox) {}
+        fn close(&mut self, _: u32) {}
+        fn tick(&mut self, _: &mut engine::room::Outbox) {}
+        fn people(&self) -> usize {
+            0
+        }
+    }
+
+    fn quiet(_: u64) -> Box<dyn engine::room::Room> {
+        Box::new(Quiet)
+    }
+
+    /// A message as a browser sends it: masked.
+    fn masked(payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x80 | ws::BINARY, 0x80 | payload.len() as u8, 1, 2, 3, 4];
+        out.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(i, b)| b ^ [1, 2, 3, 4][i % 4]),
+        );
+        out
+    }
+
+    #[test]
+    fn every_hello_is_answered_once_even_one_that_changes_nothing() {
+        use crate::{feedback::Feedback, souls::Souls};
+        use std::collections::HashMap;
+        use std::net::TcpListener;
+        use std::sync::Mutex;
+
+        let game = crate::host::start(quiet, 1, crate::store::Store::new(None), || false);
+        let shared = Shared {
+            games: Vec::new(),
+            hub: Default::default(),
+            visits: Default::default(),
+            souls: Mutex::new(Souls::open(None, 0)),
+            feedback: Feedback::new(None),
+            open: Default::default(),
+            from: Mutex::new(HashMap::new()),
+        };
+        let hello = |key: u8, name: &str, rename: bool| Hello {
+            proto: engine::who::PROTO,
+            key: [key; 16],
+            name: name.into(),
+            rename,
+            build: 0,
+        };
+        // Someone else goes by "zoe".
+        shared
+            .souls()
+            .hello(&hello(1, "zoe", false), "elsewhere", unix(), false);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (game, shared) = (&game, &shared);
+        thread::scope(|scope| {
+            // The page's end is this closure's, so a failed assert closes
+            // it and the server's end goes too.
+            let mut page = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let server = Arc::new(listener.accept().unwrap().0);
+            let s = server.clone();
+            let played = scope.spawn(move || {
+                let reader: &TcpStream = &server;
+                play(reader, s, 1, false, "here", game, shared)
+            });
+            page.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut said = |h: Hello| -> Option<Seen> {
+                page.write_all(&masked(&h.encode())).unwrap();
+                match ws::read(&mut page) {
+                    Ok(ws::Frame::Binary(b)) => Seen::decode(&b),
+                    _ => None,
+                }
+            };
+            assert_eq!(said(hello(2, "", false)), Some(seen(Status::New, "")));
+            // Someone's name, asked for twice: no twice (play, play again).
+            let taken = Some(seen(Status::Taken, ""));
+            assert_eq!(said(hello(2, "zoe", true)), taken);
+            assert_eq!(said(hello(2, "zoe", true)), taken);
+            assert_eq!(said(hello(2, "ash", true)), Some(seen(Status::Ok, "ash")));
+            // The same again changes nothing, and is answered all the same.
+            assert_eq!(said(hello(2, "ash", true)), Some(seen(Status::Ok, "ash")));
+            // One rename too many, too soon: told no, and keeps its name
+            // (unless the machine was slow enough for it to be one in time).
+            let soon = said(hello(2, "oak", true)).unwrap();
+            assert!(
+                soon == seen(Status::Taken, "ash") || soon == seen(Status::Ok, "oak"),
+                "{soon:?}"
+            );
+            // And nothing more: one answer each.
+            page.set_read_timeout(Some(Duration::from_millis(300)))
+                .unwrap();
+            assert!(ws::read(&mut page).is_err(), "an answer too many");
+            page.write_all(&[0x80 | ws::CLOSE, 0x80, 0, 0, 0, 0])
+                .unwrap();
+            played.join().unwrap().unwrap();
+        });
     }
 }

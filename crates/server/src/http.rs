@@ -187,6 +187,53 @@ mod tests {
     }
 
     #[test]
+    fn a_request_sent_a_byte_at_a_time_is_let_go_at_its_deadline() {
+        use std::io::BufReader;
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        // A slow drip: a byte every 5 ms, never stopping by itself.
+        let drip = |text: &'static [u8]| {
+            let mut s = TcpStream::connect(addr).unwrap();
+            std::thread::spawn(move || {
+                for b in text.iter().cycle() {
+                    if s.write_all(&[*b]).is_err() {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            });
+            listener.accept().unwrap().0
+        };
+        let wait = Duration::from_millis(300);
+        // A head with no end...
+        let stream = drip(b"GET / HTTP/1.1\r\nX: ");
+        let t = Instant::now();
+        let mut r = BufReader::new(Paced {
+            stream: &stream,
+            until: Some(t + wait),
+        });
+        assert!(read_head(&mut r).is_err());
+        assert!(t.elapsed() < wait * 3, "{:?}", t.elapsed());
+        drop(stream);
+        // ...and a report's body, after a head that came in time.
+        let stream = drip(b"POST /feedback HTTP/1.1\r\nContent-Length: 4000\r\n\r\nslow");
+        let (t, wait) = (Instant::now(), Duration::from_secs(1));
+        let mut r = BufReader::new(Paced {
+            stream: &stream,
+            until: Some(t + wait),
+        });
+        let head = read_head(&mut r).unwrap().unwrap();
+        assert_eq!(head.header("Content-Length"), Some("4000"));
+        let mut body = vec![0u8; 4000];
+        assert!(r.read_exact(&mut body).is_err());
+        let took = t.elapsed();
+        assert!(took >= wait * 9 / 10 && took < wait * 3, "{took:?}");
+    }
+
+    #[test]
     fn the_client_is_the_edge_s_word_and_ipv6_counts_by_network() {
         let peer = Some("10.0.0.9".parse().unwrap());
         let ask = |headers: &str| {

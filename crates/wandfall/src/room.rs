@@ -5,8 +5,10 @@
 //! reconnect, a reload, another tab) is given the wizard its soul has, and
 //! one whose page went mid-fight stands where it was for
 //! `RECONNECT_SECS`, waiting. Kept across deploys, in sections (schema 2):
-//! the hall of wizards, and the island (its seed, its day, its matches),
-//! so pages come back to the island they were on.
+//! the hall of wizards, and the island (its day, its matches, and its
+//! seed). People held still on it by a deploy come back to the island they
+//! were on; any other boot (nobody there, a crash, a room rebuilt after a
+//! panic) makes a new one, so no island is for ever.
 
 use std::collections::HashMap;
 
@@ -41,6 +43,9 @@ pub struct Wandfall {
     pending: Vec<Event>,
     /// The hall of wizards (kept in the room's snapshot).
     hall: Hall,
+    /// The server is stopping with people here: the next boot puts them
+    /// back on this island.
+    resume: bool,
 }
 
 impl Wandfall {
@@ -52,6 +57,7 @@ impl Wandfall {
             away: HashMap::new(),
             pending: Vec::new(),
             hall: Hall::default(),
+            resume: false,
         }
     }
 
@@ -269,15 +275,33 @@ impl Room for Wandfall {
                 out.send(conn, m.clone());
             }
         }
+        // A frame for each page with a wizard alive; every other (watching,
+        // knocked out, past the island's people, or never joined) is sent
+        // the same one, made once, so pages that never play cost a copy.
+        let mut watching = None;
         for (&conn, &id) in &self.you {
-            out.send(conn, view::frame(&self.world, id).encode());
+            let frame = match view::yours(&self.world, id) {
+                Some(_) => view::frame(&self.world, id).encode(),
+                None => watching
+                    .get_or_insert_with(|| view::frame(&self.world, 0).encode())
+                    .clone(),
+            };
+            out.send(conn, frame);
         }
+    }
+
+    fn still(&mut self, _out: &mut Outbox) {
+        self.resume = self.people() > 0;
     }
 
     fn save(&self) -> Option<Vec<u8>> {
         let w = &self.world;
         let mut island = Writer::default();
-        island.u64(w.seed()).u32(w.matches).u8(w.hour);
+        island
+            .u64(w.seed())
+            .u32(w.matches)
+            .u8(w.hour)
+            .u8(self.resume as u8);
         let mut s = Sections::default();
         s.add(HALL, &self.hall.save()).add(ISLAND, &island.0);
         Some(s.finish())
@@ -302,10 +326,14 @@ impl Room for Wandfall {
                     let short = "a short island";
                     let seed = r.u64().ok_or(short)?;
                     let (matches, hour) = (r.u32().ok_or(short)?, r.u8().ok_or(short)?);
-                    // The island the pages were on, its day and its count
-                    // going on (nobody is on it yet); its dice this boot's.
-                    let fresh = std::mem::replace(&mut self.world, World::new(seed));
-                    self.world.rng = fresh.rng;
+                    let resume = r.u8().ok_or(short)? != 0;
+                    // The island people were held still on (nobody is on
+                    // it yet), its dice this boot's; else this boot's
+                    // own. Its day and its count go on either way.
+                    if resume {
+                        let fresh = std::mem::replace(&mut self.world, World::new(seed));
+                        self.world.rng = fresh.rng;
+                    }
                     self.world.matches = matches;
                     self.world.hour = hour % HOURS;
                 }
@@ -523,10 +551,27 @@ mod tests {
         });
         r.world.matches = 9;
         r.world.hour = 3;
-        let saved = r.save().unwrap();
-        let mut back = Wandfall::new(1);
-        back.load_snap(2, &saved).unwrap();
+        let boot = |saved: &[u8]| {
+            let mut back = Wandfall::new(1);
+            back.load_snap(2, saved).unwrap();
+            back
+        };
+        // Saved now and then: the hall and the day go on, on a new island.
+        let back = boot(&r.save().unwrap());
         assert_eq!(back.hall, r.hall);
+        assert_eq!(back.world.seed(), 1, "this boot's own island");
+        assert_eq!((back.world.matches, back.world.hour), (9, 3));
+        // Held still by a deploy with nobody on it (the hub's card only
+        // watches): a new island too.
+        let mut out = Outbox::default();
+        r.open(1, &Who::guest(true), &mut out);
+        r.still(&mut out);
+        assert_eq!(boot(&r.save().unwrap()).world.seed(), 1);
+        // With people on it: the island they were on.
+        r.open(2, &person(42, "ash"), &mut out);
+        r.still(&mut out);
+        let saved = r.save().unwrap();
+        let back = boot(&saved);
         assert_eq!(back.world.seed(), 77, "the island the pages were on");
         assert_eq!((back.world.matches, back.world.hour), (9, 3));
         // Schema 1: the hall alone.
@@ -542,6 +587,39 @@ mod tests {
         let mut bad = saved.clone();
         bad[8] ^= 1;
         assert!(Wandfall::new(1).load_snap(2, &bad).is_err());
+    }
+
+    #[test]
+    fn pages_without_a_wizard_share_one_frame_and_players_have_their_own() {
+        let mut r = Wandfall::new(4);
+        let mut out = Outbox::default();
+        // Two watchers, a page that never joins, and two players.
+        r.open(1, &Who::guest(true), &mut out);
+        r.open(2, &Who::guest(true), &mut out);
+        r.open(3, &person(7, "idle"), &mut out);
+        let a = joined(&mut r, 4, &person(42, "ash"));
+        joined(&mut r, 5, &person(43, "oak"));
+        let frames = |r: &mut Wandfall| {
+            let out = ticks(r, 1);
+            let mut f: Vec<(u32, Vec<u8>)> = out
+                .0
+                .into_iter()
+                .filter(|(_, b)| proto::Frame::decode(b).is_some())
+                .collect();
+            f.sort();
+            f
+        };
+        let f = frames(&mut r);
+        assert_eq!(f.len(), 5, "a frame for every page");
+        assert!(f[0].1 == f[1].1 && f[1].1 == f[2].1);
+        assert_eq!(f[0].1, view::frame(&r.world, 0).encode());
+        assert!(f[3].1 != f[0].1 && f[4].1 != f[0].1 && f[3].1 != f[4].1);
+        assert!(proto::Frame::decode(&f[3].1).unwrap().you.is_some());
+        // A wizard knocked out watches: the same frame as the watchers.
+        r.world.find_mut(a).unwrap().alive = false;
+        let f = frames(&mut r);
+        assert_eq!(f[3].1, f[0].1);
+        assert!(proto::Frame::decode(&f[3].1).unwrap().you.is_none());
     }
 
     #[test]

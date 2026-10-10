@@ -16,12 +16,13 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs;
 use std::path::PathBuf;
 
 use engine::snap::{self, Snap};
 use engine::who::{clean_name, fold, is_guest_name, soul_of, Hello, Seen, Status, Who};
 use engine::wire::{Reader, Writer};
+
+use crate::store::{read_kept, Kept};
 
 /// Play, in seconds, before a soul is written down.
 const KEEP_AFTER: u32 = 120;
@@ -67,8 +68,9 @@ pub struct Souls {
 
 impl Souls {
     /// The store kept at `path` (or only in memory, with none). A file
-    /// that does not read (damaged, or a newer build's) is set aside as
-    /// `souls.bad-<now>` first, so starting empty never writes over it.
+    /// that does not read (damaged, a newer build's, or a disk that will
+    /// not give it) is set aside as `souls.bad-<now>` first, so starting
+    /// empty never writes over it.
     pub fn open(path: Option<PathBuf>, now: u64) -> Souls {
         let mut s = Souls {
             path,
@@ -76,19 +78,12 @@ impl Souls {
             ..Souls::default()
         };
         if let Some(p) = s.path.clone() {
-            if let Ok(bytes) = fs::read(&p) {
-                match decode(&bytes) {
-                    Ok(souls) => s.souls = souls,
-                    Err(e) => {
-                        let to = crate::store::set_aside(&p, now);
-                        eprintln!("souls: the file does not read ({e}); set aside as {to:?}");
-                        if to.is_none() {
-                            // Not where a save would write over it: keep
-                            // nothing rather than lose it.
-                            s.path = None;
-                        }
-                    }
-                }
+            match read_kept(&p, now, decode) {
+                Kept::Read(souls) => s.souls = souls,
+                Kept::Fresh => {}
+                // Not where a save would write over it: keep nothing
+                // rather than lose it.
+                Kept::Stuck => s.path = None,
             }
         }
         s.reindex();
@@ -331,6 +326,7 @@ fn decode(bytes: &[u8]) -> Result<HashMap<u64, Soul>, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn hello(key: u8, name: &str, rename: bool) -> Hello {
         Hello {
@@ -492,6 +488,17 @@ mod tests {
             ..other
         };
         assert!(decode(&newer.pack()).is_err());
+        // One the disk will not give (here, a directory where the file is):
+        // set aside too, never taken for no file at all.
+        let _ = fs::remove_file(&path);
+        fs::create_dir(&path).unwrap();
+        let mut s = Souls::open(Some(path.clone()), 300);
+        assert!(dir.join("souls.bad-300").is_dir());
+        let (a, _) = s.hello(&hello(1, "ash", false), "x", 300, false);
+        s.enter(1, a.soul);
+        s.tick(KEEP_AFTER, 420);
+        assert!(save(&mut s, 420, false));
+        assert!(dir.join("souls.bad-300").is_dir() && path.is_file());
         let _ = fs::remove_dir_all(&dir);
     }
 

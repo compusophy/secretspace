@@ -197,6 +197,54 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// What a kept file (the souls, the visit count) holds, on boot.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Kept<T> {
+    /// It read.
+    Read(T),
+    /// There is none yet, or there was one that does not read and it is
+    /// set aside now: start from nothing.
+    Fresh,
+    /// There is one that does not read, and it could not be moved: start
+    /// from nothing, and write nothing there.
+    Stuck,
+}
+
+/// The file kept at `path`, made sense of by `parse`. One that does not
+/// read (the disk will not give it, or `parse` refuses it) is set aside,
+/// so that starting again from nothing never writes over it.
+pub fn read_kept<T>(
+    path: &Path,
+    now: u64,
+    parse: impl FnOnce(&[u8]) -> Result<T, &'static str>,
+) -> Kept<T> {
+    let why = match fs::read(path) {
+        Ok(bytes) => match parse(&bytes) {
+            Ok(t) => return Kept::Read(t),
+            Err(e) => e.to_string(),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Kept::Fresh,
+        Err(e) => e.to_string(),
+    };
+    match set_aside(path, now) {
+        Some(to) => {
+            eprintln!(
+                "{}: does not read ({why}); set aside as {}",
+                path.display(),
+                to.display()
+            );
+            Kept::Fresh
+        }
+        None => {
+            eprintln!(
+                "{}: does not read ({why}), and cannot be moved; not written",
+                path.display()
+            );
+            Kept::Stuck
+        }
+    }
+}
+
 /// A file that does not read, renamed to `<name>.bad-<now>` so nothing
 /// writes over it (someone may yet read it); where it went, if it could.
 pub fn set_aside(path: &Path, now: u64) -> Option<PathBuf> {
@@ -257,6 +305,37 @@ mod tests {
         assert_eq!(to, dir.join("visits.bad-99"));
         assert!(!path.exists() && fs::read(&to).unwrap() == b"345");
         assert_eq!(set_aside(&path, 100), None, "nothing there to set aside");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_kept_file_that_does_not_read_is_never_written_over() {
+        let dir = std::env::temp_dir().join(format!("store-kept-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("count");
+        let number = |b: &[u8]| -> Result<u64, &'static str> {
+            let text = std::str::from_utf8(b).map_err(|_| "not text")?;
+            text.trim().parse().map_err(|_| "not a number")
+        };
+        assert_eq!(read_kept(&path, 1, number), Kept::Fresh, "none yet");
+        fs::write(&path, b"41\n").unwrap();
+        assert_eq!(read_kept(&path, 2, number), Kept::Read(41));
+        // Refused by its reader: set aside.
+        fs::write(&path, b"4\xff1").unwrap();
+        assert_eq!(read_kept(&path, 3, number), Kept::Fresh);
+        assert_eq!(fs::read(dir.join("count.bad-3")).unwrap(), b"4\xff1");
+        // The disk will not give it (here, a directory where the file
+        // was): set aside too, not taken for none.
+        fs::create_dir(&path).unwrap();
+        assert_eq!(read_kept(&path, 4, number), Kept::Fresh);
+        assert!(dir.join("count.bad-4").is_dir() && !path.exists());
+        // And where it cannot be moved (a directory where it would go),
+        // nothing is to be written.
+        fs::write(&path, b"junk").unwrap();
+        fs::create_dir(dir.join("count.bad-5")).unwrap();
+        assert_eq!(read_kept(&path, 5, number), Kept::Stuck);
+        assert_eq!(fs::read(&path).unwrap(), b"junk");
         let _ = fs::remove_dir_all(&dir);
     }
 }

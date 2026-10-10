@@ -181,7 +181,9 @@ fn main() {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(1);
 
-    let visits = data.as_deref().map_or(0, |d| read_visits(d, unix()));
+    let (visits, visits_at) = data
+        .as_deref()
+        .map_or((0, None), |d| read_visits(d, unix()));
     let store = Store::new(data.as_deref());
     let games: Vec<Arc<Game>> = ROOMS
         .iter()
@@ -201,8 +203,8 @@ fn main() {
         from: Mutex::new(HashMap::new()),
     });
     {
-        let (s, d) = (shared.clone(), data.clone());
-        thread::spawn(move || keep(d.as_deref(), &s));
+        let s = shared.clone();
+        thread::spawn(move || keep(visits_at.as_deref(), &s));
     }
 
     let listener = TcpListener::bind(("0.0.0.0", port)).expect("bind");
@@ -240,35 +242,36 @@ fn main() {
     }
 }
 
-/// The visit count kept in `dir`. One that does not read is set aside, not
-/// written over, and counting starts again from nothing.
-fn read_visits(dir: &Path, now: u64) -> u64 {
+/// The visit count kept in `dir`, and where to keep it from now on. One
+/// that does not read is set aside, not written over, and counting starts
+/// again from nothing; one that cannot even be moved is left alone, and
+/// the count is not kept.
+fn read_visits(dir: &Path, now: u64) -> (u64, Option<PathBuf>) {
     let path = dir.join("visits");
-    let Ok(text) = fs::read_to_string(&path) else {
-        return 0;
+    let count = |b: &[u8]| {
+        let text = std::str::from_utf8(b).map_err(|_| "not text")?;
+        text.trim().parse().map_err(|_| "not a number")
     };
-    match text.trim().parse() {
-        Ok(n) => n,
-        Err(_) => {
-            let to = store::set_aside(&path, now);
-            eprintln!("visits: {text:?} does not read; set aside as {to:?}");
-            0
-        }
+    match store::read_kept(&path, now, count) {
+        store::Kept::Read(n) => (n, Some(path)),
+        store::Kept::Fresh => (0, Some(path)),
+        store::Kept::Stuck => (0, None),
     }
 }
 
 /// Every five seconds: play time for souls, and the souls and the visit
-/// count written down when they changed (the writing done outside the
-/// souls' lock, so no Hello waits on a disk). On a stop: wait for every
-/// room to hold still and save, write everything down, and leave.
-fn keep(dir: Option<&Path>, shared: &Shared) {
+/// count (at `visits`) written down when they changed (the writing done
+/// outside the souls' lock, so no Hello waits on a disk). On a stop: wait
+/// for every room to hold still and save, write everything down, and
+/// leave.
+fn keep(visits: Option<&Path>, shared: &Shared) {
     let mut saved = shared.visits.load(Ordering::Relaxed);
     let write_visits = |saved: &mut u64| {
         let now = shared.visits.load(Ordering::Relaxed);
-        let Some(dir) = dir.filter(|_| now != *saved) else {
+        let Some(path) = visits.filter(|_| now != *saved) else {
             return;
         };
-        match store::write_atomic(&dir.join("visits"), now.to_string().as_bytes()) {
+        match store::write_atomic(path, now.to_string().as_bytes()) {
             Ok(()) => *saved = now,
             Err(e) => eprintln!("visits: not saved: {e}"),
         }
@@ -468,4 +471,58 @@ fn stats_json(shared: &Shared) -> String {
         games.join(","),
         rooms.join(",")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shared() -> Shared {
+        Shared {
+            games: Vec::new(),
+            hub: AtomicUsize::new(0),
+            visits: AtomicU64::new(0),
+            souls: Mutex::new(Souls::open(None, 0)),
+            feedback: feedback::Feedback::new(None),
+            open: AtomicUsize::new(0),
+            from: Mutex::new(HashMap::new()),
+        }
+    }
+
+    #[test]
+    fn one_address_opens_so_many_and_each_one_closed_is_room_again() {
+        let s = shared();
+        let mut held: Vec<FromOne> = (0..MOST_FROM_ONE)
+            .map(|_| s.count_from("a").expect("room"))
+            .collect();
+        assert!(s.count_from("a").is_none(), "one too many");
+        assert!(s.count_from("b").is_some(), "another address is not held");
+        held.pop();
+        assert!(s.count_from("a").is_some(), "one closed: room again");
+        drop(held);
+        assert!(
+            s.from.lock().unwrap().is_empty(),
+            "and nothing is kept for an address with none open"
+        );
+    }
+
+    #[test]
+    fn a_visit_count_that_does_not_read_is_set_aside() {
+        let dir = std::env::temp_dir().join(format!("visits-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("visits");
+        assert_eq!(read_visits(&dir, 1), (0, Some(path.clone())), "none yet");
+        fs::write(&path, "1234\n").unwrap();
+        assert_eq!(read_visits(&dir, 2), (1234, Some(path.clone())));
+        // Bytes that are not text: set aside, and counting starts again.
+        fs::write(&path, b"12\xc334").unwrap();
+        assert_eq!(read_visits(&dir, 3), (0, Some(path.clone())));
+        assert_eq!(fs::read(dir.join("visits.bad-3")).unwrap(), b"12\xc334");
+        // One that cannot be moved aside is not written over.
+        fs::write(&path, "lots").unwrap();
+        fs::create_dir(dir.join("visits.bad-4")).unwrap();
+        assert_eq!(read_visits(&dir, 4), (0, None));
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

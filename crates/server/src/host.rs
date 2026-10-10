@@ -27,6 +27,10 @@ pub enum Event {
     Open(u32, SyncSender<Vec<u8>>, Who),
     /// It said Hello again: who it is now, and the `Seen` to send it.
     Who(u32, Who, Vec<u8>),
+    /// An answer for the page alone (the room is not told), sent in its
+    /// turn with what the room sends. Only the room holds a page's
+    /// sender, so letting go of it still lets the page go.
+    Tell(u32, Vec<u8>),
     Say(u32, Vec<u8>),
     Close(u32),
 }
@@ -155,6 +159,11 @@ fn step(
                 if clients.contains_key(&conn) {
                     out.send(conn, seen);
                     room.who(conn, &who);
+                }
+            }
+            Event::Tell(conn, msg) => {
+                if clients.contains_key(&conn) {
+                    out.send(conn, msg);
                 }
             }
             Event::Say(conn, bytes) => room.message(conn, &bytes, out),
