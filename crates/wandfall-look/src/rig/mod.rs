@@ -10,8 +10,9 @@
 //!   found by two-bone reach, the chest keeping its aim, arms swinging
 //!   against the legs, the wand arm rising to cast, the robe's panels
 //!   following the thighs; sitting on a broom; falling;
-//! - `model`: its parts as meshes, each hung from its joint, near and far
-//!   (`parts` sculpts them);
+//! - `model`: its parts as meshes, each hung from its joint, in full near,
+//!   coarser a little way off and coarser still far off (`parts` sculpts
+//!   them);
 //! - `math`: the matrices, the reach and the springs they share.
 //!
 //! The model faces +x, up is +y, its right is +z (as `m4::place` turns
