@@ -52,7 +52,13 @@ pub fn draw(
     let t = (now / 1000.0) as f32;
     let own = |id: u16| eyes.first && id == eyes.id;
     fx::loot(look, d, &st.loot, t, cam.eye);
-    look.places(d, t);
+    let wind = st.frame.as_ref().map_or([0.0; 2], |f| {
+        crate::sky::wind(
+            crate::sky::Hour::from(f.hour),
+            crate::sky::Weather::from(f.weather),
+        )
+    });
+    look.places(d, t, (cam.eye, wind));
     for s in others {
         if s.flags & flag::ALIVE == 0 {
             continue;

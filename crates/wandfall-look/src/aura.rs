@@ -4,7 +4,9 @@
 //! flames, the circle's orb in its shell of light, the rift's gate
 //! burning and swirling, embers streaking up off its lava into smoke, the
 //! grove's glimmer and glints, the rune turning over the causeway's crown
-//! and the spray blowing across its columns.
+//! and the spray blowing across its columns. Spray, smoke and embers go
+//! the way the wind blows; a place's motes are left out when it is far
+//! from the eye (its light is not).
 
 use std::f32::consts::TAU;
 
@@ -18,6 +20,8 @@ use crate::land::{CYAN, EMBER, GOLDEN, VIOLET};
 const PAD: V3 = rgb(255, 200, 110);
 /// The causeway's: sea-green.
 const SPRAY: V3 = rgb(150, 255, 214);
+/// A place's motes, sparks and smoke are drawn within this of the eye.
+const MOTES: f32 = 120.0;
 use crate::look::Look;
 use wandfall::laws::{RIFT_DEPTH, TOWER_HEIGHT};
 use wandfall::places::Place;
@@ -39,9 +43,11 @@ fn laid(at: V3, up: V3, turn: f32, size: V3) -> render::M4 {
 }
 
 impl Look {
-    /// What moves at the places, and their light, `t` seconds in.
-    pub fn places(&self, d: &mut Draw, t: f32) {
+    /// What moves at the places, and their light, `t` seconds in, seen
+    /// from `eye`, the wind blowing `wind` (m/s across x and z).
+    pub fn places(&self, d: &mut Draw, t: f32, (eye, wind): (V3, [f32; 2])) {
         let l = &self.land;
+        let near = |x: f32, z: f32| (x - eye[0]).hypot(z - eye[2]) < MOTES;
         let glow = |d: &mut Draw, mesh: Mesh, m: render::M4, c: V3, a: f32| {
             d.items
                 .push(Item::new(mesh, m).tint(c, a).glow(1.0).pass(Pass::Glow));
@@ -95,7 +101,7 @@ impl Look {
                 PAD,
                 0.12 * pulse,
             );
-            for n in 0..10 {
+            for n in 0..if near(p[0], p[2]) { 10 } else { 0 } {
                 let u = |i: u32| unit(hash(k as i32, n, 61 + i));
                 let f = (t * (0.5 + 0.3 * u(0)) + u(1)).fract();
                 let a = u(2) * TAU + t * 1.5;
@@ -123,6 +129,8 @@ impl Look {
         }
         for p in &l.pois {
             let base = [p.x, p.level, p.z];
+            // How many motes to draw: all of them near, none far.
+            let motes = |n: i32| if near(p.x, p.z) { n } else { 0 };
             match p.place {
                 Place::Spire => {
                     // The beacon: a crystal turning over the hat, its
@@ -274,16 +282,17 @@ impl Look {
                         r: 12.0,
                         c: geo::scale(EMBER, 2.0),
                     });
-                    for k in 0..48 {
+                    for k in 0..motes(48) {
                         let u = |i| unit(hash(k, i, 31));
                         let f = (t / (3.0 + 2.0 * u(0)) + u(1)).fract();
                         let a = u(2) * TAU;
                         let r = 1.0 + 9.0 * u(3) + f * 1.5;
+                        let blown = 2.0 * f;
                         d.sparks.push(Spark {
                             p: [
-                                p.x + a.cos() * r,
+                                p.x + a.cos() * r + wind[0] * blown,
                                 floor + 0.3 + f * (6.0 + 6.0 * u(4)),
-                                p.z + a.sin() * r,
+                                p.z + a.sin() * r + wind[1] * blown,
                             ],
                             size: 0.07 + 0.06 * u(5),
                             c: [
@@ -297,14 +306,19 @@ impl Look {
                         });
                     }
                     // Smoke rolling up off the lava, lit red from below.
-                    for k in 0..10 {
+                    for k in 0..motes(10) {
                         let u = |i| unit(hash(k, i, 33));
                         let f = (t / (7.0 + 3.0 * u(0)) + u(1)).fract();
                         let a = u(2) * TAU + f * 0.6;
                         let r = 2.0 + 7.0 * u(3) + f * 2.0;
                         let warm = mix(rgb(120, 40, 20), rgb(40, 34, 36), f);
                         d.sparks.push(Spark {
-                            p: [p.x + a.cos() * r, floor + 1.0 + f * 14.0, p.z + a.sin() * r],
+                            // Leaning with the wind the higher it rolls.
+                            p: [
+                                p.x + a.cos() * r + wind[0] * 8.0 * f * f,
+                                floor + 1.0 + f * 14.0,
+                                p.z + a.sin() * r + wind[1] * 8.0 * f * f,
+                            ],
                             size: 2.0 + 4.0 * f,
                             c: [
                                 warm[0],
@@ -319,7 +333,7 @@ impl Look {
                     }
                 }
                 Place::Grove => {
-                    for k in 0..36 {
+                    for k in 0..motes(36) {
                         let u = |i| unit(hash(k, i, 41));
                         let a = u(0) * TAU + t * 0.05 * (u(1) - 0.5);
                         let r = p.r * u(2).sqrt();
@@ -358,14 +372,14 @@ impl Look {
                         c: geo::scale(SPRAY, 1.6),
                     });
                     // Spray blowing over the columns, low and drifting.
-                    for k in 0..28 {
+                    for k in 0..motes(28) {
                         let u = |i| unit(hash(k, i, 43));
                         let life = 4.0 + 3.0 * u(0);
                         let age = (t / life + u(1)).fract();
                         let a = u(2) * TAU;
                         let r = p.r * 0.8 * u(3).sqrt();
-                        let x = p.x + a.cos() * r + (age - 0.5) * 6.0;
-                        let z = p.z + a.sin() * r + (age - 0.5) * 2.0;
+                        let x = p.x + a.cos() * r + (age - 0.5) * 6.0 * wind[0];
+                        let z = p.z + a.sin() * r + (age - 0.5) * 6.0 * wind[1];
                         let y = base[1] + 1.0 + 7.0 * u(4) + age * 1.5;
                         let fade = (age * (1.0 - age) * 4.0).min(1.0);
                         d.sparks.push(Spark {

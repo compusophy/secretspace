@@ -155,38 +155,83 @@ fn clear_of(c: Cond) -> Look {
     weathered(c.0.clear(), c.1)
 }
 
-/// The sky as it turns: the hour and weather it is turning from and to,
-/// since when (s), and how far into the storm's look.
+/// A turn of the sky: as it was when the turn began (clear of the storm
+/// and its lightning; how wet; how bright the storm's violet), the hour
+/// and weather it was turning to before (for `weigh`), what it turns to,
+/// and since when (s).
+#[derive(Clone, Debug)]
+struct Turn {
+    from: (Look, f32, f32),
+    was: Cond,
+    to: Cond,
+    since: f64,
+}
+
+impl Turn {
+    /// Where it has turned to by `s` seconds: the clear sky, how wet, how
+    /// bright the storm's violet.
+    fn at(&self, s: f64) -> (Look, f32, f32) {
+        let (from, wet, k) = self.from;
+        let to = clear_of(self.to);
+        // Already there, it stays exactly there.
+        let t = if from == to {
+            1.0
+        } else {
+            smooth(((s - self.since) as f32 / TURN).clamp(0.0, 1.0))
+        };
+        let rain = (self.to.1 == Weather::Rain) as i32 as f32;
+        (
+            blend(&from, &to, t),
+            wet + (rain - wet) * t,
+            k + (self.to.0.storm() - k) * t,
+        )
+    }
+}
+
+/// The sky as it turns from one hour and weather to the next, and how
+/// far into the storm's look.
 #[derive(Clone, Debug, Default)]
 pub struct Sky {
-    turn: Option<(Cond, Cond, f64)>,
+    turn: Option<Turn>,
     storm: f32,
     last: f64,
 }
 
 impl Sky {
     /// The sky now (`now` in ms): turning to `hour` in `weather` if that
-    /// is new (at once, the first time), closed in if you stand in the
-    /// storm.
+    /// is new (at once, the first time; from the sky as it is, even part
+    /// way through a turn), closed in if you stand in the storm.
     pub fn look(&mut self, (hour, weather): Cond, in_storm: bool, now: f64) -> Look {
         let s = now / 1000.0;
         let to = (hour, weather);
-        let (from, to, since) = match self.turn {
-            Some((_, was, _)) if was != to => (was, to, s),
-            Some(t) => t,
-            None => (to, to, s),
-        };
-        self.turn = Some((from, to, since));
+        self.turn = Some(match self.turn.take() {
+            Some(t) if t.to == to => t,
+            Some(t) => Turn {
+                from: t.at(s),
+                was: t.to,
+                to,
+                since: s,
+            },
+            None => Turn {
+                from: (
+                    clear_of(to),
+                    (weather == Weather::Rain) as i32 as f32,
+                    hour.storm(),
+                ),
+                was: to,
+                to,
+                since: s,
+            },
+        });
         let dt = (s - self.last).clamp(0.0, 0.25) as f32;
         self.last = s;
         let aim = if in_storm { 1.0 } else { 0.0 };
         let step = dt / INTO_STORM;
         self.storm += (aim - self.storm).clamp(-step, step);
-        let t = smooth(((s - since) as f32 / TURN).clamp(0.0, 1.0));
-        let clear = blend(&clear_of(from), &clear_of(to), t);
-        let k = from.0.storm() + (to.0.storm() - from.0.storm()) * t;
-        let wet = (from.1 == Weather::Rain) as i32 as f32 * (1.0 - t)
-            + (to.1 == Weather::Rain) as i32 as f32 * t;
+        let (clear, wet, k) = self
+            .turn
+            .as_ref()
+            .map_or_else(|| (clear_of(to), 0.0, hour.storm()), |t| t.at(s));
         let mut l = blend(&clear, &storm(&clear, k), smooth(self.storm));
         // Lightning far off in the rain: the sky flashes.
         let f = flash(now, wet);
@@ -203,11 +248,11 @@ impl Sky {
     /// how hard it rains), as the sky is now, turning from one to the
     /// next.
     pub fn weigh(&self, now: f64, f: impl Fn(Hour, Weather) -> f32) -> f32 {
-        let Some((from, to, since)) = self.turn else {
+        let Some(turn) = &self.turn else {
             return f(Hour::Dusk, Weather::Clear);
         };
-        let t = smooth(((now / 1000.0 - since) as f32 / TURN).clamp(0.0, 1.0));
-        let (a, b) = (f(from.0, from.1), f(to.0, to.1));
+        let t = smooth(((now / 1000.0 - turn.since) as f32 / TURN).clamp(0.0, 1.0));
+        let (a, b) = (f(turn.was.0, turn.was.1), f(turn.to.0, turn.to.1));
         a + (b - a) * t
     }
 }
@@ -252,6 +297,11 @@ pub fn flash(now: f64, wet: f32) -> f32 {
         0.0
     };
     (first + again) * wet
+}
+
+/// Which way the wind blows (m/s across x and z) at `hour` in `weather`.
+pub fn wind(hour: Hour, weather: Weather) -> [f32; 2] {
+    clear_of((hour, weather)).wind
 }
 
 /// The sky at `hour`, at once; violet and close in the storm.
@@ -514,6 +564,35 @@ mod tests {
             );
         }
         assert_eq!(last, sky(Hour::Dawn, true), "settled, in the storm");
+    }
+
+    #[test]
+    fn a_new_hour_part_way_through_a_turn_turns_from_the_sky_as_it_is() {
+        let mut s = Sky::default();
+        s.look((Hour::Night, Weather::Clear), false, 0.0);
+        s.look((Hour::Dawn, Weather::Clear), false, 1000.0);
+        let mid = 1000.0 + TURN as f64 * 400.0;
+        let half = s.look((Hour::Dawn, Weather::Clear), false, mid);
+        // Another hour (and rain) arrives: no jump, then it turns there.
+        let next = s.look((Hour::Day, Weather::Rain), false, mid + 16.0);
+        for (a, b) in [
+            (half.exposure, next.exposure),
+            (half.sky[2], next.sky[2]),
+            (half.fog, next.fog),
+            (half.stars, next.stars),
+        ] {
+            assert!((a - b).abs() < 0.02 * a.abs().max(0.05), "{a} to {b}");
+        }
+        let day = s.look(
+            (Hour::Day, Weather::Rain),
+            false,
+            mid + TURN as f64 * 1000.0 + 50.0,
+        );
+        let want = clear_of((Hour::Day, Weather::Rain));
+        assert_eq!(
+            (day.exposure, day.fog, day.sun),
+            (want.exposure, want.fog, want.sun)
+        );
     }
 
     #[test]
