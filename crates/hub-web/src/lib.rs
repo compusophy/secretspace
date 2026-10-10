@@ -7,7 +7,6 @@
 //! till the game is left.
 //! Every pixel is drawn here, in Rust.
 
-mod luci;
 mod wand;
 mod watch;
 
@@ -27,8 +26,6 @@ struct Card {
     blurb: [&'static str; 2],
     path: &'static str,
     hue: f32,
-    /// Kept off the public shelf (`?all=1` shows it) until it is ready.
-    hidden: bool,
 }
 
 const CARDS: &[Card] = &[
@@ -38,15 +35,6 @@ const CARDS: &[Card] = &[
         blurb: ["eat the glow, grow long,", "make them run into you"],
         path: "/wyrm/",
         hue: 140.0,
-        hidden: false,
-    },
-    Card {
-        id: "luciphon",
-        title: "LUCIPHON",
-        blurb: ["carry your light out,", "knock them off the edge"],
-        path: "/luciphon/",
-        hue: 42.0,
-        hidden: true,
     },
     Card {
         id: "wandfall",
@@ -54,7 +42,6 @@ const CARDS: &[Card] = &[
         blurb: ["a wand battle royale:", "be the last one standing"],
         path: "/wandfall/",
         hue: 265.0,
-        hidden: false,
     },
     Card {
         id: "",
@@ -62,7 +49,6 @@ const CARDS: &[Card] = &[
         blurb: ["one more after that", "made of rust too"],
         path: "",
         hue: 20.0,
-        hidden: false,
     },
 ];
 
@@ -81,12 +67,8 @@ struct Hub {
     hits: Vec<(Rect, usize)>,
     /// wyrm, live, for its card.
     watch: watch::Watch,
-    /// Luciphon, live, while its card is shown (`?all=1` for now).
-    luci: Option<luci::LuciWatch>,
     /// Wandfall, live while a match is on, for its card.
     wand: wand::WandWatch,
-    /// The cards on the shelf, by index into CARDS.
-    shown: Vec<usize>,
     /// How far the page is scrolled, and the most it can be.
     scroll: f32,
     max_scroll: f32,
@@ -216,13 +198,12 @@ fn draw(h: &mut Hub, now: f64) {
     } else {
         (196.0 * uf, preview_h + 84.0 * uf)
     };
-    let shown = h.shown.clone();
-    let cols = (((w - 24.0 * uf + gap) / (cw + gap)).floor() as usize).clamp(1, shown.len());
+    let cols = (((w - 24.0 * uf + gap) / (cw + gap)).floor() as usize).clamp(1, CARDS.len());
     let grid_w = cols as f32 * cw + (cols - 1) as f32 * gap;
     let x0 = (w - grid_w) / 2.0;
     let mut hover = false;
-    for (slot, &i) in shown.iter().enumerate() {
-        let card = &CARDS[i];
+    for (i, card) in CARDS.iter().enumerate() {
+        let slot = i;
         let (col, row) = (slot % cols, slot / cols);
         let b = Rect::new(
             x0 + col as f32 * (cw + gap),
@@ -252,8 +233,6 @@ fn draw(h: &mut Hub, now: f64) {
         let pv = Rect::new(b.x + pad, b.y + pad, b.w - 2.0 * pad, preview_h);
         if card.id == "wyrm" {
             h.watch.draw(c, pv, k, 6.0 * uf, u, now);
-        } else if let (Some(l), "luciphon") = (h.luci.as_mut(), card.id) {
-            l.draw(c, pv, 6.0 * uf, u, now);
         } else if card.id == "wandfall" {
             h.wand.draw(c, pv, u, now);
         } else {
@@ -304,7 +283,7 @@ fn draw(h: &mut Hub, now: f64) {
             h.hits.push((b, i));
         }
     }
-    let rows = shown.len().div_ceil(cols) as f32;
+    let rows = CARDS.len().div_ceil(cols) as f32;
     let content = top + scroll + rows * (ch + gap) + 8.0 * uf;
     h.max_scroll = (content + foot_h - ht).max(0.0);
     h.screen.cursor(if hover { "pointer" } else { "default" });
@@ -354,16 +333,6 @@ pub fn start() -> Result<(), JsValue> {
     let canvas = kit::document()
         .get_element_by_id("screen")
         .ok_or("no #screen")?;
-    // A card not yet on the public shelf shows with ?all=1, in place of
-    // the "next game" it is.
-    let all = kit::window()
-        .location()
-        .search()
-        .is_ok_and(|q| q.trim_start_matches('?').split('&').any(|kv| kv == "all=1"));
-    let shown: Vec<usize> = (0..CARDS.len())
-        .filter(|&i| !CARDS[i].hidden || all)
-        .filter(|&i| !(all && CARDS[i].title == "NEXT GAME"))
-        .collect();
     HUB.with(|h| {
         *h.borrow_mut() = Some(Hub {
             screen,
@@ -372,9 +341,7 @@ pub fn start() -> Result<(), JsValue> {
             pointer: None,
             hits: Vec::new(),
             watch: watch::Watch::new(),
-            luci: all.then(luci::LuciWatch::new),
             wand: wand::WandWatch::new(),
-            shown,
             scroll: 0.0,
             max_scroll: 0.0,
             press: None,

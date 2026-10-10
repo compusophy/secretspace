@@ -15,8 +15,6 @@ crate-type = ["cdylib", "rlib"]
 engine = { package = "secretspace-engine", path = "../engine" }
 wyrm = { package = "secretspace-wyrm", path = "../wyrm" }
 look = { package = "secretspace-wyrm-look", path = "../wyrm-look" }
-luciphon = { package = "secretspace-luciphon", path = "../luciphon" }
-lucilook = { package = "secretspace-luciphon-look", path = "../luciphon-look" }
 wandfall = { package = "secretspace-wandfall", path = "../wandfall" }
 wandfall-look = { package = "secretspace-wandfall-look", path = "../wandfall-look" }
 render = { package = "secretspace-render", path = "../render" }
