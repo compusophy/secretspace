@@ -16,8 +16,9 @@
 
 use crate::laws::*;
 use crate::loot::{cooldown, level_scale, power};
+use crate::motion::keys;
 use crate::trig;
-use crate::world::{through, Bolt, Event, Phase, World, WAND};
+use crate::world::{through, Bolt, Event, Phase, Player, World, WAND};
 
 /// Lightning's mark: where it will strike, and when.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,22 +85,59 @@ pub fn sight_then(
     (ahead(eye, d, range * first.0), first.1)
 }
 
-/// `k` casts the spell in `slot`, if it is ready.
-pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
+/// Where a cast was aimed, as of the input that cast it: the eye, the
+/// look, the keys held (Blink steps the way you steer), and how many
+/// ticks behind its page drew everyone else.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Aim {
+    pub eye: [f32; 3],
+    pub yaw: u16,
+    pub pitch: i16,
+    pub keys: u16,
+    pub behind: u32,
+}
+
+impl Aim {
+    /// As `p` stands and looks now.
+    pub fn of(p: &Player) -> Aim {
+        Aim {
+            eye: p.eye(),
+            yaw: p.yaw,
+            pitch: p.pitch,
+            keys: p.last.keys,
+            behind: p.behind,
+        }
+    }
+}
+
+/// `k` casts the spell in `slot`, if it is ready, aimed as `aim`.
+pub fn cast(w: &mut World, k: usize, slot: usize, aim: Aim, ev: &mut Vec<Event>) {
     let tick = w.tick;
-    let p = &mut w.players[k];
+    let p = &w.players[k];
     let Some(s) = p.slots[slot] else {
         return;
     };
     if !p.alive || p.body.glide || p.cds[slot] > 0 {
         return;
     }
-    p.cds[slot] = cooldown(s.spell, s.rank);
-    let (by, level, eye, yaw, pitch) = (p.id, p.level, p.eye(), p.yaw, p.pitch);
-    let d = trig::look(yaw, pitch);
     let pw = power(s.spell, s.rank);
+    // A Blink with nowhere to go is not spent.
+    let blink_at = match s.spell {
+        spell::BLINK => match blink_to(w, k, aim, pw as f32) {
+            Some(at) => Some(at),
+            None => return,
+        },
+        _ => None,
+    };
+    let p = &mut w.players[k];
+    p.cds[slot] = cooldown(s.spell, s.rank);
+    p.spell_cds[s.spell as usize % SPELLS.len()] = p.cds[slot];
+    let (by, level, eye) = (p.id, p.level, aim.eye);
+    let d = trig::look(aim.yaw, aim.pitch);
     let hit = level_scale(level, pw);
     let from = ahead(eye, d, 0.6);
+    // Others where its caster's page saw them (not too far back).
+    let then = tick.saturating_sub(aim.behind.min(REWIND));
     let bolt = |d: [f32; 3], speed: f32, life| Bolt {
         id: 0,
         by,
@@ -119,8 +157,6 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
     match s.spell {
         spell::FIREBALL => w.bolt(bolt(d, FIREBALL_SPEED, FIREBALL_LIFE)),
         spell::LANCE => {
-            // Where its caster's page saw them (not too far back).
-            let then = tick.saturating_sub(w.players[k].behind.min(REWIND));
             let (to, who) = sight_then(w, by, (eye, d), LANCE_RANGE, then);
             ev.push(Event::Beam {
                 by,
@@ -136,12 +172,12 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
             let half = FROST_SHARDS as i32 / 2;
             for n in 0..FROST_SHARDS as i32 {
                 let turn = ((n - half) * FROST_SPREAD) as i16 as u16;
-                let d = trig::look(yaw.wrapping_add(turn), pitch);
+                let d = trig::look(aim.yaw.wrapping_add(turn), aim.pitch);
                 w.bolt(bolt(d, FROST_SPEED, FROST_LIFE));
             }
         }
         spell::LIGHTNING => {
-            let (to, _) = sight(w, by, eye, d, LIGHTNING_RANGE);
+            let (to, _) = sight_then(w, by, (eye, d), LIGHTNING_RANGE, then);
             let at = [
                 to[0],
                 w.map.floor(to[0], to[2], to[1] + 0.3).max(SEA),
@@ -160,7 +196,11 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
                 at,
             });
         }
-        spell::BLINK => blink(w, k, pw as f32, ev),
+        spell::BLINK => {
+            if let Some(at) = blink_at {
+                blink(w, k, at, ev);
+            }
+        }
         spell::WARD => {
             let p = &mut w.players[k];
             p.shield = p.shield.max(pw);
@@ -174,9 +214,9 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
         spell::GUST => gust(w, k, pw as f32, ev),
         spell::TETHER => {
             // It catches the first thing on the line, or the air itself
-            // short of its reach.
+            // short of its reach, and pulls as long as its reach needs.
             let reach = pw as f32;
-            let (mut to, _) = sight(w, by, eye, d, reach);
+            let (mut to, _) = sight_then(w, by, (eye, d), reach, then);
             let far =
                 ((to[0] - eye[0]).powi(2) + (to[1] - eye[1]).powi(2) + (to[2] - eye[2]).powi(2))
                     .sqrt();
@@ -185,7 +225,7 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
             }
             let b = &mut w.players[k].body;
             b.anchor = to;
-            b.tether = TETHER_TICKS;
+            b.tether = tether_ticks(pw);
             b.mantle = 0;
             ev.push(Event::Cast {
                 by,
@@ -198,9 +238,17 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
     }
 }
 
-/// Step through the air toward where `k` looks, up to `reach` metres,
-/// stopping short of anything (or anyone) in the way; chill falls away.
-fn blink(w: &mut World, k: usize, reach: f32, ev: &mut Vec<Event>) {
+/// How long a Tether of `reach` metres pulls (ticks): `TETHER_TICKS` at
+/// the first rank's reach, longer as it reaches further.
+pub fn tether_ticks(reach: i32) -> u8 {
+    let first = SPELLS[spell::TETHER as usize].power.max(1);
+    (TETHER_TICKS as i32 * reach / first).clamp(1, u8::MAX as i32) as u8
+}
+
+/// Where a Blink from `k` would land: up to `reach` metres the way it
+/// steers (or faces), stopping short of anything (or anyone) in the way;
+/// nowhere (None) if that is not even `BLINK_MIN` away.
+pub fn blink_to(w: &World, k: usize, aim: Aim, reach: f32) -> Option<[f32; 3]> {
     let p = &w.players[k];
     let others: Vec<[f32; 3]> = w
         .players
@@ -208,21 +256,34 @@ fn blink(w: &mut World, k: usize, reach: f32, ev: &mut Vec<Event>) {
         .filter(|q| q.id != p.id && q.alive)
         .map(|q| q.body.p)
         .collect();
-    let (s, c) = trig::sin_cos(p.yaw);
+    let (s, c) = trig::sin_cos(aim.yaw);
+    let has = |key| (aim.keys & key != 0) as i32 as f32;
+    let (f, r) = (
+        has(keys::FWD) - has(keys::BACK),
+        has(keys::RIGHT) - has(keys::LEFT),
+    );
+    // Forward is (c, s) on the ground; right is (-s, c).
+    let (mut dx, mut dz) = (c * f - s * r, s * f + c * r);
+    let len = (dx * dx + dz * dz).sqrt();
+    (dx, dz) = if len > 1e-6 {
+        (dx / len, dz / len)
+    } else {
+        (c, s)
+    };
     let start = p.body.p;
     let mut at = start;
     let lim = MAP_HALF - 2.0;
-    let mut d = 0.5;
+    let mut d = BLINK_STEP;
     while d <= reach {
-        let x = (start[0] + c * d).clamp(-lim, lim);
-        let z = (start[2] + s * d).clamp(-lim, lim);
+        let x = (start[0] + dx * d).clamp(-lim, lim);
+        let z = (start[2] + dz * d).clamp(-lim, lim);
         let ground = w.map.height(x, z).max(SEA - 0.9);
         let y = start[1].max(ground);
         let crowded = others.iter().any(|q| {
-            (q[0] - x).powi(2) + (q[2] - z).powi(2) < (RADIUS * 2.2).powi(2)
+            (q[0] - x).powi(2) + (q[2] - z).powi(2) < BLINK_CROWD * BLINK_CROWD
                 && (q[1] - y).abs() < HEIGHT
         });
-        if y - start[1] > 3.0
+        if y - start[1] > BLINK_CLIMB
             || crowded
             || w.map
                 .near(x, z, RADIUS)
@@ -231,29 +292,35 @@ fn blink(w: &mut World, k: usize, reach: f32, ev: &mut Vec<Event>) {
             break;
         }
         at = [x, y, z];
-        d += 0.5;
+        d += BLINK_STEP;
     }
-    let by = p.id;
+    let moved = (at[0] - start[0]).hypot(at[2] - start[2]);
+    (moved >= BLINK_MIN).then_some(at)
+}
+
+/// `k` steps through the air to `at`; chill falls away.
+fn blink(w: &mut World, k: usize, at: [f32; 3], ev: &mut Vec<Event>) {
     let p = &mut w.players[k];
     p.body.p = at;
     p.body.ground = false;
     p.body.v[1] = 0.0;
     p.body.chill = 0;
     ev.push(Event::Cast {
-        by,
+        by: p.id,
         spell: spell::BLINK,
         stage: 1,
         at: [at[0], at[1] + 1.0, at[2]],
     });
 }
 
-/// Everyone near `k` thrown back at `push` m/s (and up), a little hurt;
-/// everyone else's bolts near it blown away.
+/// Everyone near `k` thrown back at `push` m/s (and up), a little hurt,
+/// and let go of whatever held them (a Tether, a climb); everyone else's
+/// bolts near it blown away.
 fn gust(w: &mut World, k: usize, push: f32, ev: &mut Vec<Event>) {
     let (by, at, level) = (w.players[k].id, w.players[k].body.p, w.players[k].level);
     let near = |p: [f32; 3], up: f32| {
         let (dx, dz) = (p[0] - at[0], p[2] - at[2]);
-        (dx * dx + dz * dz).sqrt() <= GUST_RADIUS && (p[1] - at[1] - up).abs() < 3.0
+        (dx * dx + dz * dz).sqrt() <= GUST_RADIUS && (p[1] - at[1] - up).abs() < GUST_BAND
     };
     w.bolts.retain(|b| b.by == by || !near(b.p, 1.0));
     let fight = w.phase == Phase::Fight;
@@ -275,6 +342,8 @@ fn gust(w: &mut World, k: usize, push: f32, ev: &mut Vec<Event>) {
         };
         q.body.v = [nx * push, GUST_LIFT, nz * push];
         q.body.ground = false;
+        q.body.tether = 0;
+        q.body.mantle = 0;
         hit.push(q.id);
     }
     for id in hit {
@@ -282,14 +351,22 @@ fn gust(w: &mut World, k: usize, push: f32, ev: &mut Vec<Event>) {
     }
 }
 
-/// Everyone within `r` of `at` but `by`, hurt by `what` (less toward the
-/// edge).
-fn burst(w: &mut World, by: u16, at: [f32; 3], r: f32, dmg: i32, what: u8, ev: &mut Vec<Event>) {
+/// Everyone within `r` of `at` but its caster and `skip` (one already
+/// struck), hurt by `what`: less toward the edge. Lightning shatters a
+/// Ward first.
+fn burst(
+    w: &mut World,
+    (by, skip): (u16, u16),
+    (at, r): ([f32; 3], f32),
+    dmg: i32,
+    what: u8,
+    ev: &mut Vec<Event>,
+) {
     let fight = w.phase == Phase::Fight;
     let hit: Vec<(u16, f32)> = w
         .players
         .iter()
-        .filter(|q| q.id != by && q.alive && q.entrant == fight)
+        .filter(|q| q.id != by && q.id != skip && q.alive && q.entrant == fight)
         .map(|q| {
             let c = [q.body.p[0], q.body.p[1] + 1.0, q.body.p[2]];
             let d =
@@ -299,8 +376,25 @@ fn burst(w: &mut World, by: u16, at: [f32; 3], r: f32, dmg: i32, what: u8, ev: &
         .filter(|&(_, d)| d < r)
         .collect();
     for (id, d) in hit {
-        let k = 1.0 - 0.5 * d / r;
-        w.hurt(by, id, (dmg as f32 * k) as i32, what, ev);
+        if what == spell::LIGHTNING {
+            shatter(w, id, ev);
+        }
+        let k = 1.0 - (1.0 - BURST_EDGE) * d / r;
+        w.hurt(by, id, (dmg as f32 * k).round() as i32, what, ev);
+    }
+}
+
+/// `id`'s Ward broken outright.
+fn shatter(w: &mut World, id: u16, ev: &mut Vec<Event>) {
+    if let Some(q) = w.find_mut(id).filter(|q| q.shield > 0) {
+        q.shield = 0;
+        let at = [q.body.p[0], q.body.p[1] + 1.0, q.body.p[2]];
+        ev.push(Event::Cast {
+            by: id,
+            spell: spell::WARD,
+            stage: 2,
+            at,
+        });
     }
 }
 
@@ -319,8 +413,12 @@ pub fn impact(w: &mut World, b: &Bolt, at: [f32; 3], who: u16, ev: &mut Vec<Even
                 stage: 1,
                 at,
             });
-            let r = FIREBALL_RADIUS * (1.0 + 0.1 * (b.rank as f32 - 1.0));
-            burst(w, b.by, at, r, b.power, b.kind, ev);
+            // Whoever it struck takes all of it; the splash, the rest.
+            if who != 0 {
+                w.hurt(b.by, who, b.power, b.kind, ev);
+            }
+            let r = FIREBALL_RADIUS * (1.0 + FIREBALL_RANK_RADIUS * (b.rank as f32 - 1.0));
+            burst(w, (b.by, who), (at, r), b.power, b.kind, ev);
         }
         spell::FROST => {
             ev.push(Event::Cast {
@@ -345,7 +443,7 @@ pub fn impact(w: &mut World, b: &Bolt, at: [f32; 3], who: u16, ev: &mut Vec<Even
 pub fn tick(w: &mut World, ev: &mut Vec<Event>) {
     let tick = w.tick;
     for p in w.players.iter_mut() {
-        for cd in p.cds.iter_mut() {
+        for cd in p.cds.iter_mut().chain(p.spell_cds.iter_mut()) {
             *cd = cd.saturating_sub(1);
         }
         if tick >= p.shield_until {
@@ -368,217 +466,16 @@ pub fn tick(w: &mut World, ev: &mut Vec<Event>) {
             at: z.at,
         });
         let at = [z.at[0], z.at[1] + 0.5, z.at[2]];
-        burst(w, z.by, at, LIGHTNING_RADIUS, z.power, spell::LIGHTNING, ev);
+        burst(
+            w,
+            (z.by, 0),
+            (at, LIGHTNING_RADIUS),
+            z.power,
+            spell::LIGHTNING,
+            ev,
+        );
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::world::{Phase, Slot};
-
-    fn duel(gap: f32) -> (World, u16, u16) {
-        let mut w = World::new(21);
-        let a = w.join("a", 0);
-        let b = w.join("b", 0);
-        // Into the fight, then side by side on the Spire's open plaza.
-        while w.phase != Phase::Fight {
-            w.step();
-        }
-        w.players.retain(|p| !p.bot);
-        let [x, z] = [-gap / 2.0, -12.0];
-        for (k, dx) in [(0usize, 0.0f32), (1, gap)] {
-            let p = &mut w.players[k];
-            p.body.glide = false;
-            p.body.ground = true;
-            p.body.p = [x + dx, w.map.height(x + dx, z), z];
-            p.yaw = 0;
-            p.pitch = 0;
-        }
-        // Looking at the other's chest.
-        let (e, c) = (w.players[0].eye(), w.players[1].body.p);
-        let dy = c[1] + 1.0 - e[1];
-        w.players[0].pitch = trig::pitch(dy.atan2(gap));
-        (w, a, b)
-    }
-
-    fn give(w: &mut World, k: usize, slot: usize, spell: u8) {
-        w.players[k].slots[slot] = Some(Slot { spell, rank: 1 });
-        w.players[k].cds[slot] = 0;
-    }
-
-    fn fly(w: &mut World, ticks: u32, ev: &mut Vec<Event>) {
-        for _ in 0..ticks {
-            w.tick += 1;
-            let mut more = Vec::new();
-            for b in std::mem::take(&mut w.bolts) {
-                let e = ahead(b.p, b.v, DT);
-                match through(b.p, e, w.players[1].body.p, HEIGHT) {
-                    Some(_) => impact(w, &b, e, w.players[1].id, &mut more),
-                    None if b.life > 1 => w.bolts.push(Bolt {
-                        p: e,
-                        life: b.life - 1,
-                        ..b
-                    }),
-                    None => impact(w, &b, e, 0, &mut more),
-                }
-            }
-            tick(w, &mut more);
-            ev.append(&mut more);
-        }
-    }
-
-    #[test]
-    fn a_ward_takes_the_hurt_first_breaks_and_mend_heals() {
-        let (mut w, a, b) = duel(4.0);
-        let mut ev = Vec::new();
-        give(&mut w, 1, 2, spell::WARD);
-        cast(&mut w, 1, 2, &mut ev);
-        assert!(w.find(b).unwrap().shield >= 40);
-        w.hurt(a, b, 20, WAND, &mut ev);
-        assert_eq!(w.find(b).unwrap().hp, HEALTH, "the ward took it");
-        ev.clear();
-        w.hurt(a, b, 40, WAND, &mut ev);
-        let hp = w.find(b).unwrap().hp;
-        assert!(hp < HEALTH);
-        assert!(
-            ev.iter().any(|e| matches!(
-                e,
-                Event::Cast {
-                    spell: spell::WARD,
-                    stage: 2,
-                    ..
-                }
-            )),
-            "and it broke"
-        );
-        give(&mut w, 1, 3, spell::MEND);
-        cast(&mut w, 1, 3, &mut ev);
-        fly(&mut w, MEND_TICKS, &mut ev);
-        assert!(w.find(b).unwrap().hp > hp, "mended");
-    }
-
-    #[test]
-    fn the_lance_strikes_at_once_and_far() {
-        let (mut w, _, b) = duel(30.0);
-        let mut ev = Vec::new();
-        give(&mut w, 0, 0, spell::LANCE);
-        cast(&mut w, 0, 0, &mut ev);
-        assert!(w.find(b).unwrap().hp < HEALTH, "struck, no flight");
-        assert!(ev.iter().any(|e| matches!(e, Event::Beam { .. })));
-    }
-
-    #[test]
-    fn frost_is_deadly_close_and_chills() {
-        let mut dealt = Vec::new();
-        for gap in [3.0, 18.0] {
-            let (mut w, _, b) = duel(gap);
-            let mut ev = Vec::new();
-            give(&mut w, 0, 0, spell::FROST);
-            cast(&mut w, 0, 0, &mut ev);
-            assert_eq!(w.bolts.len(), FROST_SHARDS);
-            fly(&mut w, FROST_LIFE + 1, &mut ev);
-            let q = w.find(b).unwrap();
-            dealt.push(HEALTH - q.hp);
-            if gap < 5.0 {
-                assert!(q.body.chill > 0, "chilled");
-            }
-        }
-        assert!(dealt[0] >= 30, "close, most shards: {dealt:?}");
-        assert!(dealt[0] > dealt[1] * 2, "far, few: {dealt:?}");
-    }
-
-    #[test]
-    fn fireball_bursts_and_lightning_strikes_late() {
-        let (mut w, _, b) = duel(12.0);
-        let mut ev = Vec::new();
-        give(&mut w, 0, 0, spell::FIREBALL);
-        cast(&mut w, 0, 0, &mut ev);
-        fly(&mut w, 20, &mut ev);
-        let hp = w.find(b).unwrap().hp;
-        assert!(hp < HEALTH - 20, "burst: {hp}");
-        give(&mut w, 0, 1, spell::LIGHTNING);
-        cast(&mut w, 0, 1, &mut ev);
-        assert_eq!(w.find(b).unwrap().hp, hp, "not yet");
-        fly(&mut w, LIGHTNING_DELAY + 1, &mut ev);
-        assert!(w.find(b).unwrap().hp < hp - 20, "struck");
-    }
-
-    #[test]
-    fn gust_throws_back_and_blows_bolts_away_and_blink_moves_you() {
-        let (mut w, _, b) = duel(4.0);
-        let mut ev = Vec::new();
-        give(&mut w, 1, 0, spell::FIREBALL);
-        w.players[1].yaw = 32768;
-        cast(&mut w, 1, 0, &mut ev);
-        assert_eq!(w.bolts.len(), 1);
-        give(&mut w, 0, 2, spell::GUST);
-        cast(&mut w, 0, 2, &mut ev);
-        assert!(w.bolts.is_empty(), "blown away");
-        let v = w.find(b).unwrap().body.v;
-        assert!(v[0] > 5.0 && v[1] > 0.0, "thrown away and up: {v:?}");
-        let before = w.players[0].body.p;
-        w.players[0].body.chill = 30;
-        give(&mut w, 0, 3, spell::BLINK);
-        cast(&mut w, 0, 3, &mut ev);
-        let after = w.players[0].body.p;
-        assert!(after != before, "blinked");
-        assert_eq!(w.players[0].body.chill, 0, "and shook off the chill");
-        assert!(w.players[0].cds[3] > 0, "and now it cools down");
-        cast(&mut w, 0, 3, &mut ev);
-        assert_eq!(w.players[0].body.p, after, "not twice");
-    }
-
-    #[test]
-    fn the_lance_strikes_where_your_page_saw_them() {
-        let (mut w, _, b) = duel(30.0);
-        give(&mut w, 0, 0, spell::LANCE);
-        w.step();
-        w.step();
-        let seen = w.tick;
-        // Then they step out of the line.
-        let k = w.players.iter().position(|p| p.id == b).unwrap();
-        w.players[k].body.p[2] += 3.0;
-        w.step();
-        let hp = w.players[k].hp;
-        let mut ev = Vec::new();
-        cast(&mut w, 0, 0, &mut ev);
-        assert_eq!(w.players[k].hp, hp, "missed, where they are now");
-        // As the caster's page saw them a tick ago: struck.
-        w.players[0].cds[0] = 0;
-        w.players[0].behind = w.tick - seen;
-        cast(&mut w, 0, 0, &mut ev);
-        assert!(w.players[k].hp < hp, "struck where it saw them");
-        // A page cannot ask for further back than REWIND.
-        let hp = w.players[k].hp;
-        for _ in 0..REWIND + 2 {
-            w.step();
-        }
-        w.players[0].cds[0] = 0;
-        w.players[0].behind = w.tick - seen;
-        cast(&mut w, 0, 0, &mut ev);
-        assert_eq!(w.players[k].hp, hp, "too far back: as now");
-    }
-
-    #[test]
-    fn a_tether_catches_where_you_look() {
-        let (mut w, _, _) = duel(30.0);
-        let mut ev = Vec::new();
-        give(&mut w, 0, 2, spell::TETHER);
-        // Looking down at the ground ahead: it catches there.
-        w.players[0].pitch = -6000;
-        cast(&mut w, 0, 2, &mut ev);
-        let b = w.players[0].body;
-        assert_eq!(b.tether, TETHER_TICKS);
-        let ahead = b.anchor[0] - b.p[0];
-        assert!(ahead > 1.0 && ahead < 40.0, "{b:?}");
-        assert!(ev.iter().any(|e| matches!(
-            e,
-            Event::Cast {
-                spell: spell::TETHER,
-                stage: 1,
-                ..
-            }
-        )));
-    }
-}
+mod tests;

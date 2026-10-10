@@ -163,8 +163,11 @@ pub const MIST_ODDS: u64 = 18;
 pub const DROP_HEIGHT: f32 = 70.0;
 pub const GLIDE_FALL: f32 = 5.0;
 pub const GLIDE_SPEED: f32 = 14.0;
-/// Seconds the winner is shown before the next lobby.
-pub const OVER_SECS: u32 = 9;
+/// Seconds the winner is shown before the next lobby; and, once every
+/// person in a match is out, seconds before a new one gathers for them
+/// (the bots' fight does not go on without them).
+pub const OVER_SECS: u32 = 6;
+pub const OUT_LINGER_SECS: u32 = 5;
 /// A page's inputs, one a tick: at most this many wait their turn (a
 /// flood is cut short); this many are kept back against the network's
 /// jitter (more, and it catches up); steps are banked a tick at a time
@@ -189,12 +192,17 @@ pub const STORM: [(u32, u32, f32, i32); 5] = [
 /// How far a phase's circle may drift from the last one's centre, as a
 /// share of the room it has.
 pub const STORM_DRIFT: f32 = 0.7;
+/// Damage a second outside once it has closed to nothing.
+pub const STORM_END_DPS: i32 = 30;
 
 // Health and the wand.
 pub const HEALTH: i32 = 100;
 /// Seconds without being hurt before health returns, and how fast.
 pub const REGEN_AFTER: u32 = 6;
 pub const REGEN: i32 = 3;
+/// Knocked out by the storm, or gone from the match, within this many
+/// seconds of a wizard's hurt: the knockout is theirs.
+pub const KILL_CREDIT_SECS: u32 = 6;
 pub const BOLT_SPEED: f32 = 80.0;
 /// Ticks a bolt flies (a second: 80 m).
 pub const BOLT_LIFE: u32 = 30;
@@ -248,6 +256,10 @@ pub const XP_DAMAGE: i32 = 3;
 // spellbook puts what you know in your four slots.
 pub const CACHES: usize = 28;
 pub const CUBES_A_CACHE: usize = 2;
+/// Caches lie at least this far apart (m), and this far from the ruin
+/// they are by.
+pub const CACHE_APART: f32 = 10.0;
+pub const CACHE_RUIN: f32 = 2.5;
 pub const LOOSE_CUBES: usize = 36;
 /// Ticks a spell put in a slot waits before it can be cast.
 pub const EQUIP_COOLDOWN: u32 = 2 * TICK_HZ;
@@ -389,6 +401,10 @@ pub const SPELLS: [Spell; 9] = [
 pub const FIREBALL_SPEED: f32 = 48.0;
 pub const FIREBALL_LIFE: u32 = 45;
 pub const FIREBALL_RADIUS: f32 = 3.5;
+/// A burst's damage at its edge (a share of the whole); a Fireball's
+/// burst this share wider a rank above the first.
+pub const BURST_EDGE: f32 = 0.5;
+pub const FIREBALL_RANK_RADIUS: f32 = 0.1;
 pub const LANCE_RANGE: f32 = 80.0;
 /// The Lance strikes others where its caster's page drew them, but never
 /// from further back than this (ticks; a third of a second).
@@ -406,13 +422,23 @@ pub const LIGHTNING_DELAY: u32 = 24;
 pub const LIGHTNING_RADIUS: f32 = 4.0;
 pub const WARD_TICKS: u32 = 120;
 pub const MEND_TICKS: u32 = 60;
+/// Blink: it looks ahead in steps this long (m), stops short of a rise
+/// higher than this (m) and this near anyone (m), and goes nowhere (and
+/// is not spent) if it would not go this far.
+pub const BLINK_STEP: f32 = 0.5;
+pub const BLINK_CLIMB: f32 = 3.0;
+pub const BLINK_CROWD: f32 = RADIUS * 2.2;
+pub const BLINK_MIN: f32 = 1.0;
+/// Gust: how far it reaches about you, how far above or below (m).
 pub const GUST_RADIUS: f32 = 7.0;
+pub const GUST_BAND: f32 = 3.0;
 pub const GUST_LIFT: f32 = 7.0;
 pub const GUST_DAMAGE: i32 = 5;
-/// The Tether: how long it can pull (ticks), how fast (m/s) and how
-/// quickly the pull takes hold (a share a second); how near counts as
-/// there (m), the hop up off it (m/s), and how much gravity still pulls
-/// while it holds you.
+/// The Tether: how long it can pull at the first rank's reach (ticks;
+/// longer as it reaches further), how fast (m/s) and how quickly the
+/// pull takes hold (a share a second); how near counts as there (m), the
+/// hop up off it (m/s), and how much gravity still pulls while it holds
+/// you.
 pub const TETHER_TICKS: u8 = 60;
 pub const TETHER_SPEED: f32 = 24.0;
 pub const TETHER_GRIP: f32 = 7.0;

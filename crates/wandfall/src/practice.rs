@@ -149,6 +149,7 @@ pub fn step(w: &mut World, ev: &mut Vec<Event>) {
         }
         if !p.bot && no_cd {
             p.cds = [0; 4];
+            p.spell_cds = [0; SPELLS.len()];
             p.cool = 0;
         }
     }
@@ -187,6 +188,7 @@ pub fn equip(w: &mut World, id: u16, slot: usize, spell: u8, rank: u8) -> bool {
     let ok = loot::equip(p, slot, spell);
     if ok {
         p.cds[slot] = 0;
+        p.spell_cds[i] = 0;
     }
     ok
 }

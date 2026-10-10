@@ -2,22 +2,28 @@
 //! lobby (anyone here warms up, unhurt) → the fight (everyone drops from
 //! the sky, bots fill the island to MATCH_SIZE, the storm closes) → over
 //! (the last one standing is shown) → lobby again. Whoever comes during
-//! a fight watches until the next. Spells are in `spells`, spell cubes
-//! and levels in `loot`.
+//! a fight watches until the next. Moving (inputs, the wand, bolts in
+//! flight) is in `moving`, spells in `spells`, spell cubes and levels in
+//! `loot`.
 
 use std::collections::VecDeque;
 
 use engine::rng::Rng;
 
-use crate::bots::{self, Mind};
+use crate::bots::Mind;
 use crate::laws::*;
 use crate::loot::{self, Scroll};
 use crate::map::Map;
-use crate::motion::{self, cast, keys, Body, Input};
+use crate::motion::{Body, Input};
 use crate::practice::{self, Practice};
 use crate::spells::{self, Zone};
 use crate::storm::{self, Storm};
-use crate::trig;
+
+mod moving;
+#[cfg(test)]
+mod tests;
+
+pub use moving::through;
 
 /// A spell in a slot, and its rank (1 to MAX_RANK).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,16 +74,28 @@ pub struct Player {
     /// Steps it may take now: one more each tick, banked up to
     /// `INPUT_BANK` (never more steps than ticks, give or take the bank).
     pub credit: u32,
+    /// When it was last hurt (by anything); by whom it last was, and
+    /// when (the storm or a quit then knocks it out to their credit).
     pub hurt_at: u32,
+    pub hurt_by: u16,
+    pub hurt_by_at: u32,
+    /// Ticks spent outside the storm since it last burned.
+    pub burning: u32,
     pub mind: Mind,
-    /// 1 to MAX_LEVEL, and XP toward the next.
+    /// 1 to MAX_LEVEL, and XP toward the next; damage dealt not yet worth
+    /// an XP.
     pub level: u8,
     pub xp: u32,
+    pub dealt: i32,
     /// The spellbook: each spell's rank, 0 for one not known.
     pub book: [u8; SPELLS.len()],
-    /// Two offensive slots, then two utility; ticks until each is ready.
+    /// Two offensive slots, then two utility; ticks until each is ready
+    /// (its spell's cooldown, or the wait of one just put in).
     pub slots: [Option<Slot>; 4],
     pub cds: [u32; 4],
+    /// Ticks until each spell is ready, slotted or not: a spell keeps its
+    /// cooldown from slot to slot.
+    pub spell_cds: [u32; SPELLS.len()],
     /// A ward's shield, until when; healing still to come, until when.
     pub shield: i32,
     pub shield_until: u32,
@@ -265,11 +283,16 @@ impl World {
             idle: 0,
             credit: 0,
             hurt_at: 0,
+            hurt_by: 0,
+            hurt_by_at: 0,
+            burning: 0,
             mind: Mind::default(),
             level: 1,
             xp: 0,
+            dealt: 0,
             slots: [None; 4],
             cds: [0; 4],
+            spell_cds: [0; SPELLS.len()],
             shield: 0,
             shield_until: 0,
             mend: 0,
@@ -301,15 +324,35 @@ impl World {
         id
     }
 
-    /// A person leaves: out of the match if they were in it.
+    /// A person leaves: out of the match if they were in it, to the
+    /// credit of whoever hurt them lately (no one: gone, said nothing of).
     pub fn leave(&mut self, id: u16, ev: &mut Vec<Event>) {
         if let Some(p) = self.players.iter().find(|p| p.id == id) {
             if self.phase == Phase::Fight && p.entrant && p.alive {
-                self.out(id, 0, ev);
+                let by = self.credit(id);
+                let mut said = Vec::new();
+                self.out(id, by, &mut said);
+                if by != 0 {
+                    ev.append(&mut said);
+                }
             }
         }
         self.players.retain(|p| p.id != id);
         self.roster_dirty = true;
+    }
+
+    /// Whoever hurt `id` last, if lately (0: no one): the knockout is
+    /// theirs when the storm finishes it, or it leaves.
+    fn credit(&self, id: u16) -> u16 {
+        let Some(p) = self.find(id) else {
+            return 0;
+        };
+        let lately = self.tick.saturating_sub(p.hurt_by_at) < KILL_CREDIT_SECS * TICK_HZ;
+        if lately && p.hurt_by != id && self.find(p.hurt_by).is_some() {
+            p.hurt_by
+        } else {
+            0
+        }
     }
 
     /// The spellbook: put a spell `id` knows in one of its slots.
@@ -354,8 +397,11 @@ impl World {
 
     fn begin(&mut self, ev: &mut Vec<Event>) {
         self.players.retain(|p| !p.bot);
-        let humans = self.players.len();
-        for k in 0..MATCH_SIZE.saturating_sub(humans) {
+        // The island holds MATCH_SIZE: the first here go; the rest watch
+        // this one, and go first in the next.
+        let humans = self.players.len().min(MATCH_SIZE);
+        let mut watching: Vec<Player> = self.players.drain(humans..).collect();
+        for k in 0..MATCH_SIZE - humans {
             let name = BOT_NAMES[(k + self.matches as usize * 5) % BOT_NAMES.len()];
             let mut b = self.player(name, 0, true);
             b.mind = Mind::new(self.rng.next_u64());
@@ -381,12 +427,18 @@ impl World {
             let first = spell::OFFENSE[(self.rng.next_u64() % 4) as usize];
             loot::learn(p, first, 1);
         }
+        for p in &mut watching {
+            p.alive = false;
+            p.entrant = false;
+        }
+        self.players.splice(0..0, watching);
         self.storm = Storm::plan(&self.map, &mut self.rng);
         self.bolts.clear();
         self.zones.clear();
         loot::scatter(self);
         self.phase = Phase::Fight;
         self.began = self.tick;
+        self.until = 0;
         self.winner = 0;
         self.matches += 1;
         self.roster_dirty = true;
@@ -439,6 +491,10 @@ impl World {
             p.alive = false;
             p.place = place;
             p.hp = 0;
+            // The last two fell together: the last to fall won.
+            if place == 1 {
+                self.winner = who;
+            }
         }
         let killer = self.find_mut(by).map(|k| {
             k.kills += 1;
@@ -472,12 +528,15 @@ impl World {
             return;
         };
         // What was really taken (not past the last of it) earns XP.
-        let dealt = amount.min(p.hp.max(0) + p.shield);
+        let taken = amount.min(p.hp.max(0) + p.shield);
         let soaked = amount.min(p.shield);
         let broke = soaked > 0 && soaked == p.shield;
         p.shield -= soaked;
         p.hp -= amount - soaked;
         p.hurt_at = tick;
+        if by != 0 && by != to {
+            (p.hurt_by, p.hurt_by_at) = (by, tick);
+        }
         let dead = p.hp <= 0;
         if broke {
             ev.push(Event::Cast {
@@ -494,9 +553,17 @@ impl World {
                 amount: amount as u16,
                 what,
             });
-            loot::gain(self, by, (dealt / XP_DAMAGE) as u32, ev);
+            // An XP for every XP_DAMAGE dealt, the rest kept for the next.
+            let xp = self.find_mut(by).map_or(0, |k| {
+                k.dealt += taken;
+                let xp = k.dealt / XP_DAMAGE;
+                k.dealt %= XP_DAMAGE;
+                xp
+            });
+            loot::gain(self, by, xp as u32, ev);
         }
         if dead {
+            let by = if by == 0 { self.credit(to) } else { by };
             self.out(to, by, ev);
         }
     }
@@ -514,24 +581,38 @@ impl World {
             // is always one to watch (the hub's card shows it).
             Phase::Lobby if self.until != 0 && self.tick >= self.until => self.begin(&mut ev),
             Phase::Fight => {
-                // Someone arrived to a match of bots alone: not made to
-                // wait it out, a new one gathers for them.
-                let waiting = self.players.iter().any(|p| !p.bot && !p.entrant);
-                let in_it = self.players.iter().any(|p| !p.bot && p.entrant);
-                if waiting && !in_it {
-                    self.lobby(&mut ev);
-                } else if self.alive() <= 1 {
-                    self.winner = self
-                        .players
-                        .iter()
-                        .find(|p| p.entrant && p.alive)
-                        .map_or(0, |p| p.id);
+                let people = || self.players.iter().filter(|p| !p.bot);
+                let fighting = people().any(|p| p.entrant && p.alive);
+                let fallen = people().any(|p| p.entrant && !p.alive);
+                let late = people().any(|p| !p.entrant);
+                if self.alive() <= 1 {
+                    // The last one standing; or, the last two fallen
+                    // together, the last to fall (if still here).
+                    let standing = self.players.iter().find(|p| p.entrant && p.alive);
+                    self.winner = match standing {
+                        Some(p) => p.id,
+                        None if self.find(self.winner).is_some() => self.winner,
+                        None => 0,
+                    };
                     if let Some(w) = self.players.iter_mut().find(|p| p.id == self.winner) {
                         w.place = 1;
                     }
                     ev.push(Event::Win { who: self.winner });
                     self.phase = Phase::Over;
                     self.until = self.tick + OVER_SECS * TICK_HZ;
+                } else if !fighting && late && !fallen {
+                    // Someone arrived to a match of bots alone: not made
+                    // to wait it out, a new one gathers for them.
+                    self.lobby(&mut ev);
+                } else if !fighting && fallen {
+                    // Everyone here is out: a moment to see how they
+                    // fell, then a new match gathers for them (the bots'
+                    // does not go on without them).
+                    if self.until == 0 {
+                        self.until = self.tick + OUT_LINGER_SECS * TICK_HZ;
+                    } else if self.tick >= self.until {
+                        self.lobby(&mut ev);
+                    }
                 }
             }
             Phase::Over if self.tick >= self.until => self.lobby(&mut ev),
@@ -539,13 +620,13 @@ impl World {
         }
         self.minds();
         let casts = self.move_all();
-        for (k, slot) in casts {
-            spells::cast(self, k, slot, &mut ev);
+        for (k, slot, aim) in casts {
+            spells::cast(self, k, slot, aim, &mut ev);
         }
         self.fly(&mut ev);
         spells::tick(self, &mut ev);
         loot::touch(self, &mut ev);
-        self.weather(&mut ev);
+        self.storm_and_regen(&mut ev);
         // Where everyone stands now, for the pages that will see it.
         let now: Vec<_> = self
             .players
@@ -560,179 +641,22 @@ impl World {
         ev
     }
 
-    fn minds(&mut self) {
-        let storm = self.storm_now();
-        let tick = self.tick;
-        for k in 0..self.players.len() {
-            if !self.players[k].bot || !self.players[k].alive {
-                continue;
-            }
-            let (i, mind) = bots::think(self, k, &storm, tick);
-            let p = &mut self.players[k];
-            p.mind = mind;
-            p.queue.clear();
-            p.queue.push_back(i);
-        }
-    }
-
-    /// Everyone moves by their inputs; the wand fires. The spells asked
-    /// for: (who, slot).
-    fn move_all(&mut self) -> Vec<(usize, usize)> {
-        let mut shots = Vec::new();
-        let mut casts = Vec::new();
-        let tick = self.tick;
-        for (k, p) in self.players.iter_mut().enumerate() {
-            p.cool = p.cool.saturating_sub(1);
-            if !p.alive {
-                p.queue.clear();
-                continue;
-            }
-            // One input a tick, and those held back past the jitter's
-            // allowance caught up on, as far as the bank goes.
-            p.credit = (p.credit + 1).min(INPUT_BANK);
-            let steps = (1 + p.queue.len().saturating_sub(INPUT_JITTER)).min(p.credit as usize);
-            for _ in 0..steps {
-                let i = match p.queue.pop_front() {
-                    Some(i) => {
-                        p.idle = 0;
-                        i
-                    }
-                    None => {
-                        p.idle += 1;
-                        if p.idle < INPUT_IDLE {
-                            break;
-                        }
-                        Input {
-                            keys: 0,
-                            cast: 0,
-                            ..p.last
-                        }
-                    }
-                };
-                p.credit -= 1;
-                p.yaw = i.yaw;
-                p.pitch = i.pitch.clamp(-16000, 16000);
-                motion::step(&mut p.body, &i, &self.map);
-                p.last = i;
-                if i.cast != 0 {
-                    // What its page saw as it cast (a bot sees now).
-                    let back = (tick as u16).wrapping_sub(i.view) as u32;
-                    p.behind = if p.bot { 0 } else { back.min(REWIND) };
-                }
-                for (slot, bit) in cast::SLOT.iter().enumerate() {
-                    if i.cast & bit != 0 && !casts.contains(&(k, slot)) {
-                        casts.push((k, slot));
-                    }
-                }
-                if i.keys & keys::FIRE != 0 && p.cool == 0 && !p.body.glide {
-                    p.cool = BOLT_COOLDOWN;
-                    let d = trig::look(p.yaw, p.pitch);
-                    let e = p.eye();
-                    shots.push((
-                        p.id,
-                        loot::level_scale(p.level, BOLT_DAMAGE),
-                        [e[0] + d[0] * 0.5, e[1] + d[1] * 0.5, e[2] + d[2] * 0.5],
-                        [d[0] * BOLT_SPEED, d[1] * BOLT_SPEED, d[2] * BOLT_SPEED],
-                    ));
-                }
-            }
-            // A page running ahead of the clock: what it sent beyond the
-            // jitter's allowance is dropped (its prediction corrects), its
-            // casts kept for the next.
-            while p.queue.len() > INPUT_JITTER {
-                let cast = p.queue.pop_front().map_or(0, |i| i.cast);
-                if let Some(next) = p.queue.front_mut() {
-                    next.cast |= cast;
-                }
-            }
-        }
-        for (by, power, p, v) in shots {
-            self.bolt(Bolt {
-                id: 0,
-                by,
-                kind: WAND,
-                rank: 1,
-                p,
-                v,
-                life: BOLT_LIFE,
-                power,
-            });
-        }
-        // Fallen off into the deep (should not happen): back on land.
-        for k in 0..self.players.len() {
-            if self.players[k].body.p[1] < SEA - 20.0 {
-                let b = self.standing();
-                self.players[k].body = b;
-            }
-        }
-        casts
-    }
-
-    /// Set a bolt flying.
-    pub(crate) fn bolt(&mut self, mut b: Bolt) {
-        b.id = self.next_bolt;
-        self.next_bolt = self.next_bolt.wrapping_add(1).max(1);
-        self.bolts.push(b);
-    }
-
-    fn fly(&mut self, ev: &mut Vec<Event>) {
-        let mut impacts = Vec::new();
-        let mut keep = Vec::with_capacity(self.bolts.len());
-        let fight = self.phase_fight();
-        for mut b in std::mem::take(&mut self.bolts) {
-            let a = b.p;
-            let e = [a[0] + b.v[0] * DT, a[1] + b.v[1] * DT, a[2] + b.v[2] * DT];
-            let mut first = self.map.strikes(a, e).map(|t| (t, 0u16));
-            for p in &self.players {
-                if p.id == b.by || !p.alive || p.entrant != fight {
-                    continue;
-                }
-                if let Some(t) = through(a, e, p.body.p, p.body.tall()) {
-                    if first.is_none_or(|f| t < f.0) {
-                        first = Some((t, p.id));
-                    }
-                }
-            }
-            b.life = b.life.saturating_sub(1);
-            match first {
-                Some((t, who)) => {
-                    let at = [
-                        a[0] + (e[0] - a[0]) * t,
-                        a[1] + (e[1] - a[1]) * t,
-                        a[2] + (e[2] - a[2]) * t,
-                    ];
-                    impacts.push((b, at, who));
-                }
-                None if b.life > 0 => {
-                    b.p = e;
-                    keep.push(b);
-                }
-                // A fireball bursts at the end of its flight too.
-                None if b.kind == spell::FIREBALL => impacts.push((b, e, 0)),
-                None => {}
-            }
-        }
-        self.bolts = keep;
-        for (b, at, who) in impacts {
-            spells::impact(self, &b, at, who, ev);
-        }
-    }
-
-    fn phase_fight(&self) -> bool {
-        self.phase == Phase::Fight
-    }
-
-    fn weather(&mut self, ev: &mut Vec<Event>) {
-        if !self.tick.is_multiple_of(TICK_HZ) {
-            return;
-        }
+    /// The storm burns whoever is outside it, for each second spent
+    /// there (counted a tick at a time, so a step back in on the beat
+    /// does not dodge it); the long unhurt heal, a second at a time.
+    fn storm_and_regen(&mut self, ev: &mut Vec<Event>) {
         let storm = self.storm_now();
         let fight = self.phase == Phase::Fight;
+        let (tick, second) = (self.tick, self.tick.is_multiple_of(TICK_HZ));
         let mut burned = Vec::new();
         for p in self.players.iter_mut().filter(|p| p.alive) {
             if fight && p.entrant && storm.outside(p.body.p[0], p.body.p[2]) {
-                burned.push(p.id);
-            } else if self.tick - p.hurt_at >= REGEN_AFTER * TICK_HZ {
+                p.burning += 1;
+                if p.burning >= TICK_HZ {
+                    p.burning = 0;
+                    burned.push(p.id);
+                }
+            } else if second && tick - p.hurt_at >= REGEN_AFTER * TICK_HZ {
                 p.hp = (p.hp + REGEN).min(p.max_hp());
             }
         }
@@ -746,9 +670,13 @@ impl World {
 fn fresh(p: &mut Player) {
     p.level = 1;
     p.xp = 0;
+    p.dealt = 0;
     p.book = [0; SPELLS.len()];
     p.slots = [None; 4];
     p.cds = [0; 4];
+    p.spell_cds = [0; SPELLS.len()];
+    p.hurt_by = 0;
+    p.burning = 0;
     p.shield = 0;
     p.mend = 0;
     p.hp = p.max_hp();
@@ -770,30 +698,4 @@ pub(crate) fn warmup(p: &mut Player, rng: &mut Rng) {
     for s in [a, b, c, d] {
         p.book[s as usize] = 1;
     }
-}
-
-/// Where along a bolt's step from `a` to `e` (0..1) it passes through a
-/// wizard standing at `feet`, `tall` metres tall, if it does.
-pub fn through(a: [f32; 3], e: [f32; 3], feet: [f32; 3], tall: f32) -> Option<f32> {
-    // The wizard as a segment from shin to crown, `RADIUS` thick.
-    let (lo, hi) = (feet[1] + RADIUS * 0.5, feet[1] + tall - RADIUS * 0.5);
-    let d = [e[0] - a[0], e[1] - a[1], e[2] - a[2]];
-    let reach = RADIUS + BOLT_RADIUS;
-    // Closest approach on the ground's plane, then the height there.
-    let (fx, fz) = (a[0] - feet[0], a[2] - feet[2]);
-    let aa = d[0] * d[0] + d[2] * d[2];
-    let t = if aa < 1e-9 {
-        0.0
-    } else {
-        (-(fx * d[0] + fz * d[2]) / aa).clamp(0.0, 1.0)
-    };
-    let (px, pz) = (fx + d[0] * t, fz + d[2] * t);
-    if px * px + pz * pz > reach * reach {
-        return None;
-    }
-    let y = a[1] + d[1] * t;
-    if y < lo - reach || y > hi + reach {
-        return None;
-    }
-    Some(t)
 }

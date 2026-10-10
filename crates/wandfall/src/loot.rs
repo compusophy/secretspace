@@ -23,15 +23,15 @@ pub fn max_hp(level: u8) -> i32 {
     HEALTH + HEALTH_PER_LEVEL * (level.max(1) as i32 - 1)
 }
 
-/// Damage as a level deals it.
+/// Damage as a level deals it (to the nearest whole).
 pub fn level_scale(level: u8, v: i32) -> i32 {
-    v * (100 + POWER_PER_LEVEL * (level.max(1) as i32 - 1)) / 100
+    (v * (100 + POWER_PER_LEVEL * (level.max(1) as i32 - 1)) + 50) / 100
 }
 
-/// A spell's power at a rank.
+/// A spell's power at a rank (to the nearest whole).
 pub fn power(spell: u8, rank: u8) -> i32 {
     let s = &SPELLS[spell as usize % SPELLS.len()];
-    s.power * (100 + RANK_POWER * (rank.max(1) as i32 - 1)) / 100
+    (s.power * (100 + RANK_POWER * (rank.max(1) as i32 - 1)) + 50) / 100
 }
 
 /// A spell's cooldown at a rank (ticks).
@@ -121,7 +121,7 @@ pub fn scatter(w: &mut World) {
         } else if !ruins.is_empty() && cached.len().is_multiple_of(3) {
             let r = ruins[(w.rng.next_u64() % ruins.len() as u64) as usize];
             let a = unit(w) * std::f32::consts::TAU;
-            [r[0] + a.cos() * 2.5, r[2] + a.sin() * 2.5]
+            [r[0] + a.cos() * CACHE_RUIN, r[2] + a.sin() * CACHE_RUIN]
         } else {
             w.map.spot(&mut w.rng)
         };
@@ -132,7 +132,7 @@ pub fn scatter(w: &mut World) {
         }
         if cached
             .iter()
-            .any(|c| (c[0] - x).powi(2) + (c[1] - z).powi(2) < 100.0)
+            .any(|c| (c[0] - x).powi(2) + (c[1] - z).powi(2) < CACHE_APART * CACHE_APART)
         {
             continue;
         }
@@ -199,19 +199,21 @@ pub fn learn(p: &mut Player, spell: u8, rank: u8) {
     let [a, b] = slots_of(spell);
     if let Some(k) = [a, b].into_iter().find(|&k| p.slots[k].is_none()) {
         p.slots[k] = Some(Slot { spell, rank: now });
-        p.cds[k] = 0;
+        p.cds[k] = p.spell_cds[i];
     } else if p.bot {
         let rank_of = |k: usize| p.slots[k].map_or(0, |s| s.rank);
         let k = if rank_of(a) <= rank_of(b) { a } else { b };
         if rank_of(k) < now {
             p.slots[k] = Some(Slot { spell, rank: now });
+            p.cds[k] = p.spell_cds[i];
         }
     }
 }
 
 /// The spellbook: put a spell you know in a slot of its kind (if it is
 /// in the other slot, the two trade places). A spell put in waits a
-/// moment before it can be cast.
+/// moment before it can be cast, or out its own cooldown if that is
+/// longer (it keeps it from slot to slot).
 pub fn equip(p: &mut Player, slot: usize, spell: u8) -> bool {
     let i = spell as usize;
     if slot > 3 || i >= SPELLS.len() || p.book[i] == 0 || !slots_of(spell).contains(&slot) {
@@ -229,7 +231,7 @@ pub fn equip(p: &mut Player, slot: usize, spell: u8) -> bool {
         p.cds.swap(k, slot);
     } else {
         p.slots[slot] = held;
-        p.cds[slot] = p.cds[slot].max(EQUIP_COOLDOWN);
+        p.cds[slot] = p.spell_cds[i].max(EQUIP_COOLDOWN);
     }
     true
 }
@@ -299,6 +301,30 @@ mod tests {
     }
 
     #[test]
+    fn a_spell_keeps_its_cooldown_from_slot_to_slot() {
+        let mut w = World::new(3);
+        let id = w.join("t", 0);
+        let k = w.players.iter().position(|p| p.id == id).unwrap();
+        let p = &mut w.players[k];
+        p.book = [0; SPELLS.len()];
+        p.slots = [None; 4];
+        learn(p, spell::MEND, 1);
+        learn(p, spell::BLINK, 1);
+        learn(p, spell::WARD, 1);
+        assert_eq!(p.slots[2].map(|s| s.spell), Some(spell::MEND));
+        let aim = crate::spells::Aim::of(p);
+        crate::spells::cast(&mut w, k, 2, aim, &mut Vec::new());
+        let p = &mut w.players[k];
+        let mend = cooldown(spell::MEND, 1);
+        assert_eq!(p.cds[2], mend);
+        // Ward into Mend's slot, then Mend into the other.
+        assert!(equip(p, 2, spell::WARD));
+        assert_eq!(p.cds[2], EQUIP_COOLDOWN, "Ward is not charged Mend's");
+        assert!(equip(p, 3, spell::MEND));
+        assert_eq!(p.cds[3], mend, "and Mend still cools down");
+    }
+
+    #[test]
     fn the_fallen_drop_every_spell_they_knew() {
         let mut w = World::new(3);
         let id = w.join("t", 0);
@@ -322,5 +348,8 @@ mod tests {
         assert!(power(spell::LANCE, MAX_RANK) > power(spell::LANCE, 1));
         assert!(cooldown(spell::LANCE, MAX_RANK) < cooldown(spell::LANCE, 1));
         assert_eq!(power(spell::WARD, 3), 60, "a rank is a quarter more");
+        // Small numbers grow too: a Frost shard a level, not every fourth.
+        let shard = power(spell::FROST, 1);
+        assert!(level_scale(3, shard) > level_scale(1, shard));
     }
 }
