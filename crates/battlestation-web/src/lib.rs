@@ -12,7 +12,9 @@
 //! keeps the page out of full screen, `?q=low|medium|high` the quality,
 //! `?eye=x,y,z,yaw,pitch` holds the camera (metres, degrees: yaw 0 looks
 //! north), `?capture=1` draws off screen and shows it as an image (what
-//! a headless browser can photograph).
+//! a headless browser can photograph), `?os=0` keeps compusophyOS off
+//! the monitor (its own terminal instead), `?lock=0` never takes the
+//! mouse (a headless browser moves a locked mouse wrongly).
 
 pub mod sound;
 
@@ -43,6 +45,10 @@ pub struct Hooks {
     pub windowed: bool,
     /// A held camera: where, and its yaw and pitch (degrees).
     pub eye: Option<[f32; 5]>,
+    /// compusophyOS on the monitor once you sit (else its own terminal).
+    pub os: bool,
+    /// Take the mouse when you sit (else it moves the arrow unlocked).
+    pub lock: bool,
 }
 
 impl Hooks {
@@ -60,6 +66,8 @@ impl Hooks {
             shot: on("shot", false),
             perf: on("perf", false),
             windowed: on("windowed", false),
+            os: on("os", true),
+            lock: on("lock", true),
             eye: param(query, "eye").and_then(|v| {
                 let n: Vec<f32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
                 <[f32; 5]>::try_from(n).ok()
@@ -84,6 +92,8 @@ mod tests {
         let d = Hooks::read("");
         assert!(!d.sit && d.demo && d.lean.is_none() && !d.windowed);
         assert!(!Hooks::read("?demo=0").demo);
+        assert!(d.os && !Hooks::read("?os=0").os);
+        assert!(d.lock && !Hooks::read("?lock=0").lock);
         assert_eq!(
             Hooks::read("?eye=0,1,0.2,10,-30").eye,
             Some([0.0, 1.0, 0.2, 10.0, -30.0])

@@ -152,7 +152,7 @@ impl DeskWatch {
                 (&mut enc, &view, size),
                 cam,
                 (&self.hands, &self.heat),
-                &self.screen,
+                (&self.screen, None),
                 t,
             );
             th.off.end(enc);

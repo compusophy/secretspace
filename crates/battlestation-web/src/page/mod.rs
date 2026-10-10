@@ -16,6 +16,7 @@ use wasm_bindgen::prelude::*;
 use crate::{sound, Hooks};
 
 mod input;
+mod os;
 mod out;
 mod view;
 
@@ -29,7 +30,8 @@ struct KeyEv {
     code: String,
     key: String,
     down: bool,
-    ctrl: bool,
+    /// The modifiers held (as `os::mods` counts them).
+    mods: u8,
     repeat: bool,
 }
 
@@ -38,6 +40,8 @@ struct KeyEv {
 struct Heard {
     keys: Vec<KeyEv>,
     wheel: f32,
+    /// Shift was held on the wheel (it leans then, whatever is under it).
+    wheel_shift: bool,
     /// The page lost the keyboard (another window): let every key go.
     blur: bool,
 }
@@ -99,6 +103,9 @@ impl Sounds {
 
 struct Page {
     out: Out,
+    /// compusophyOS, once mounted; why not, if it could not be.
+    os: Option<os::Os>,
+    os_said: String,
     r: Renderer,
     desk: Desk,
     hands: Hands,
@@ -166,6 +173,8 @@ impl Page {
         let now = kit::now();
         let lean = hooks.lean.unwrap_or(0.0);
         Page {
+            os: None,
+            os_said: String::new(),
             r,
             desk,
             hands: Hands::new(),
@@ -241,6 +250,14 @@ impl Page {
             }
         }
         if grab && !self.touch {
+            self.grab();
+        }
+    }
+
+    /// Take the mouse (and, unless `?windowed`, the screen and the keys);
+    /// with `?lock=0`, nothing (a test's mouse then moves the arrow).
+    fn grab(&self) {
+        if self.hooks.lock {
             kit::input::play(self.out.canvas(), !self.hooks.windowed);
         }
     }
@@ -253,6 +270,18 @@ impl Page {
             f.blur();
             f.place(None);
         }
+    }
+
+    /// Whether the monitor shows compusophyOS: once mounted and you have
+    /// sat down (before, the desk's own terminal types by itself).
+    fn on_os(&self) -> bool {
+        self.os.is_some() && self.demo.is_none()
+    }
+
+    /// Whether you sit at the desk while compusophyOS is still starting
+    /// (the monitor says so, rather than show its own terminal).
+    fn booting(&self) -> bool {
+        self.hooks.os && self.os.is_none() && self.os_said.is_empty() && self.demo.is_none()
     }
 
     fn items(&self) -> Vec<String> {
@@ -270,11 +299,16 @@ impl Page {
     fn open_menu(&mut self) {
         kit::input::unlock();
         self.meta.context = format!(
-            "seated: {}\nfps: {:.0}\ngpu: {}\nran: {}",
+            "seated: {}\nfps: {:.0}\ngpu: {}\nran: {}\nos: {}",
             self.seated,
             self.fps,
             self.out.caps().adapter,
-            self.term.ran()
+            self.term.ran(),
+            if self.os.is_some() {
+                "mounted"
+            } else {
+                &self.os_said
+            }
         );
         self.meta.show();
         self.menu_at = kit::now();
@@ -283,7 +317,7 @@ impl Page {
     fn resume(&mut self) {
         self.meta.hide();
         if self.seated && !self.touch {
-            kit::input::play(self.out.canvas(), !self.hooks.windowed);
+            self.grab();
         }
     }
 
@@ -313,6 +347,7 @@ fn say(text: &str) {
 pub fn start() {
     let query = kit::window().location().search().unwrap_or_default();
     let hooks = Hooks::read(&query);
+    kit::report::on_panic();
     wasm_bindgen_futures::spawn_local(async move {
         if !gpu::offered() {
             // (`?capture=1` needs it too.)
@@ -329,6 +364,20 @@ pub fn start() {
         };
         let page = Page::new(out, hooks, &query);
         PAGE.with(|p| *p.borrow_mut() = Some(page));
+        // The computer boots in the background, to its welcome.
+        if hooks.os {
+            wasm_bindgen_futures::spawn_local(async {
+                let os = os::mount().await;
+                PAGE.with(|p| {
+                    if let Some(p) = p.borrow_mut().as_mut() {
+                        match os {
+                            Ok(o) => p.os = Some(o),
+                            Err(e) => p.os_said = e,
+                        }
+                    }
+                })
+            });
+        }
         kit::frames(|now| {
             PAGE.with(|p| {
                 if let Some(p) = p.borrow_mut().as_mut() {

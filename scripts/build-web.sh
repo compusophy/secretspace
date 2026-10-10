@@ -21,5 +21,24 @@ page luciphon_web luciphon luciphon web/luciphon/index.html
 page showcase_web showcase showcase web/showcase/index.html
 page wandfall_web wandfall wandfall web/wandfall/index.html
 page battlestation_web battlestation battlestation web/battlestation/index.html
+# compusophyOS for Battlestation's monitor: the OS's built files mirrored
+# beside its page (it mounts as a cartridge, from files of this origin).
+# COMPUTEHUB: where from, a built dist/ or a site (default: computehub's).
+# The page imports it, so a build without it fails rather than ship.
+mirror_os() {
+  local from=${COMPUTEHUB:-https://computehub-sigma.vercel.app} to=dist/battlestation/os
+  mkdir -p "$to"
+  if [ -d "$from" ]; then cp "$from/files.txt" "$to/"; else curl -fsS --retry 4 --retry-all-errors "$from/files.txt" -o "$to/files.txt"; fi
+  local n=0
+  while read -r f; do
+    case "$f" in ""|index.html) continue ;; *..*|/*) echo "os: refusing $f"; exit 1 ;; esac
+    mkdir -p "$to/$(dirname "$f")"
+    if [ -d "$from" ]; then cp "$from/$f" "$to/$f"; else curl -fsS --retry 4 --retry-all-errors "$from/$f" -o "$to/$f"; fi
+    n=$((n + 1))
+  done < "$to/files.txt"
+  [ -s "$to/os.js" ] && [ -s "$to/os_bg.wasm" ] || { echo "os: no os.js or os_bg.wasm from $from"; exit 1; }
+  echo "dist/battlestation/os: compusophyOS, $n files from $from"
+}
+mirror_os
 echo "$build" > dist/version.txt
 echo "pages build $build"

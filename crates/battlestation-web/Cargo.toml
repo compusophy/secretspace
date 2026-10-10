@@ -22,5 +22,5 @@ pixels = { package = "secretspace-pixels", path = "../pixels" }
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["KeyboardEvent", "WheelEvent", "CssStyleDeclaration", "HtmlCanvasElement", "HtmlElement", "Window", "Document", "CanvasRenderingContext2d", "ImageData"] }
+web-sys = { version = "0.3", features = ["KeyboardEvent", "WheelEvent", "CssStyleDeclaration", "HtmlCanvasElement", "HtmlElement", "Window", "Document", "CanvasRenderingContext2d", "ImageData", "OffscreenCanvas"] }
 

@@ -53,7 +53,7 @@ crates/engine     wire rng room (the Room trait) hub (Stats) who (Hello, Seen,
                   Still, names) words snap (save files) fixed (Q16.16) sha1
                   synth (sounds from numbers)
 crates/pixels     Canvas (RGBA buffer, AA shapes, glow, blend), font (5x7),
-                  wrap, fit_scale; examples/sheet.rs draws a test sheet
+                  wrap, fit_scale; examples/sheet.rs (a test sheet)
 crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
                   ui text scale), gl (WebGL2 + a pixel layer), input (keys,
                   fingers, mouse, pointer lock), Link (reconnects, Hello
@@ -75,8 +75,8 @@ crates/wandfall   game #3's core: laws trig map places motion storm world bots
 crates/wandfall-look  its look (page + hub): look land basalt aura
                   rig/ fx/ state icon scene spectate camera sky
 crates/wandfall-web  its page: page/ bar hud menu sound ambience steps touch lessons
-crates/battlestation*  desk sim: laws keys hands demo term; -look (page,
-                  hub): gear scene body glass monitor light desk; -web: page/
+crates/battlestation*  desk sim: laws keys hands demo term; -look: gear scene
+                  body glass monitor light desk; -web: page/ (os.rs: compusophyOS)
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM) feedback
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -90,7 +90,7 @@ old pages; `?watch=1` only looks), `/ws/hub` the live Stats once a second,
 GET `?key=$FEEDBACK_KEY` reads them); with `--static dist` the pages (`/arena`
 redirects to `/wyrm/`, as `web/vercel.json` does). A page's first connection carries
 `?v=1` and counts a visit; visits persist in `$DATA_DIR/visits` (the image
-sets `/data`; a volume there keeps them across deploys), as are `souls`
+sets `/data`, a volume: kept across deploys), as are `souls`
 and `rooms/<id>/snap-*.bin`. A deploy is a Stillness: SIGTERM, each room
 `still()`s and saves, pages keep their picture and resume on reconnect.
 CI ships the server only when its build hash differs from live /health.
@@ -124,7 +124,8 @@ Deploys are automatic (`.github/workflows/deploy.yml`) on every push to
 main or a `claude/` branch: tests, then the server to Railway (`railway
 up` of `ship/`, secret RAILWAY_TOKEN, variable RAILWAY_SERVICE) and the
 pages to Vercel (secrets VERCEL_*), pointed at the server by the variable
-RELAY (`wss://<railway domain>/ws`). No RELAY, no page deploy.
+RELAY (`wss://<railway domain>/ws`). No RELAY, no page deploy. Pages
+send COOP+COEP (the OS).
 
 Browser checks: Playwright on the installed Chromium; each context a
 player; `hasTouch, isMobile, deviceScaleFactor: 3` at 390x844 a phone.

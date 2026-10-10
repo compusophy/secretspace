@@ -12,7 +12,7 @@ use render::geo::{self, Geo};
 use render::{m4, wgpu, Camera, Frame, Item, Material, Mesh, Pass, Renderer, M4};
 
 use crate::body::{self, HandMeshes};
-use crate::glass::Glass;
+use crate::glass::{Glass, Show};
 use crate::monitor::Screen;
 use crate::{gear, light, scene};
 
@@ -28,6 +28,9 @@ pub struct Meshes {
     pub neon: Mesh,
     pub tower: Mesh,
 }
+
+/// The light a computer's picture throws (its mean is not read back).
+pub const OS_MEAN: [f32; 3] = [0.06, 0.065, 0.085];
 
 pub struct Desk {
     pub m: Meshes,
@@ -222,7 +225,8 @@ impl Desk {
     }
 
     /// One frame of the desk into `view` (`size` pixels) as `cam` sees it:
-    /// the room by the engine, then the screen's picture on its glass.
+    /// the room by the engine, then on the glass the desk's own `screen`,
+    /// or (`os`: the arrow at that point of it) the computer's picture.
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &self,
@@ -231,10 +235,10 @@ impl Desk {
         (encoder, view, size): (&mut wgpu::CommandEncoder, &wgpu::TextureView, (u32, u32)),
         cam: Camera,
         (hands, heat): (&Hands, &[f32]),
-        screen: &Screen,
+        (screen, os): (&Screen, Option<(f32, f32)>),
         t: f32,
     ) {
-        let mean = screen.mean();
+        let mean = if os.is_some() { OS_MEAN } else { screen.mean() };
         let items = self.items(hands, heat, mean, t);
         let lights = light::lights(t, mean);
         let sparks = light::steam(t);
@@ -250,8 +254,11 @@ impl Desk {
         };
         r.draw(encoder, view, size, &frame);
         let (vp, _, _) = cam.matrices(cam.fov);
-        self.glass
-            .draw(queue, encoder, view, &vp, &screen.c.data, 1.0);
+        let show = match os {
+            Some(cursor) => Show::Os { cursor },
+            None => Show::Pixels(&screen.c.data),
+        };
+        self.glass.draw(queue, encoder, view, &vp, show, 1.0);
     }
 }
 

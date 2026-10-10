@@ -15,6 +15,7 @@ use kit::input::{Hand, Kind};
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, KeyboardEvent, WheelEvent};
 
+use super::os;
 use super::{Heard, KeyEv, Page, CAPTURE};
 
 /// The most one mouse move may move the arrow (pixels).
@@ -61,7 +62,13 @@ pub(super) fn listen(heard: &Rc<RefCell<Heard>>, canvas: &HtmlCanvasElement) {
                     code: k.code(),
                     key: k.key(),
                     down,
-                    ctrl: k.ctrl_key(),
+                    mods: os::mods(
+                        k.shift_key(),
+                        k.ctrl_key(),
+                        k.alt_key(),
+                        k.meta_key(),
+                        k.get_modifier_state("AltGraph"),
+                    ),
                     repeat: k.repeat(),
                 });
             }
@@ -71,7 +78,9 @@ pub(super) fn listen(heard: &Rc<RefCell<Heard>>, canvas: &HtmlCanvasElement) {
     kit::on(canvas, "wheel", move |e| {
         if let Some(w) = e.dyn_ref::<WheelEvent>() {
             e.prevent_default();
-            h.borrow_mut().wheel += w.delta_y() as f32;
+            let mut h = h.borrow_mut();
+            h.wheel += w.delta_y() as f32;
+            h.wheel_shift |= w.shift_key();
         }
     });
     let h = heard.clone();
@@ -117,8 +126,16 @@ pub(super) fn input(p: &mut Page, now: f64, dt: f32) {
     for h in p.pointer.drain() {
         pointer(p, h, now);
     }
+    // The wheel scrolls the computer where it takes it; elsewhere (or
+    // with Shift) it leans you in and out.
     if heard.wheel != 0.0 && p.seated && !p.meta.is_open() {
-        p.lean_to = (p.lean_to - heard.wheel.signum() * LEAN_NOTCH).clamp(0.0, 1.0);
+        let taken = match &p.os {
+            Some(o) if p.on_os() && !heard.wheel_shift => o.wheel(p.screen.cursor, heard.wheel),
+            _ => false,
+        };
+        if !taken {
+            p.lean_to = (p.lean_to - heard.wheel.signum() * LEAN_NOTCH).clamp(0.0, 1.0);
+        }
     }
     typed_on_phone(p, now);
     let due: Vec<&'static str> = p
@@ -131,14 +148,17 @@ pub(super) fn input(p: &mut Page, now: f64, dt: f32) {
     for code in due {
         if code == "#mouse" {
             p.hands.button(0, false);
+            if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
+                o.pointer(os::UP, p.screen.cursor, 0);
+            }
         } else {
-            press(p, code, "", false, false, false, now);
+            press(p, code, "", false, 0, false, now);
         }
     }
     if let Some(mut demo) = p.demo.take() {
         for ev in demo.step(dt) {
             match ev {
-                Ev::Key { code, key, down } => press(p, code, &key, down, false, false, now),
+                Ev::Key { code, key, down } => press(p, code, &key, down, 0, false, now),
                 Ev::Move { dx, dy } => move_mouse(p, dx, dy),
                 Ev::Button { b, down } => p.hands.button(b, down),
             }
@@ -183,24 +203,27 @@ fn key(p: &mut Page, e: KeyEv, now: f64) {
         p.sit(false);
     }
     let Some(code) = keys::find(&e.code).map(|k| k.code) else {
-        // Not on this keyboard: the terminal may still want it.
-        if e.down {
+        // Not on this keyboard: the computer may still want it.
+        if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
+            o.key(e.down, (&e.code, &e.key), e.mods, e.repeat);
+        } else if e.down {
             let facts_gpu = p.out.caps().adapter.clone();
-            run(p, &e.key, e.ctrl, &facts_gpu, now);
+            run(p, &e.key, e.mods & 2 != 0, &facts_gpu, now);
         }
         return;
     };
-    press(p, code, &e.key, e.down, e.ctrl, e.repeat, now);
+    press(p, code, &e.key, e.down, e.mods, e.repeat, now);
 }
 
 /// A key of the desk's keyboard down or up: the hands, the light, the
-/// sound, and (going down) the terminal.
+/// sound, and the computer (or, going down, the desk's own terminal).
+/// The modifiers are `mods` (as `os::mods` counts them).
 fn press(
     p: &mut Page,
     code: &'static str,
     key: &str,
     down: bool,
-    ctrl: bool,
+    mods: u8,
     repeat: bool,
     now: f64,
 ) {
@@ -214,9 +237,11 @@ fn press(
             p.sounds.key(code, x, down);
         }
     }
-    if down && !key.is_empty() {
+    if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
+        o.key(down, (code, key), mods, repeat);
+    } else if down && !key.is_empty() {
         let gpu = p.out.caps().adapter.clone();
-        run(p, key, ctrl, &gpu, now);
+        run(p, key, mods & 2 != 0, &gpu, now);
     }
 }
 
@@ -244,6 +269,9 @@ fn move_mouse(p: &mut Page, dx: f32, dy: f32) {
     p.hands.stir(dx.hypot(dy));
     let (x, z) = mouse_for(p.screen.cursor, SCREEN_PX);
     p.hands.put_mouse(x, z);
+    if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
+        o.pointer(os::MOVE, p.screen.cursor, 0);
+    }
 }
 
 fn pointer(p: &mut Page, h: Hand, now: f64) {
@@ -294,13 +322,20 @@ fn pointer(p: &mut Page, h: Hand, now: f64) {
                 return;
             }
             if down && !p.touch && !kit::input::locked() {
-                kit::input::play(p.out.canvas(), !p.hooks.windowed);
+                p.grab();
             }
             if button == 0 || button == 2 {
                 p.hands.button(button, down);
                 if down {
                     p.sounds.click();
                 }
+            }
+            if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
+                o.pointer(
+                    if down { os::DOWN } else { os::UP },
+                    p.screen.cursor,
+                    button,
+                );
             }
         }
         Hand::Finger { kind, x, y, t, .. } => finger(p, kind, x, y, t, now),
@@ -337,6 +372,9 @@ fn finger(p: &mut Page, kind: Kind, x: f64, y: f64, t: f64, now: f64) {
             if let Some((_, _, x0, t0)) = p.finger.take() {
                 if t - t0 < 260.0 && (x - x0).abs() < 12.0 && p.seated {
                     p.hands.button(0, true);
+                    if let Some(o) = p.os.as_ref().filter(|_| p.on_os()) {
+                        o.pointer(os::DOWN, p.screen.cursor, 0);
+                    }
                     p.sounds.click();
                     p.ups.push((now + 90.0, "#mouse"));
                     if let Some(f) = &p.field {
@@ -364,14 +402,25 @@ fn typed_on_phone(p: &mut Page, now: f64) {
     for (n, c) in v.chars().take(32).enumerate() {
         let s = c.to_string();
         match keys::for_char(c) {
-            Some((code, _)) => {
-                press(p, code, &s, true, false, false, now);
+            Some((code, shift)) => {
+                press(
+                    p,
+                    code,
+                    &s,
+                    true,
+                    os::mods(shift, false, false, false, false),
+                    false,
+                    now,
+                );
                 p.ups.push((now + 70.0 + n as f64 * 10.0, code));
             }
-            None => {
-                let gpu = p.out.caps().adapter.clone();
-                run(p, &s, false, &gpu, now);
-            }
+            None => match p.os.as_ref().filter(|_| p.on_os()) {
+                Some(o) => o.key(true, ("", &s), 0, false),
+                None => {
+                    let gpu = p.out.caps().adapter.clone();
+                    run(p, &s, false, &gpu, now);
+                }
+            },
         }
     }
 }

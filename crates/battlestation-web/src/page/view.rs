@@ -64,7 +64,12 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
     for h in &mut p.heat {
         *h *= (-dt / 0.35).exp();
     }
-    p.screen.draw(&p.term, &clock(), t, dt);
+    let on_os = p.on_os();
+    if p.booting() {
+        p.screen.boot("compusophyOS is starting...", t);
+    } else if !on_os {
+        p.screen.draw(&p.term, &clock(), t, dt);
+    }
     let cam = camera(p, t, dt);
     hud(p, now);
     let size = p.out.size();
@@ -72,6 +77,13 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
         p.out.idle();
         return;
     };
+    if let (true, Some(o)) = (on_os, p.os.as_mut()) {
+        o.copy(p.out.device(), p.out.queue(), &mut p.desk.glass);
+    }
+    let arrow =
+        p.os.as_ref()
+            .filter(|_| on_os)
+            .map(|o| o.arrow(p.screen.cursor));
     let (view, encoder) = target.parts();
     p.desk.draw(
         &mut p.r,
@@ -79,7 +91,7 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
         (encoder, view, size),
         cam,
         (&p.hands, &p.heat),
-        &p.screen,
+        (&p.screen, arrow),
         t,
     );
     p.out.finish(target);
@@ -87,13 +99,20 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
     let doc = kit::document();
     if p.hooks.shot && p.frames == SHOT_AFTER {
         doc.set_title("shot ready");
-    } else if p.hooks.perf && p.frames.is_multiple_of(30) {
+    } else if p.hooks.perf && p.frames.is_multiple_of(10) {
         let s = p.r.stats;
         doc.set_title(&format!(
-            "battlestation {:.0}fps draws {} tris {}k",
+            "battlestation {:.0}fps draws {} tris {}k at {:.0},{:.0} os {}",
             p.fps,
             s.draws,
-            s.triangles / 1000
+            s.triangles / 1000,
+            p.screen.cursor.0,
+            p.screen.cursor.1,
+            match (&p.os, p.os_said.as_str()) {
+                (Some(_), _) => "on",
+                (None, "") => "starting",
+                (None, why) => why,
+            }
         ));
     }
 }
@@ -131,7 +150,7 @@ fn hud(p: &mut Page, now: f64) {
         let text = if p.touch {
             "drag to move the mouse - tap to type"
         } else {
-            "type anything - move the mouse - the wheel leans in - esc for the menu"
+            "type anything - move the mouse - shift+wheel leans in - esc for the menu"
         };
         let lines = pixels::wrap(text, w - 24 * ui, ui);
         let mut y = h - 14 * ui - lines.len() as i32 * 10 * ui;
@@ -145,7 +164,7 @@ fn hud(p: &mut Page, now: f64) {
         let labels: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
         let help = vec![
             "your keys are the desk's keys".to_string(),
-            "the wheel leans in to read".to_string(),
+            "shift+wheel leans in to read".to_string(),
         ];
         let s = p.out.scale();
         let hud = p.out.hud();

@@ -103,6 +103,26 @@ impl Screen {
         self.arrow();
     }
 
+    /// A computer starting: its wallpaper, a word in the middle, a pulse.
+    pub fn boot(&mut self, say: &str, t: f32) {
+        self.c.data.copy_from_slice(&self.wall.data);
+        let (w, h) = (self.c.w, self.c.h);
+        let a = (150.0 + 100.0 * (t * 2.5).sin()) as u8;
+        self.c
+            .text_centred(w / 2, h / 2 - 4, say, 1, Rgba(230, 234, 246, a));
+        let k = (t * 0.8).fract();
+        let bw = 60;
+        self.c
+            .fill_rect(w / 2 - bw / 2, h / 2 + 10, bw, 2, Rgba(255, 255, 255, 30));
+        self.c.fill_rect(
+            w / 2 - bw / 2,
+            h / 2 + 10,
+            (bw as f32 * k) as i32,
+            2,
+            Rgba(126, 232, 166, 200),
+        );
+    }
+
     fn bar(&mut self, clock: &str) {
         let w = self.c.w;
         self.c.fill_rect(0, 0, w, BAR, Rgba(5, 6, 12, 215));
