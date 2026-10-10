@@ -1,27 +1,24 @@
 //! The browser end every page here shares, so a game's page is only its
 //! own drawing and rules: a pixel `Screen` the game draws into and shows
 //! once a frame (or a WebGL2 screen, `gl`, with a pixel layer over it), a
-//! `Link` to its room, the `Session` that says who
-//! this is, one `Pointer` at a time (or every hand at once, `input`), the
-//! page's `version`, an invisible `TextField` (so a phone still offers its
-//! keyboard), storage, `audio`, a frame loop, `report`s to the server
-//! (feedback, crashes), the menu every game shares (`meta`), and the
-//! `shell` the front page opens games in. Rust only: the page's one line
-//! of script just starts the wasm.
+//! `Link` to its room, the `Session` that says who this is, every hand at
+//! once (`input`), the page's `version`, an invisible `TextField` (so a
+//! phone still offers its keyboard), storage, `audio`, a frame loop,
+//! `report`s to the server (feedback, crashes), the menu every game
+//! shares (`meta`), and the `shell` the front page opens games in. Rust
+//! only: the page's one line of script just starts the wasm.
 
 pub mod audio;
 pub mod gl;
 pub mod input;
 pub mod link;
 pub mod meta;
-pub mod pointer;
 pub mod report;
 pub mod session;
 pub mod shell;
 pub mod version;
 
 pub use link::{Link, Net};
-pub use pointer::{Latch, Pointer, Press};
 pub use session::Session;
 pub use version::Version;
 
@@ -163,29 +160,6 @@ pub fn vibrate(ms: u32) {
     let _ = window().navigator().vibrate_with_duration(ms);
 }
 
-/// Hand the person a file to keep.
-pub fn download(name: &str, bytes: &[u8]) {
-    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
-    let opts = web_sys::BlobPropertyBag::new();
-    opts.set_type("application/octet-stream");
-    let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts) else {
-        return;
-    };
-    let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob) else {
-        return;
-    };
-    if let Some(a) = document()
-        .create_element("a")
-        .ok()
-        .and_then(|e| e.dyn_into::<web_sys::HtmlAnchorElement>().ok())
-    {
-        a.set_href(&url);
-        a.set_download(name);
-        a.click();
-    }
-    let _ = web_sys::Url::revoke_object_url(&url);
-}
-
 /// Go to another page.
 pub fn go(url: &str) {
     let _ = window().location().assign(url);
@@ -286,15 +260,6 @@ impl Screen {
         // Text reads the same size whichever way that is snapped.
         self.ui = if pick >= 2.0 { 1 } else { 2 };
         self.size(snap(pick, window().device_pixel_ratio()), w, h);
-    }
-
-    /// Match the window as `fit` does, but with pixels small enough to leave
-    /// at least `min_short` buffer pixels on the short side whenever the
-    /// window allows: a game that must show so much of its world.
-    pub fn fit_view(&mut self, min_short: f64) {
-        let (w, h) = window_css();
-        let s = (w / 960.0).ceil().min((w.min(h) / min_short).floor());
-        self.size(s.clamp(1.0, 4.0), w, h);
     }
 
     fn size(&mut self, scale: f64, w: f64, h: f64) {

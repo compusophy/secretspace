@@ -16,7 +16,18 @@ thread_local! {
     static HELD: Cell<bool> = const { Cell::new(false) };
 }
 
-pub use crate::pointer::Kind;
+/// What a finger did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Down,
+    Move,
+    Up,
+    /// The browser took the pointer away (a system gesture, say).
+    Cancel,
+    /// A mouse or pen moving with nothing pressed (never sent by `Hands`,
+    /// whose mouse comes as `Hand::Mouse`).
+    Hover,
+}
 
 /// Something a hand did.
 #[derive(Clone, Copy, Debug, PartialEq)]
