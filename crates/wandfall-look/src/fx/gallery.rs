@@ -78,11 +78,10 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
             aim: 0.1,
             tip: (super::colour(sp), fresh),
             spell: Some((sp, fresh)),
-            glide: false,
             t,
         };
         let a = crate::rig::Anim::default();
-        look.rig.wizard(d, 3, me, yaw, &a, &pose, false);
+        look.rig.wizard(d, 3, me, yaw, &a, &pose, 0.0);
         return;
     }
     let ev = match name {

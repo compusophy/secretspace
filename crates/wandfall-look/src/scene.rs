@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use render::{Camera, V3};
-use wandfall::proto::{flag, Seen};
+use wandfall::laws::{spell, GUST_RADIUS};
+use wandfall::proto::{self, flag, Ev, Seen};
 use wandfall::trig;
 
 use crate::fx::{self, Draw};
@@ -35,6 +36,20 @@ pub struct Show {
     pub storm: bool,
 }
 
+/// Whether a Gust has just gone off near `s` (cast by another a moment
+/// ago, within its reach and as far again as a throw carries it): it
+/// throws whoever stands there, hurt or not.
+fn gusted(shows: &[(f64, Ev)], s: &Seen, now: f64) -> bool {
+    shows
+        .iter()
+        .rev()
+        .take_while(|e| now - e.0 < 600.0)
+        .any(|&(_, e)| {
+            matches!(e, Ev::Cast { by, spell: spell::GUST, at, .. }
+            if by != s.id && (at[0] - s.p[0]).hypot(at[2] - s.p[2]) < GUST_RADIUS + 6.0)
+        })
+}
+
 /// Everything in the match into `d`, at `now` (`dt` since the last
 /// frame); whether the eyes are out in the storm.
 #[allow(clippy::too_many_arguments)]
@@ -52,7 +67,13 @@ pub fn draw(
     let t = (now / 1000.0) as f32;
     let own = |id: u16| eyes.first && id == eyes.id;
     fx::loot(look, d, &st.loot, t, cam.eye);
-    look.places(d, t);
+    let wind = st.frame.as_ref().map_or([0.0; 2], |f| {
+        crate::sky::wind(
+            crate::sky::Hour::from(f.hour),
+            crate::sky::Weather::from(f.weather),
+        )
+    });
+    look.places(d, t, (cam.eye, wind));
     for s in others {
         if s.flags & flag::ALIVE == 0 {
             continue;
@@ -83,6 +104,10 @@ pub fn draw(
                 s.flags & flag::CROUCH != 0,
                 slide,
             );
+            // Hauled by a Tether or thrown by a Gust: not its own leap.
+            if s.fx & proto::fx::TETHER != 0 || gusted(&st.shows, s, now) {
+                a.shove();
+            }
             if let Some(hard) = a.step(s.p, aimed, stance, dt as f32 / 1000.0) {
                 st.dust.push((now, s.p, hard));
             }
@@ -98,7 +123,6 @@ pub fn draw(
                     .min(1.0),
                 aim,
                 tip,
-                glide,
                 t,
             };
             // A slide kicks up dust behind it.
@@ -109,7 +133,8 @@ pub fn draw(
             let far = render::geo::dot(
                 render::geo::sub(s.p, cam.eye),
                 render::geo::sub(s.p, cam.eye),
-            ) > 16.0 * 16.0;
+            )
+            .sqrt();
             look.rig.wizard(d, s.id, s.p, yaw, a, &pose, far);
         }
         fx::on_wizard(look, d, s, t, own(s.id));
@@ -161,7 +186,10 @@ pub fn draw(
         if !(eyes.alive && own(who)) {
             let when = hold.map_or(when, |ms| when.max(now - ms));
             let age = ((now - when) / 1000.0) as f32;
-            look.rig.fallen(d, who, at, trig::radians(yaw), age);
+            let far =
+                render::geo::dot(render::geo::sub(at, cam.eye), render::geo::sub(at, cam.eye))
+                    .sqrt();
+            look.rig.fallen(d, who, (at, far), trig::radians(yaw), age);
         }
     }
     fx::falls(look, d, &falls, now);
