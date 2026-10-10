@@ -140,7 +140,9 @@ fn the_page_predicts_its_wizard_exactly() {
                 pitch: 0,
                 keys: (rng.next_u64() as u16)
                     & (keys::FWD
+                        | keys::BACK
                         | keys::LEFT
+                        | keys::RIGHT
                         | keys::JUMP
                         | keys::AIM
                         | keys::SPRINT
