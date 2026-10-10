@@ -21,31 +21,35 @@
 //!
 //! `bolts`: spells in flight; `casts`: what each cast and landing shows;
 //! `blasts`: the big ones (a fireball's burst, lightning, blink, gust);
-//! `marks`: on wizards, the fallen, dust; `rope`: the Tether's;
-//! `meshes`: the shapes;
-//! `gallery`: any one of them on its own, to look at.
+//! `marks`: on wizards, the fallen, dust, bursts where something struck;
+//! `rope`: the Tether's; `meshes`: the shapes; `ground`: the island's
+//! ground, for what lies on it; `gallery`: any one of them on its own, to
+//! look at.
 
 mod blasts;
 mod bolts;
 mod casts;
 mod gallery;
+mod ground;
 mod marks;
 pub mod meshes;
 mod rain;
 mod rope;
 
 pub(crate) use blasts::forks;
-pub use bolts::bolt;
+pub use bolts::bolts;
 pub use casts::shows;
 pub use gallery::{gallery, NAMES};
-pub use marks::{dust, falls, on_wizard, scars};
+pub use ground::Ground;
+pub use marks::{burst, dust, falls, on_wizard, scar_life, scars};
 pub use rain::rain;
 pub use rope::ropes;
 
 use render::geo::{self, hash, mix, rgb, unit, V3};
-use render::{m4, Item, Light, Material, Mesh, Pass, Shape, Spark};
+use render::{m4, Decal, Item, Light, Mark, Material, Mesh, Pass, Shape, Spark};
 use wandfall::laws::{spell, LIGHTNING_RADIUS};
 use wandfall::proto::{Ev, Loot, Seen};
+use wandfall::world::STORM;
 
 use crate::look::{Look, GOLD};
 
@@ -58,9 +62,12 @@ pub struct Draw {
     pub decals: Vec<render::Decal>,
 }
 
-const WHITE: V3 = [1.0; 3];
+pub(crate) const WHITE: V3 = [1.0; 3];
+pub(crate) const UP: V3 = [0.0, 1.0, 0.0];
+/// Everyone else's wand: its bolts, and the light where they strike.
+pub const FOE: V3 = rgb(255, 96, 120);
 
-/// A spell's colour (the wand's is gold).
+/// A spell's colour (the wand's is gold; the storm's, violet).
 pub fn colour(s: u8) -> V3 {
     match s {
         spell::FIREBALL => rgb(255, 120, 40),
@@ -72,8 +79,102 @@ pub fn colour(s: u8) -> V3 {
         spell::MEND => rgb(120, 235, 110),
         spell::GUST => rgb(215, 235, 245),
         spell::TETHER => rgb(200, 255, 80),
+        STORM => rgb(175, 100, 255),
         _ => GOLD,
     }
+}
+
+/// The time effects are drawn at: `now` (ms), and every effect held at
+/// an age (`hold`, the page's `?hold`: to look at them).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Clock {
+    pub now: f64,
+    pub hold: Option<f64>,
+}
+
+impl Clock {
+    /// How long ago `when` was (ms), as held.
+    pub fn age(&self, when: f64) -> f64 {
+        let age = self.now - when;
+        self.hold.map_or(age, |h| age.min(h))
+    }
+}
+
+/// A wizard as drawn this frame: its feet, and its wand's tip (where
+/// its spells leave, a flash, a rope).
+#[derive(Clone, Copy, Debug)]
+pub struct Drawn {
+    pub id: u16,
+    pub feet: V3,
+    pub tip: V3,
+}
+
+/// What effects know of the wizards casting them: where each is drawn,
+/// and how each stood as it cast (`State::stood`: when, who, its look,
+/// its feet).
+#[derive(Clone, Copy, Default)]
+pub struct Casters<'a> {
+    pub drawn: &'a [Drawn],
+    pub stood: &'a [(f64, u16, V3, V3)],
+}
+
+impl Casters<'_> {
+    pub fn drawn(&self, id: u16) -> Option<&Drawn> {
+        self.drawn.iter().find(|w| w.id == id)
+    }
+
+    /// How `id` stood casting at `when`: its look, its feet.
+    fn stood(&self, when: f64, id: u16) -> Option<(V3, V3)> {
+        self.stood
+            .iter()
+            .find(|s| s.0 == when && s.1 == id)
+            .map(|s| (s.2, s.3))
+    }
+}
+
+/// An event's own seed: from who, what and where (and when it came), so
+/// its sparks keep their ways as long as it shows, however the list
+/// about it comes and goes.
+fn seed_of(when: f64, e: &Ev) -> i32 {
+    let at = |p: V3| (p[0] * 16.0) as i32 ^ (((p[2] * 16.0) as i32) << 11) ^ (p[1] * 16.0) as i32;
+    let (who, what, p) = match *e {
+        Ev::Cast {
+            by,
+            spell,
+            stage,
+            at,
+        } => (by, (spell as i32) << 8 | stage as i32, at),
+        Ev::Beam { by, spell, to, .. } => (by, (spell as i32) << 8 | 0xff, to),
+        Ev::Level { who, level } => (who, level as i32, [0.0; 3]),
+        Ev::Hit { to, what, .. } => (to, what as i32, [0.0; 3]),
+        Ev::Out { who, .. } => (who, 0, [0.0; 3]),
+        _ => (0, 0, [0.0; 3]),
+    };
+    hash(who as i32 ^ (when as i32) << 4, what, at(p) as u32) as i32
+}
+
+/// A glint's brightness through its life `u` (0 to 1): up and gone.
+fn twinkle(u: f32) -> f32 {
+    (1.0 - (u * 2.0 - 1.0).abs()).powi(2)
+}
+
+/// One of a stream of motes shed `rate` times a second, phased by
+/// `phase`, `t` seconds in: how far through its life it is (0 to 1),
+/// and which life it is (the same number all its life, so its path and
+/// noise stay its own).
+fn cycle(t: f32, rate: f32, phase: f32) -> (f32, i32) {
+    let c = t * rate + phase;
+    (c - c.floor(), c.floor() as i32)
+}
+
+/// A trail of `n` puffs streaming back, a new one shed `rate` times a
+/// second, `t` seconds in: each one's way along it (0 just shed, 1 at
+/// its end) and its life (the same as it streams back, so it flickers
+/// rather than swaps).
+fn trail(n: i32, rate: f32, t: f32) -> impl Iterator<Item = (f32, i32)> {
+    let c = t * rate;
+    let (f, k0) = (c - c.floor(), c.floor() as i32);
+    (0..n).map(move |k| ((k as f32 + f) / n as f32, k0 - k))
 }
 
 /// A random direction, the same for the same seed and n (`up`: only
@@ -190,14 +291,29 @@ fn sigil(look: &Look, d: &mut Draw, at: V3, up: V3, r: f32, (c, a): (V3, f32), t
 /// How a beam is drawn: a hot core (it blooms), a halo bright at its
 /// edges, or energy flowing along it (`grain` cells a metre).
 #[derive(Clone, Copy)]
-enum Ray {
+pub(crate) enum Ray {
     Core,
     Halo,
     Flow(f32),
 }
 
-/// A beam from `a` to `b`, `r` thick.
-fn beam(look: &Look, d: &mut Draw, (a, b): (V3, V3), r: f32, (c, alpha): (V3, f32), ray: Ray) {
+/// A beam from `a` to `b`, `r` thick (one length of a rope or a fork:
+/// its ends meet the next).
+pub(crate) fn beam(look: &Look, d: &mut Draw, ab: (V3, V3), r: f32, c: (V3, f32), ray: Ray) {
+    beam_of(look.beam, d, ab, r, c, ray);
+}
+
+/// A lone beam from `a` to `b`, `r` thick, drawn to a point at each end.
+fn lone(look: &Look, d: &mut Draw, ab: (V3, V3), r: f32, c: (V3, f32), ray: Ray) {
+    beam_of(look.ray, d, ab, r, c, ray);
+}
+
+/// A shaft of light up from `a` toward `b`, `r` thick, fading as it goes.
+fn shaft(look: &Look, d: &mut Draw, ab: (V3, V3), r: f32, c: (V3, f32), ray: Ray) {
+    beam_of(look.shaft, d, ab, r, c, ray);
+}
+
+fn beam_of(mesh: Mesh, d: &mut Draw, (a, b): (V3, V3), r: f32, (c, alpha): (V3, f32), ray: Ray) {
     let along = geo::sub(b, a);
     let len = geo::dot(along, along).sqrt();
     if len < 0.01 || alpha <= 0.0 {
@@ -205,7 +321,7 @@ fn beam(look: &Look, d: &mut Draw, (a, b): (V3, V3), r: f32, (c, alpha): (V3, f3
     }
     let (side, other) = across(geo::scale(along, 1.0 / len));
     let m = m4::basis(a, geo::scale(side, r), along, geo::scale(other, r));
-    let it = Item::new(look.beam, m).tint(c, alpha).pass(Pass::Glow);
+    let it = Item::new(mesh, m).tint(c, alpha).pass(Pass::Glow);
     d.items.push(match ray {
         Ray::Core => it.glow(3.0),
         Ray::Halo => it.glow(1.0).material(Material::Rim),
@@ -249,7 +365,8 @@ fn light(d: &mut Draw, p: V3, r: f32, c: V3, k: f32) {
 /// they last (s), how fast they fall (m/s²; 0 none, below 0 they rise),
 /// hot then cooling to a colour, how big (m), their shape, and how much
 /// of their motion shows as a streak (s; 0 none); `up`: thrown upward
-/// only.
+/// only; `floor`: the ground they come down on, if they are thrown
+/// from it (they settle there, cooling, rather than sink into it).
 #[derive(Clone, Copy)]
 struct Spray {
     n: i32,
@@ -262,6 +379,7 @@ struct Spray {
     shape: Shape,
     streak: f32,
     up: bool,
+    floor: Option<f32>,
 }
 
 impl Spray {
@@ -277,6 +395,7 @@ impl Spray {
             shape: Shape::Glow,
             streak: 0.0,
             up: false,
+            floor: None,
         }
     }
 }
@@ -294,13 +413,17 @@ fn spray(d: &mut Draw, at: V3, t: f32, seed: i32, s: Spray) {
         );
         // A little drag, so they slow as they spread.
         let go = (1.0 - (-2.2 * t).exp()) / 2.2;
-        let p = [
+        let mut p = [
             at[0] + v0[0] * go,
             at[1] + v0[1] * go - 0.5 * s.fall * t * t,
             at[2] + v0[2] * go,
         ];
         let slow = (-2.2 * t).exp();
-        let v = [v0[0] * slow, v0[1] * slow - s.fall * t, v0[2] * slow];
+        let mut v = [v0[0] * slow, v0[1] * slow - s.fall * t, v0[2] * slow];
+        if let Some(floor) = s.floor.filter(|&y| p[1] < y) {
+            p[1] = floor;
+            v[1] = 0.0;
+        }
         let col = mix(s.hot, s.cold, (1.0 - f).min(1.0));
         d.sparks.push(Spark {
             p,
@@ -381,34 +504,29 @@ pub fn casting(list: &[(f64, Ev)], who: u16, now: f64) -> Option<(u8, f32)> {
     })
 }
 
-/// How long a cast shows at the wand and in the caster's gesture (ms).
-const CAST_SHOWN: f64 = 450.0;
+/// How long a cast shows at the wand and in the caster's gesture, and
+/// a bolt loosed in its arm (ms).
+pub const CAST_SHOWN: f64 = 450.0;
 
-/// The colour and brightness of a wizard's wand tip: the spell it last
-/// cast, flaring and fading; gold at rest.
-pub fn tip(list: &[(f64, Ev)], who: u16, now: f64) -> (V3, f32) {
-    list.iter()
-        .rev()
-        .find_map(|&(when, e)| match e {
-            Ev::Cast {
-                by,
-                spell,
-                stage: 0,
-                ..
-            } if by == who && now - when < 450.0 => {
-                Some((colour(spell), (1.0 - (now - when) / 450.0) as f32))
-            }
-            _ => None,
-        })
-        .unwrap_or((GOLD, 0.0))
+/// The colour and brightness of a wizard's wand tip, from what it is
+/// casting (`casting`): the spell, flaring and fading; gold at rest.
+pub fn tip(cast: Option<(u8, f32)>) -> (V3, f32) {
+    cast.map_or((GOLD, 0.0), |(s, f)| (colour(s), f))
 }
 
+/// How far off a cube's pillar shows whole, faint, and not at all (m).
+const LOOT_CLEAR: f32 = 30.0;
+const LOOT_FAINT: f32 = 90.0;
+const LOOT_SEEN: f32 = 140.0;
+
 /// Spell cubes (their icon on every face, under a pillar of their light,
-/// taller by rank, a circle of runes turning under them).
+/// taller by rank, a circle of runes turning under them). The pillars
+/// fade with distance, so far ones do not stripe the skyline; a rank III
+/// cube's stands out, wider, a gold core in it, pulsing.
 pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
-    let far = |p: V3| (p[0] - eye[0]).powi(2) + (p[2] - eye[2]).powi(2) > 140.0 * 140.0;
     for &(id, s, rank, p) in &l.scrolls {
-        if far(p) {
+        let far = ((p[0] - eye[0]).powi(2) + (p[2] - eye[2]).powi(2)).sqrt();
+        if far > LOOT_SEEN {
             continue;
         }
         // A spell cube, turning and bobbing, tipped to show its top.
@@ -423,18 +541,30 @@ pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
         if let Some(&cube) = look.cubes.get(s as usize) {
             d.items.push(Item::new(cube, m).rough(0.45));
         }
-        // Its light rises from above it (higher, the higher its rank).
+        // Its light rises from above it (higher, the higher its rank),
+        // fading far off.
         let top = 3.0 + 1.5 * rank as f32;
-        beam(
-            look,
-            d,
-            ([at[0], at[1] + k * 0.9, at[2]], [p[0], p[1] + top, p[2]]),
-            0.05 + 0.02 * rank as f32,
-            (c, 0.3),
-            Ray::Halo,
-        );
+        let fade = if far < LOOT_CLEAR {
+            1.0
+        } else if far < LOOT_FAINT {
+            1.0 - 0.7 * (far - LOOT_CLEAR) / (LOOT_FAINT - LOOT_CLEAR)
+        } else {
+            0.3 * (LOOT_SEEN - far) / (LOOT_SEEN - LOOT_FAINT)
+        };
+        let best = rank >= 3;
+        let pulse = if best {
+            0.8 + 0.2 * (t * 2.0).sin()
+        } else {
+            1.0
+        };
+        let pillar = ([at[0], at[1] + k * 0.9, at[2]], [p[0], p[1] + top, p[2]]);
+        let wide = (0.05 + 0.02 * rank as f32) * if best { 2.0 } else { 1.0 };
+        shaft(look, d, pillar, wide, (c, 0.3 * fade * pulse), Ray::Halo);
+        if best {
+            shaft(look, d, pillar, 0.025, (GOLD, fade * pulse), Ray::Core);
+        }
         let floor = [p[0], p[1] + 0.06, p[2]];
-        sigil(look, d, floor, [0.0, 1.0, 0.0], 0.62, (c, 0.55), t * 0.4);
+        sigil(look, d, floor, UP, 0.62, (c, 0.55), t * 0.4);
         if rank > 1 {
             ring(look, d, [p[0], p[1] + 0.07, p[2]], 0.85, GOLD, 0.6, -t);
         }
@@ -482,22 +612,111 @@ pub fn sight(
 pub fn aim_ring(look: &Look, d: &mut Draw, at: V3, t: f32) {
     let c = colour(spell::LIGHTNING);
     let pulse = 0.35 + 0.15 * (t * 6.0).sin();
-    sigil(
-        look,
-        d,
-        [at[0], at[1] + 0.08, at[2]],
-        [0.0, 1.0, 0.0],
-        LIGHTNING_RADIUS,
-        (c, pulse),
-        t * 0.5,
-    );
+    runes(look, d, at, LIGHTNING_RADIUS, (c, pulse), t * 0.5);
 }
 
-/// Where a cast came from and which way it went (the caster's eyes to
-/// its wand), if the caster is known.
-fn aim(by: u16, at: V3, at_of: &impl Fn(u16) -> Option<V3>) -> V3 {
-    at_of(by)
-        .map(|p| geo::norm(geo::sub(at, [p[0], p[1] + wandfall::laws::EYE, p[2]])))
-        .filter(|v| v.iter().all(|x| x.is_finite()))
-        .unwrap_or([1.0, 0.0, 0.0])
+/// A circle of runes lying on the ground about `at`, `r` across, turned
+/// by `turn`: laid on it where the renderer lays decals (taking to a
+/// slope, a step, a deck), else a flat circle over the grass.
+fn runes(look: &Look, d: &mut Draw, at: V3, r: f32, (c, a): (V3, f32), turn: f32) {
+    if !look.marks {
+        sigil(look, d, [at[0], at[1] + 0.06, at[2]], UP, r, (c, a), turn);
+    } else if r > 0.01 && a > 0.0 {
+        d.decals.push(Decal {
+            p: at,
+            r,
+            depth: lay_depth(r),
+            yaw: turn,
+            c: [c[0], c[1], c[2], a],
+            mark: Mark::Runes,
+            seed: 0.37,
+        });
+    }
+}
+
+/// A ring of light rushing out along the ground about `at`, `r` across:
+/// laid on it as a decal where the renderer lays them (nothing in the
+/// air, all of it on a slope), else a soft ring lying flat.
+fn wave(look: &Look, d: &mut Draw, at: V3, r: f32, c: V3, a: f32) {
+    if !look.marks {
+        ring(look, d, at, r, c, a, 0.0);
+    } else if r > 0.01 && a > 0.0 {
+        d.decals.push(Decal {
+            p: at,
+            // The decal's ring is brightest a little in from its edge.
+            r: r / 0.88,
+            depth: lay_depth(r),
+            yaw: 0.0,
+            c: [c[0], c[1], c[2], a],
+            mark: Mark::Ring,
+            seed: 0.0,
+        });
+    }
+}
+
+/// How far up and down a decal `r` across reaches (m): enough to lie
+/// whole on a slope of some 25 degrees.
+fn lay_depth(r: f32) -> f32 {
+    (r * 0.95).max(1.5)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_effect_keeps_its_seed_while_the_list_about_it_changes() {
+        let shard = |x: f32| Ev::Cast {
+            by: 4,
+            spell: spell::FROST,
+            stage: 1,
+            at: [x, 1.0, 2.0],
+        };
+        // Its seed is its own, wherever in the list it is: an older show
+        // let go does not change it.
+        let list = [(100.0, shard(0.0)), (900.0, shard(1.0))];
+        let seeds = |l: &[(f64, Ev)]| l.iter().map(|(w, e)| seed_of(*w, e)).collect::<Vec<_>>();
+        assert_eq!(seeds(&list)[1], seeds(&list[1..])[0]);
+        // Frost's shards, landing together, each their own.
+        let batch: Vec<i32> = (0..7)
+            .map(|k| seed_of(900.0, &shard(k as f32 * 0.5)))
+            .collect();
+        for (k, s) in batch.iter().enumerate() {
+            assert!(!batch[..k].contains(s), "{batch:?}");
+        }
+    }
+
+    #[test]
+    fn a_trail_s_puffs_keep_their_own_life_as_they_stream_back() {
+        // Over a few sheddings, the puff with each life only moves back.
+        let rate = 14.0;
+        let mut was: Vec<(i32, f32)> = Vec::new();
+        for f in 0..40 {
+            let t = 3.0 + f as f32 / 120.0;
+            let now: Vec<(i32, f32)> = trail(16, rate, t).map(|(u, life)| (life, u)).collect();
+            for &(life, u) in &now {
+                if let Some(&(_, u0)) = was.iter().find(|p| p.0 == life) {
+                    assert!(u >= u0 && u - u0 < 0.02, "life {life}: {u0} to {u}");
+                }
+            }
+            was = now;
+        }
+        // A mote's life stays the same through it.
+        let (u0, l0) = cycle(2.0, 9.0, 0.3);
+        let (u1, l1) = cycle(2.0 + 0.5 * (1.0 - u0) / 9.0, 9.0, 0.3);
+        assert!(l0 == l1 && u1 > u0);
+    }
+
+    #[test]
+    fn sparks_thrown_on_the_ground_come_down_on_it() {
+        let mut d = Draw::default();
+        let s = Spray {
+            fall: 12.0,
+            floor: Some(0.0),
+            ..Spray::new(30, 10.0, 1.0, (WHITE, WHITE), 0.1)
+        };
+        spray(&mut d, [0.0, 0.1, 0.0], 0.8, 7, s);
+        assert!(d.sparks.iter().all(|p| p.p[1] >= 0.0));
+        assert!(d.sparks.iter().any(|p| p.p[1] == 0.0));
+    }
 }

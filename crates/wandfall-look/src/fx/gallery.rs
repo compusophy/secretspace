@@ -8,7 +8,7 @@ use wandfall::laws::spell;
 use wandfall::proto::{fx, BoltSeen, Ev, Seen};
 use wandfall::world::WAND;
 
-use super::{bolt, falls, on_wizard, shows, Draw};
+use super::{bolts, falls, on_wizard, shows, Casters, Clock, Draw, Drawn, CAST_SHOWN};
 use crate::look::Look;
 
 /// The effects there are, by name.
@@ -41,12 +41,29 @@ pub const NAMES: [&str; 25] = [
 ];
 
 /// Effect `name` at `age` ms (`now` ms, `t` s), cast from `at` (feet)
-/// toward `fwd`.
+/// toward `fwd`. Its events came at nought, so `age` is their clock (it
+/// holds still while `age` does).
 pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at: V3, fwd: V3) {
     let t = (now / 1000.0) as f32;
     let secs = (age / 1000.0) as f32;
+    let clock = Clock {
+        now: age,
+        hold: None,
+    };
     let chest = [at[0], at[1] + 1.3, at[2]];
     let ahead = |m: f32| geo::add(chest, geo::scale(fwd, m));
+    // The caster: its wand a little ahead of its chest, looking along
+    // `fwd`.
+    let drawn = [Drawn {
+        id: 1,
+        feet: at,
+        tip: ahead(0.6),
+    }];
+    let stood = [(0.0, 1, fwd, at)];
+    let who = Casters {
+        drawn: &drawn,
+        stood: &stood,
+    };
     let on = |m: f32| {
         let p = geo::add(at, geo::scale(fwd, m));
         [p[0], p[1] + 1.0, p[2]]
@@ -69,7 +86,7 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
         .strip_prefix("gesture")
         .and_then(|n| n.parse::<u8>().ok())
     {
-        let fresh = (1.0 - age / 450.0).clamp(0.0, 1.0) as f32;
+        let fresh = (1.0 - age / CAST_SHOWN).clamp(0.0, 1.0) as f32;
         let me = geo::add(at, geo::scale(fwd, 2.5));
         let yaw = fwd[2].atan2(fwd[0]) + std::f32::consts::FRAC_PI_2;
         let pose = crate::rig::Pose {
@@ -87,15 +104,15 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
     }
     let ev = match name {
         "wand" => {
-            bolt(look, d, &flying(WAND, 30.0), false, t);
+            bolts(look, d, &[flying(WAND, 30.0)], 0, t);
             None
         }
         "fireball" => {
-            bolt(look, d, &flying(spell::FIREBALL, 8.0), false, t);
+            bolts(look, d, &[flying(spell::FIREBALL, 8.0)], 0, t);
             None
         }
         "frost" => {
-            bolt(look, d, &flying(spell::FROST, 14.0), false, t);
+            bolts(look, d, &[flying(spell::FROST, 14.0)], 0, t);
             Some(cast(spell::FROST, 0, ahead(0.6)))
         }
         "burst" => Some(cast(spell::FIREBALL, 1, on(4.0))),
@@ -135,7 +152,7 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
                 fx: mark,
                 ..Seen::default()
             };
-            on_wizard(look, d, &s, t, false);
+            on_wizard(look, d, &s, t);
             None
         }
         "sparks" => {
@@ -171,7 +188,7 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
             None
         }
         "fall" => {
-            falls(look, d, &[(now - age, at, 1)], now);
+            falls(look, d, &[(0.0, at, 1)], clock);
             None
         }
         // A burn to one side, lightning's ahead, frost's to the other
@@ -181,12 +198,12 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
             let by =
                 |m: f32, s: f32| geo::add(at, geo::add(geo::scale(fwd, m), geo::scale(side, s)));
             let list = [
-                (now - age, by(2.0, 3.5), spell::FIREBALL),
-                (now - age, by(5.0, 0.0), spell::LIGHTNING),
-                (now - age, by(2.5, -3.5), spell::FROST),
-                (now - age, by(1.5, 0.8), spell::LANCE),
+                (0.0, by(2.0, 3.5), spell::FIREBALL),
+                (0.0, by(5.0, 0.0), spell::LIGHTNING),
+                (0.0, by(2.5, -3.5), spell::FROST),
+                (0.0, by(1.5, 0.8), spell::LANCE),
             ];
-            super::scars(d, &list, now);
+            super::scars(d, &list, age);
             None
         }
         // A rope to a point up ahead (`age` since it was thrown), and the
@@ -201,13 +218,13 @@ pub fn gallery(look: &Look, d: &mut Draw, name: &str, (age, now): (f64, f64), at
                     fx: fx::TETHER,
                     ..Seen::default()
                 };
-                super::ropes(look, d, &[s], &[(now - age, e)], now);
+                super::ropes(look, d, &[s], &[(0.0, e)], clock, &who);
             }
             Some(e)
         }
         _ => None,
     };
     if let Some(e) = ev {
-        shows(look, d, &[(now - age, e)], now, (0, None), |_| Some(at));
+        shows(look, d, &[(0.0, e)], clock, &who);
     }
 }

@@ -9,7 +9,9 @@ use render::{Shape, Spark};
 use wandfall::laws::spell;
 use wandfall::proto::{fx, Ev, Seen};
 
-use super::{across, beam, colour, glint, light, ring, rnd, spray, Draw, Ray, Spray, WHITE};
+use super::{
+    across, beam, colour, glint, light, ring, rnd, spray, Casters, Clock, Draw, Ray, Spray, WHITE,
+};
 use crate::look::Look;
 
 /// How long the rope takes to fly out to where it caught (ms), and how
@@ -17,9 +19,16 @@ use crate::look::Look;
 const THROW: f32 = 110.0;
 const SETTLE: f32 = 350.0;
 
-/// Every rope hauling someone now (`fx::TETHER`): from their hand to
-/// where their last Tether caught.
-pub fn ropes(look: &Look, d: &mut Draw, wizards: &[Seen], shows: &[(f64, Ev)], now: f64) {
+/// Every rope hauling someone now (`fx::TETHER`): from their wand (as
+/// `who` has it drawn) to where their last Tether caught.
+pub fn ropes(
+    look: &Look,
+    d: &mut Draw,
+    wizards: &[Seen],
+    shows: &[(f64, Ev)],
+    clock: Clock,
+    who: &Casters,
+) {
     for s in wizards.iter().filter(|s| s.fx & fx::TETHER != 0) {
         let caught = shows.iter().rev().find_map(|&(when, e)| match e {
             Ev::Cast {
@@ -31,8 +40,10 @@ pub fn ropes(look: &Look, d: &mut Draw, wizards: &[Seen], shows: &[(f64, Ev)], n
             _ => None,
         });
         if let Some((when, to)) = caught {
-            let hand = [s.p[0], s.p[1] + 1.25, s.p[2]];
-            rope(look, d, (hand, to), (now - when) as f32, s.id as i32);
+            let hand = who
+                .drawn(s.id)
+                .map_or([s.p[0], s.p[1] + 1.25, s.p[2]], |w| w.tip);
+            rope(look, d, (hand, to), clock.age(when) as f32, s.id as i32);
         }
     }
 }
@@ -66,16 +77,18 @@ fn rope(look: &Look, d: &mut Draw, (a, b): (V3, V3), age: f32, seed: i32) {
     for k in 0..N {
         let (p, q) = (at(k), at(k + 1));
         beam(look, d, (p, q), 0.03, (core, 1.0), Ray::Core);
-        beam(look, d, (p, q), 0.11, (c, 0.45), Ray::Halo);
+        beam(look, d, (p, q), 0.07, (c, 0.45), Ray::Halo);
     }
     let head = at(N);
     if out < 1.0 {
         glint(d, head, 0.5, WHITE, 1.0);
     } else {
-        // Motes running up it toward where it bit.
+        // Motes running up it toward where it bit, on it as it wavers.
         for n in 0..7 {
             let f = (t * 2.2 + n as f32 / 7.0 + rnd(seed, n, 9)).fract();
-            let p = geo::add(a, geo::scale(along, f));
+            let u = f * N as f32;
+            let k = (u as usize).min(N - 1);
+            let p = geo::add(at(k), geo::scale(geo::sub(at(k + 1), at(k)), u - k as f32));
             d.sparks.push(Spark {
                 p,
                 size: 0.1,

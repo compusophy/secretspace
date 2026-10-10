@@ -55,8 +55,6 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             id: p.st.you,
             at: feet,
             alive: p.alive,
-            first: false,
-            tip: None,
         };
         let show = scene::Show {
             hold: p.hold,
