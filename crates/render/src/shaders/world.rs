@@ -483,13 +483,24 @@ struct GrassOut {
     @location(3) side: vec3<f32>,
 };
 
+/// Whether a blade rising from `a` to `b` (in clip space) lies wholly
+/// past one edge of the screen, or behind the eye, with `m` to spare
+/// for its sway.
+fn off_screen(a: vec4<f32>, b: vec4<f32>, m: f32) -> bool {
+    return (a.x < -a.w - m && b.x < -b.w - m) || (a.x > a.w + m && b.x > b.w + m)
+        || (a.y < -a.w - m && b.y < -b.w - m) || (a.y > a.w + m && b.y > b.w + m)
+        || (a.w < -m && b.w < -m);
+}
+
 @vertex
 fn grass_vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> GrassOut {
-    var shape = array<vec2<f32>, 9>(
+    // A blade's five corners (its two triangles and its tip share them).
+    var shape = array<vec2<f32>, 5>(
         vec2<f32>(-1.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(-0.7, 0.5),
-        vec2<f32>(-0.7, 0.5), vec2<f32>(1.0, 0.0), vec2<f32>(0.7, 0.5),
-        vec2<f32>(-0.7, 0.5), vec2<f32>(0.7, 0.5), vec2<f32>(0.0, 1.0));
+        vec2<f32>(0.7, 0.5), vec2<f32>(0.0, 1.0));
     let k = shape[vi];
+    var o: GrassOut;
+    o.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
     let sp = g.grass.x;
     let side = u32(g.grass.y);
     // Each blade belongs to a whole-numbered cell of the ground and is
@@ -498,28 +509,36 @@ fn grass_vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     let cell = corner + vec2<i32>(i32(ii % side), i32(ii / side));
     let r1 = cell_hash(cell, 1u);
     let r2 = cell_hash(cell, 2u);
-    let r3 = cell_hash(cell, 3u);
     let xz = vec2<f32>(cell) * sp + (vec2<f32>(r1, r2) - 0.5) * sp * 1.8;
-    let gh = ground(xz);
-    let dx = ground(xz + vec2<f32>(0.6, 0.0)) - ground(xz - vec2<f32>(0.6, 0.0));
-    let dz = ground(xz + vec2<f32>(0.0, 0.6)) - ground(xz - vec2<f32>(0.0, 0.6));
-    let slope = length(vec2<f32>(dx, dz)) / 1.2;
+    // Out of reach, or thinned away far off (the rest made wider to
+    // cover as much): none, before the ground is read.
     let dist = length(xz - g.eye.xz);
     let reach = g.grass.z;
-    var height = (0.28 + 0.42 * r3)
+    let keep = 1.0 - GRASS_THIN * smoothstep(reach * 0.45, reach, dist);
+    if (g.grass.w < 0.5 || dist > reach || cell_hash(cell, 4u) > keep) {
+        return o;
+    }
+    let here = terrain_at(xz);
+    let gh = here.x;
+    // Off the screen, root and tallest tip: none.
+    let foot = g.vp * vec4<f32>(xz.x, gh, xz.y, 1.0);
+    let top = g.vp * vec4<f32>(xz.x, gh + 0.75, xz.y, 1.0);
+    if (off_screen(foot, top, 1.2)) {
+        return o;
+    }
+    let r3 = cell_hash(cell, 3u);
+    let height = (0.28 + 0.42 * r3)
         * (1.0 - smoothstep(reach * 0.7, reach, dist))
-        * (1.0 - smoothstep(0.35, 0.6, slope))
+        * (1.0 - smoothstep(0.35, 0.6, length(here.zw)))
         * smoothstep(g.deep.w + 0.7, g.deep.w + 1.4, gh)
         * smoothstep(0.2, 0.45, noise2(xz * 0.09))
-        * lush(xz);
-    var o: GrassOut;
-    if (height < 0.04 || g.grass.w < 0.5) {
-        o.clip = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        * here.y;
+    if (height < 0.04) {
         return o;
     }
     let a = r1 * 6.2832;
     let across = vec2<f32>(cos(a), sin(a));
-    let width = 0.035 * (1.0 - k.y * 0.6);
+    let width = 0.035 * (1.0 - k.y * 0.6) / keep;
     let phase = g.eye.w * 1.8 + xz.x * 0.35 + xz.y * 0.27;
     let bend = (sin(phase) * 0.5 + 0.7 + sin(phase * 2.7) * 0.2) * k.y * k.y * height * 0.45;
     let lean = vec2<f32>(g.wind.x, g.wind.y) * bend + (vec2<f32>(r2, r3) - 0.5) * k.y * height * 0.3;

@@ -88,36 +88,30 @@ fn fbm3(x: vec3<f32>) -> f32 {
     return s;
 }
 
-/// The terrain's height at (x, z), between its samples.
-fn ground(xz: vec2<f32>) -> f32 {
+/// The terrain at (x, z), between its samples: x its height, y how much
+/// grass grows there (0 to 1, as the game painted it), zw its slope (the
+/// rise a metre along x and along z).
+fn terrain_at(xz: vec2<f32>) -> vec4<f32> {
     let n = i32(g.terrain.w);
     if (n < 2) {
-        return -1000.0;
+        return vec4<f32>(-1000.0, 0.0, 0.0, 0.0);
     }
     let f = clamp((xz - g.terrain.xy) / g.terrain.z, vec2<f32>(0.0), vec2<f32>(f32(n - 1) - 0.001));
     let i = vec2<i32>(floor(f));
     let t = f - floor(f);
-    let a = textureLoad(heights, i, 0).r;
-    let b = textureLoad(heights, i + vec2<i32>(1, 0), 0).r;
-    let c = textureLoad(heights, i + vec2<i32>(0, 1), 0).r;
-    let d = textureLoad(heights, i + vec2<i32>(1, 1), 0).r;
-    return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+    let a = textureLoad(heights, i, 0);
+    let b = textureLoad(heights, i + vec2<i32>(1, 0), 0);
+    let c = textureLoad(heights, i + vec2<i32>(0, 1), 0);
+    let d = textureLoad(heights, i + vec2<i32>(1, 1), 0);
+    let here = mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+    let sx = mix(b.r - a.r, d.r - c.r, t.y) / g.terrain.z;
+    let sz = mix(c.r - a.r, d.r - b.r, t.x) / g.terrain.z;
+    return vec4<f32>(here.r, here.g, sx, sz);
 }
 
-/// How much grass grows at `xz` (0 to 1), as the game painted it.
-fn lush(xz: vec2<f32>) -> f32 {
-    let n = i32(g.terrain.w);
-    if (n < 2) {
-        return 0.0;
-    }
-    let f = clamp((xz - g.terrain.xy) / g.terrain.z, vec2<f32>(0.0), vec2<f32>(f32(n - 1) - 0.001));
-    let i = vec2<i32>(floor(f));
-    let t = f - floor(f);
-    let a = textureLoad(heights, i, 0).g;
-    let b = textureLoad(heights, i + vec2<i32>(1, 0), 0).g;
-    let c = textureLoad(heights, i + vec2<i32>(0, 1), 0).g;
-    let d = textureLoad(heights, i + vec2<i32>(1, 1), 0).g;
-    return mix(mix(a, b, t.x), mix(c, d, t.x), t.y);
+/// The terrain's height at (x, z), between its samples.
+fn ground(xz: vec2<f32>) -> f32 {
+    return terrain_at(xz).x;
 }
 
 /// How much of the sun reaches `pos` (0 in shadow, 1 lit), softened.
@@ -263,7 +257,11 @@ fn shade(pos: vec3<f32>, n: vec3<f32>, base: vec3<f32>, rough: f32, metal: f32, 
             let q = lights[index[cell.x + i]];
             let d = q.p.xyz - pos;
             let dist = length(d);
-            let k = clamp(1.0 - dist / q.p.w, 0.0, 1.0);
+            // The cell is a column: a light listed may not reach here.
+            if (dist >= q.p.w) {
+                continue;
+            }
+            let k = 1.0 - dist / q.p.w;
             let dl = d / max(dist, 0.001);
             let ndl = max(dot(n, dl), 0.0);
             c = c + (diffuse * (0.25 + 0.75 * ndl) + ggx(n, v, dl, max(rough, 0.3), f0) * ndl) * q.c.rgb * (k * k);

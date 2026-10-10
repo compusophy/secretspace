@@ -9,7 +9,7 @@
 use crate::buffers::{lay, make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, Run};
 use crate::grid::{Grid, Lists};
 use crate::pipes::Pipes;
-use crate::post::{Post, HDR};
+use crate::post::{Ops, Post, HDR};
 use crate::shadow::Shadows;
 use crate::terrain::Terrain;
 use crate::{geo, laws, m4, shaders, shadow, Frame, Item, Material, Mesh, Pass, Quality, M4};
@@ -261,7 +261,9 @@ impl Renderer {
         let mut stats = Stats::default();
 
         // The lights, gridded about the eye.
-        self.grid.build(f.lights, [f.cam.eye[0], f.cam.eye[2]]);
+        let most = self.quality.lights;
+        self.grid
+            .build(f.lights, [f.cam.eye[0], f.cam.eye[2]], most);
         stats.lights = self.grid.lights.len() as u32;
         let mut b = std::mem::take(&mut self.bytes);
         let grew = self
@@ -412,9 +414,15 @@ impl Renderer {
         }
         let soft = self.soft_group.as_ref().filter(|_| split).map(|g| &g.0);
         let marks = soft.filter(|_| self.quality.decals && !f.decals.is_empty());
-        // The sea mirrors the picture so far (resolved into a copy first).
+        // The sea mirrors the picture of what is solid (resolved into a
+        // copy at the end of the last pass that draws it).
         let ssr = split && self.quality.ssr > 0 && t.resolve.is_some();
         let pipes = &self.pipes;
+        let moving = &self.moving.buf;
+        let solid = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
+            pass.set_pipeline(&pipes.opaque);
+            runs_of(pass, meshes, moving, &runs[Pass::Opaque as usize], stats);
+        };
         let lit = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
             match soft.filter(|_| ssr) {
                 Some(group) => {
@@ -423,21 +431,9 @@ impl Renderer {
                 }
                 None => pass.set_pipeline(&pipes.faint),
             }
-            runs_of(
-                pass,
-                meshes,
-                &self.moving.buf,
-                &runs[Pass::Faint as usize],
-                stats,
-            );
+            runs_of(pass, meshes, moving, &runs[Pass::Faint as usize], stats);
             pass.set_pipeline(&pipes.glow);
-            runs_of(
-                pass,
-                meshes,
-                &self.moving.buf,
-                &runs[Pass::Glow as usize],
-                stats,
-            );
+            runs_of(pass, meshes, moving, &runs[Pass::Glow as usize], stats);
             if !f.sparks.is_empty() {
                 match soft {
                     Some(group) => {
@@ -451,12 +447,18 @@ impl Renderer {
                 stats.draws += 1;
             }
         };
+        // What stands still, grass, what moves (unless decals go under
+        // it first), then the sky wherever none of it stands (so it is
+        // shaded only there); with no depth to read, the rest too.
         {
-            let mut pass = t.pass(encoder, "world", Some(f.look.horizon), (true, true), false);
+            let ops = Ops {
+                clear: Some(f.look.horizon),
+                depth: (true, true),
+                resolve: ssr && marks.is_none(),
+                done: false,
+            };
+            let mut pass = t.pass(encoder, "world", ops);
             pass.set_bind_group(0, &groups[0], &[]);
-            pass.set_pipeline(&pipes.sky);
-            pass.draw(0..3, 0..1);
-            stats.draws += 1;
             pass.set_pipeline(&pipes.opaque);
             runs_of(
                 &mut pass,
@@ -468,20 +470,17 @@ impl Renderer {
             let side = self.grass_side();
             if side > 0 {
                 pass.set_pipeline(&pipes.grass);
-                pass.draw(0..9, 0..side * side);
+                pass.set_index_buffer(pipes.blade.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..9, 0, 0..side * side);
                 stats.draws += 1;
                 stats.grass = side * side;
             }
             if marks.is_none() {
-                pass.set_pipeline(&pipes.opaque);
-                runs_of(
-                    &mut pass,
-                    meshes,
-                    &self.moving.buf,
-                    &runs[Pass::Opaque as usize],
-                    &mut stats,
-                );
+                solid(&mut pass, &mut stats);
             }
+            pass.set_pipeline(&pipes.sky);
+            pass.draw(0..3, 0..1);
+            stats.draws += 1;
             if !split {
                 lit(&mut pass, &mut stats);
             }
@@ -490,45 +489,50 @@ impl Renderer {
         // moves over them.
         if let Some(group) = marks {
             {
-                let mut pass = t.pass(encoder, "marks", None, (false, false), false);
+                let mut pass = t.pass(encoder, "marks", Ops::default());
                 pass.set_bind_group(0, &groups[0], &[]);
                 pipes.decals.draw(&mut pass, group, &mut stats);
             }
-            let mut pass = t.pass(encoder, "moving", None, (false, true), false);
+            let ops = Ops {
+                depth: (false, true),
+                resolve: ssr,
+                ..Ops::default()
+            };
+            let mut pass = t.pass(encoder, "moving", ops);
             pass.set_bind_group(0, &groups[0], &[]);
-            pass.set_pipeline(&pipes.opaque);
-            runs_of(
-                &mut pass,
-                meshes,
-                &self.moving.buf,
-                &runs[Pass::Opaque as usize],
-                &mut stats,
-            );
+            solid(&mut pass, &mut stats);
         }
+        // Occlusion and shafts from the depth; then, over the occluded
+        // picture, what is see-through and what glows.
+        let mut shafts = false;
         if split {
-            self.post.occlude(encoder, &queue, &f.cam, &f.look);
-            if ssr {
-                // Nothing drawn: the picture so far, resolved for the sea.
-                drop(t.pass(encoder, "scene", None, (false, false), true));
-            }
-            let mut pass = t.pass(encoder, "lit", None, (false, false), false);
+            shafts = self.post.occlude(encoder, &queue, &f.cam, &f.look);
+            let mut pass = t.pass(encoder, "lit", Ops::default());
+            self.post.apply(&mut pass);
             pass.set_bind_group(0, &groups[0], &[]);
             lit(&mut pass, &mut stats);
         }
-        // The viewmodel, over a cleared depth; the picture resolves here.
+        // The viewmodel, over a cleared depth; the picture resolves here
+        // (and its samples are let go).
         {
-            let mut pass = t.pass(encoder, "view", None, (true, false), true);
+            let ops = Ops {
+                depth: (true, false),
+                resolve: true,
+                done: true,
+                ..Ops::default()
+            };
+            let mut pass = t.pass(encoder, "view", ops);
             pass.set_bind_group(0, &groups[1], &[]);
             pass.set_pipeline(&pipes.opaque);
             runs_of(
                 &mut pass,
                 meshes,
-                &self.moving.buf,
+                moving,
                 &runs[Pass::View as usize],
                 &mut stats,
             );
         }
-        self.post.run(encoder, &queue, target, &f.look);
+        self.post.run(encoder, &queue, target, &f.look, shafts);
         self.stats = stats;
     }
 }

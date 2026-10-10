@@ -1,13 +1,15 @@
 //! Ambient occlusion (`shaders::ao`): from the scene's depth once what is
 //! solid is drawn, at half the screen's size, blurred, then multiplied
-//! into the picture before what is see-through, what glows and the
-//! viewmodel are drawn over it.
+//! into the picture (the first draw of the pass that lays what is
+//! see-through and what glows over it, so the many-sampled picture is not
+//! read and written by a pass of its own).
 
 use gpu::wgpu;
 
 use crate::buffers::bytes;
 use crate::fullscreen;
-use crate::post::{texture, HDR};
+use crate::pipes::{pipeline, Kind, Shared};
+use crate::post::texture;
 use crate::{laws, shaders, Camera};
 
 const AO: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
@@ -88,34 +90,22 @@ impl Ao {
                 operation: wgpu::BlendOperation::Add,
             },
         };
-        let apply = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("apply_fs"),
-            layout: Some(&pl),
-            vertex: wgpu::VertexState {
+        // Over the scene, in its pass: its samples, its depth only read.
+        let apply = pipeline(
+            &Shared {
+                device,
+                layout: &pl,
                 module: &module,
-                entry_point: Some("ao_vs"),
-                compilation_options: Default::default(),
+                samples: msaa,
+            },
+            Kind {
+                entry: ("ao_vs", "apply_fs"),
                 buffers: &[],
+                blend: Some(times),
+                depth: (false, wgpu::CompareFunction::Always),
+                cull: None,
             },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: msaa,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("apply_fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: HDR,
-                    blend: Some(times),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        );
         Ao {
             ways,
             ao: half("ao_fs"),
@@ -175,14 +165,9 @@ impl Ao {
         self.views = Some(views);
     }
 
-    /// Occlude the picture (`color`) as `cam` sees it.
-    pub fn run(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        queue: &wgpu::Queue,
-        color: &wgpu::TextureView,
-        cam: &Camera,
-    ) {
+    /// The occlusion as `cam` sees the scene (at half size, blurred), to
+    /// be laid over it (`apply`).
+    pub fn run(&self, encoder: &mut wgpu::CommandEncoder, queue: &wgpu::Queue, cam: &Camera) {
         let (Some(views), Some(groups)) = (&self.views, &self.groups) else {
             return;
         };
@@ -207,26 +192,25 @@ impl Ao {
             0.0,
         ];
         queue.write_buffer(&self.buf, 0, &bytes(&k));
-        let steps = [
-            (
-                &views[0],
-                &self.ao,
-                &groups[0],
-                wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-            ),
-            (
-                &views[1],
-                &self.blur,
-                &groups[1],
-                wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-            ),
-            (color, &self.apply, &groups[0], wgpu::LoadOp::Load),
-        ];
-        for (view, pipe, group, load) in steps {
-            let mut rp = fullscreen::pass(encoder, "ao", view, load);
+        let white = wgpu::LoadOp::Clear(wgpu::Color::WHITE);
+        for (view, pipe, group) in [
+            (&views[0], &self.ao, &groups[0]),
+            (&views[1], &self.blur, &groups[1]),
+        ] {
+            let mut rp = fullscreen::pass(encoder, "ao", view, white);
             rp.set_pipeline(pipe);
             rp.set_bind_group(0, group, &[]);
             rp.draw(0..3, 0..1);
+        }
+    }
+
+    /// Lay the occlusion over the picture: the first draw of a scene pass
+    /// (its group 0 is then this one's: set the scene's again after).
+    pub fn apply(&self, pass: &mut wgpu::RenderPass) {
+        if let Some(groups) = &self.groups {
+            pass.set_pipeline(&self.apply);
+            pass.set_bind_group(0, &groups[0], &[]);
+            pass.draw(0..3, 0..1);
         }
     }
 }

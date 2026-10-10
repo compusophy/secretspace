@@ -4,7 +4,7 @@
 //! each frame; Phase 3 moves it to froxels in compute.
 
 use crate::buffers::{put_f32s, Grow};
-use crate::laws::{GRID_CELL, GRID_CELLS, MAX_PER_CELL};
+use crate::laws::{GRID_CELL, GRID_CELLS};
 use crate::{geo, Light};
 use gpu::wgpu;
 
@@ -22,8 +22,9 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// The lights that reach the square about `centre` (x, z).
-    pub fn build(&mut self, lights: &[Light], centre: [f32; 2]) {
+    /// The lights that reach the square about `centre` (x, z), at most
+    /// `most` a cell (the nearest the centre kept).
+    pub fn build(&mut self, lights: &[Light], centre: [f32; 2], most: u32) {
         let (cell, n) = (GRID_CELL, GRID_CELLS);
         let half = cell * n as f32 / 2.0;
         // Snapped to whole cells, so lights do not swim as the eye moves.
@@ -61,7 +62,7 @@ impl Grid {
             for z in z0..=z1 {
                 for x in x0..=x1 {
                     let k = &mut count[(z * n + x) as usize];
-                    *k = (*k + 1).min(MAX_PER_CELL);
+                    *k = (*k + 1).min(most);
                 }
             }
         }
@@ -171,7 +172,7 @@ mod tests {
             })
             .collect();
         let mut g = Grid::default();
-        g.build(&lights, [3.0, -2.0]);
+        g.build(&lights, [3.0, -2.0], 48);
         for (x, z) in [(0.0, 0.0), (10.5, -7.25), (-40.0, 33.0), (60.0, 60.0)] {
             let listed: Vec<usize> = g.at(x, z).iter().map(|&i| i as usize).collect();
             for (i, l) in g.lights.iter().enumerate() {
@@ -180,7 +181,7 @@ mod tests {
                     assert!(listed.contains(&i), "light {i} reaches ({x}, {z})");
                 }
             }
-            assert!(listed.len() <= MAX_PER_CELL as usize);
+            assert!(listed.len() <= 48);
         }
     }
 
@@ -190,8 +191,8 @@ mod tests {
             .map(|i| light(0.5, 0.5, 2.0 + i as f32 * 0.01))
             .collect();
         let mut g = Grid::default();
-        g.build(&lights, [0.0, 0.0]);
-        assert_eq!(g.at(0.5, 0.5).len(), MAX_PER_CELL as usize);
+        g.build(&lights, [0.0, 0.0], 16);
+        assert_eq!(g.at(0.5, 0.5).len(), 16);
         assert!(g.at(900.0, 0.0).is_empty(), "outside the grid: none");
     }
 }

@@ -387,6 +387,8 @@ pub struct Quality {
     pub ssr: u32,
     /// Whether decals are laid.
     pub decals: bool,
+    /// The most lights a cell of the light grid lists (the nearest).
+    pub lights: u32,
 }
 
 impl Quality {
@@ -441,6 +443,7 @@ impl Quality {
         shafts: true,
         ssr: 16,
         decals: true,
+        lights: 48,
     };
     pub const MEDIUM: Quality = Quality {
         msaa: 4,
@@ -453,6 +456,7 @@ impl Quality {
         shafts: true,
         ssr: 10,
         decals: true,
+        lights: 16,
     };
     pub const LOW: Quality = Quality {
         msaa: 1,
@@ -465,6 +469,7 @@ impl Quality {
         shafts: false,
         ssr: 0,
         decals: false,
+        lights: 8,
     };
 }
 

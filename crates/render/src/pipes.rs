@@ -20,6 +20,8 @@ pub(crate) struct Pipes {
     pub sky: wgpu::RenderPipeline,
     pub sparks: wgpu::RenderPipeline,
     pub grass: wgpu::RenderPipeline,
+    /// A blade's two triangles and its tip, over its five corners.
+    pub blade: wgpu::Buffer,
     pub soft_sparks: wgpu::RenderPipeline,
     pub faint_ssr: wgpu::RenderPipeline,
     pub decals: Decals,
@@ -56,7 +58,7 @@ impl Pipes {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
         };
-        use wgpu::CompareFunction::{Always, GreaterEqual};
+        use wgpu::CompareFunction::GreaterEqual;
         let world = [Some(vertex), Some(instance)];
         let add = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -98,13 +100,15 @@ impl Pipes {
                 world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None),
             ),
             glow: pipeline(&shared, world_kind(Some(add), false, None)),
+            // Drawn after what is solid, at the far end of the depth:
+            // only where nothing stands (the depth still cleared).
             sky: pipeline(
                 &shared,
                 Kind {
                     entry: ("sky_vs", "sky_fs"),
                     buffers: &[],
                     blend: None,
-                    depth: (false, Always),
+                    depth: (false, GreaterEqual),
                     cull: None,
                 },
             ),
@@ -129,6 +133,21 @@ impl Pipes {
                     cull: None,
                 },
             ),
+            blade: {
+                let buf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("blade"),
+                    size: 32,
+                    usage: wgpu::BufferUsages::INDEX,
+                    mapped_at_creation: true,
+                });
+                let corners: [u16; 16] = [0, 1, 2, 2, 1, 3, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0];
+                let bytes: Vec<u8> = corners.iter().flat_map(|c| c.to_le_bytes()).collect();
+                if let Ok(mut view) = buf.slice(..).get_mapped_range_mut() {
+                    view.copy_from_slice(&bytes);
+                }
+                buf.unmap();
+                buf
+            },
             soft_sparks: pipeline(
                 &soft,
                 Kind {

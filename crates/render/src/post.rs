@@ -13,6 +13,9 @@ use crate::shafts::{Shafts, SHAFT};
 use crate::{shaders, Camera, Look, Quality};
 
 pub const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// Bloom's chain, where the device can draw into it: half the bytes of
+/// `HDR` (no alpha, which bloom never reads).
+const BLOOM_SMALL: wgpu::TextureFormat = wgpu::TextureFormat::Rg11b10Ufloat;
 pub const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Where the scene draws: the colour (multisampled, or the picture
@@ -23,19 +26,35 @@ pub struct Targets {
     pub depth: wgpu::TextureView,
 }
 
+/// What a pass drawing the scene does with its targets.
+#[derive(Clone, Copy, Default)]
+pub struct Ops {
+    /// The colour cleared to this, or kept.
+    pub clear: Option<[f32; 3]>,
+    /// The depth cleared (to infinity) or kept, and stored after it or
+    /// not (neither: only read, so the pass's shaders may read it too).
+    pub depth: (bool, bool),
+    /// The picture resolved (its samples to one) at its end.
+    pub resolve: bool,
+    /// The many-sampled colour let go at its end (it was resolved, and
+    /// nothing reads it again): never when the colour is the picture.
+    pub done: bool,
+}
+
 impl Targets {
-    /// A pass drawing the scene: its colour cleared or kept, its depth
-    /// cleared (to infinity) or kept, and kept after it or not (neither:
-    /// only read, so its shaders may read it too), the picture resolved at
-    /// its end or not.
+    /// A pass drawing the scene, its targets treated as `ops` says.
     pub fn pass<'a>(
         &self,
         encoder: &'a mut wgpu::CommandEncoder,
         label: &str,
-        clear: Option<[f32; 3]>,
-        depth: (bool, bool),
-        resolve: bool,
+        ops: Ops,
     ) -> wgpu::RenderPass<'a> {
+        let Ops {
+            clear,
+            depth,
+            resolve,
+            done,
+        } = ops;
         let load = match clear {
             Some(c) => wgpu::LoadOp::Clear(wgpu::Color {
                 r: c[0] as f64,
@@ -54,7 +73,11 @@ impl Targets {
                 resolve_target: if resolve { self.resolve.as_ref() } else { None },
                 ops: wgpu::Operations {
                     load,
-                    store: wgpu::StoreOp::Store,
+                    store: if done && resolve && self.resolve.is_some() {
+                        wgpu::StoreOp::Discard
+                    } else {
+                        wgpu::StoreOp::Store
+                    },
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -89,6 +112,8 @@ struct Pass {
 pub struct Post {
     msaa: u32,
     levels: u32,
+    /// Bloom's chain's format.
+    bloom: wgpu::TextureFormat,
     /// Whether the scene's depth is read once what is solid is drawn.
     reads: bool,
     layout: wgpu::BindGroupLayout,
@@ -157,6 +182,12 @@ impl Post {
     pub fn new(device: &wgpu::Device, out: wgpu::TextureFormat, quality: Quality) -> Post {
         let (msaa, levels) = (quality.msaa, quality.bloom_levels);
         let (ao, shafts) = (quality.ao, quality.shafts);
+        let small = wgpu::Features::RG11B10UFLOAT_RENDERABLE;
+        let bloom = if device.features().contains(small) {
+            BLOOM_SMALL
+        } else {
+            HDR
+        };
         let tex = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -227,8 +258,9 @@ impl Post {
             msaa,
             levels: levels.max(1),
             reads: ao > 0 || shafts || quality.ssr > 0 || quality.decals,
-            down: pipe(&layout, "down_fs", HDR, None),
-            up: pipe(&layout, "up_fs", HDR, Some(add)),
+            down: pipe(&layout, "down_fs", bloom, None),
+            up: pipe(&layout, "up_fs", bloom, Some(add)),
+            bloom,
             finish: pipe(&finish_layout, "finish_fs", out, None),
             layout,
             finish_layout,
@@ -268,20 +300,29 @@ impl Post {
         self.reads
     }
 
-    /// Ambient occlusion over the picture drawn so far, and the sun's
-    /// shafts from its depth.
+    /// From the depth of what is solid: ambient occlusion (laid over the
+    /// picture by `apply`), and the sun's shafts; whether they show (for
+    /// the finish: `run`).
     pub fn occlude(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         cam: &Camera,
         look: &Look,
-    ) {
-        if let (Some(ao), Some(t)) = (&self.ao, &self.targets) {
-            ao.run(encoder, queue, &t.color, cam);
+    ) -> bool {
+        if let Some(ao) = &self.ao {
+            ao.run(encoder, queue, cam);
         }
-        if let Some(sh) = &self.shafts {
-            sh.run(encoder, queue, cam, look);
+        self.shafts
+            .as_ref()
+            .is_some_and(|sh| sh.run(encoder, queue, cam, look) > 0.0)
+    }
+
+    /// The occlusion laid over the picture, first in a scene pass that
+    /// only reads the depth (its group 0 left as the occlusion's).
+    pub fn apply(&self, pass: &mut wgpu::RenderPass) {
+        if let Some(ao) = &self.ao {
+            ao.apply(pass);
         }
     }
 
@@ -318,7 +359,7 @@ impl Post {
             .collect();
         self.chain = sizes
             .iter()
-            .map(|&s| texture(device, "bloom", s, HDR, 1, true))
+            .map(|&s| texture(device, "bloom", s, self.bloom, 1, true))
             .collect();
         let group = |src: &wgpu::TextureView, buf: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -430,19 +471,17 @@ impl Post {
         self.targets = Some(targets);
     }
 
-    /// Bloom, then the finish into `out`.
+    /// Bloom, then the finish into `out` (the sun's shafts added if they
+    /// were drawn this frame).
     pub fn run(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         out: &wgpu::TextureView,
         look: &Look,
+        shafts: bool,
     ) {
-        let sun = if self.shafts.is_some() {
-            look.sun
-        } else {
-            [0.0; 3]
-        };
+        let sun = if shafts { look.sun } else { [0.0; 3] };
         let k = [
             sun[0],
             sun[1],

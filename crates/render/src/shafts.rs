@@ -104,17 +104,18 @@ impl Shafts {
         self.view = Some(view);
     }
 
-    /// The sun's shafts as `cam` sees them under `look`'s sun: how strong
-    /// (0 when it is behind the eye, down or off far from the screen).
+    /// The sun's shafts as `cam` sees them under `look`'s sun; how strong
+    /// they are (0 when it is behind the eye, down, off far from the
+    /// screen or behind cloud: then nothing is marched).
     pub fn run(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         cam: &Camera,
         look: &Look,
-    ) {
+    ) -> f32 {
         let (Some(view), Some(group)) = (&self.view, &self.group) else {
-            return;
+            return 0.0;
         };
         let sun = geo::norm(look.sun_dir);
         let (vp, _, _) = cam.matrices(cam.fov);
@@ -127,13 +128,22 @@ impl Shafts {
         let (uv, k) = if clip[2] > 0.01 && sun[1] > 0.0 {
             let ndc = [clip[0] / clip[2], clip[1] / clip[2]];
             let uv = [ndc[0] * 0.5 + 0.5, 0.5 - ndc[1] * 0.5];
-            // Fading as the sun leaves the screen, and as it sets.
+            // Fading as the sun leaves the screen, as it sets, and as
+            // cloud covers the sky.
             let off = (uv[0] - 0.5).abs().max((uv[1] - 0.5).abs());
             let k = (1.0 - (off - 0.5) / 0.6).clamp(0.0, 1.0) * (sun[1] / 0.08).min(1.0);
-            (uv, k * laws::SHAFTS)
+            let (clear, dull) = laws::SHAFT_CLOUDS;
+            let cover = ((look.clouds - clear) / (dull - clear)).clamp(0.0, 1.0);
+            (
+                uv,
+                k * (1.0 - cover * cover * (3.0 - 2.0 * cover)) * laws::SHAFTS,
+            )
         } else {
             ([0.5, 0.5], 0.0)
         };
+        if k <= 0.0 {
+            return 0.0;
+        }
         let q = self.quarter();
         let u = [
             uv[0],
@@ -151,5 +161,6 @@ impl Shafts {
         rp.set_pipeline(&self.pipe);
         rp.set_bind_group(0, group, &[]);
         rp.draw(0..3, 0..1);
+        k
     }
 }

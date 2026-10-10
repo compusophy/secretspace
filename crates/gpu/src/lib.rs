@@ -97,11 +97,9 @@ fn say(s: &str) {
     eprintln!("{s}");
 }
 
-/// Optional features asked for whenever the adapter offers them.
+/// Optional features asked for whenever the adapter offers them (only
+/// what the engine uses): drawing into the small float format (bloom's
+/// chain at half the bytes).
 pub fn wanted() -> wgpu::Features {
-    wgpu::Features::TIMESTAMP_QUERY
-        | wgpu::Features::FLOAT32_FILTERABLE
-        | wgpu::Features::RG11B10UFLOAT_RENDERABLE
-        | wgpu::Features::SHADER_F16
-        | wgpu::Features::INDIRECT_FIRST_INSTANCE
+    wgpu::Features::RG11B10UFLOAT_RENDERABLE
 }

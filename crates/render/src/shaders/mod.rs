@@ -45,6 +45,7 @@ pub fn scene(msaa: bool, ssr: u32) -> String {
         .replace("SPARK_MAX_PX", &format!("{:.1}", crate::laws::SPARK_MAX_PX))
         .replace("PUFF_MAX", &format!("{:.3}", crate::laws::PUFF_MAX))
         .replace("SPARK_NEAR", &format!("{:.3}", crate::laws::SPARK_NEAR))
+        .replace("GRASS_THIN", &format!("{:.3}", crate::laws::GRASS_THIN))
         .replace("SSR_STEPS", &format!("{steps}"))
         .replace("SSR_GROW", &format!("{grow:.5}"))
 }
