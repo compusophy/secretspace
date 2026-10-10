@@ -313,7 +313,7 @@ fn serve(
         return respond(&mut out, "200 OK", "application/json", body.as_bytes());
     }
     match root {
-        Some(root) => file(&mut out, root, path),
+        Some(root) => file(&mut out, root, path, query),
         None => respond(&mut out, "200 OK", "text/plain", b"secretspace\n"),
     }
 }
@@ -405,7 +405,7 @@ fn respond(out: &mut TcpStream, status: &str, kind: &str, body: &[u8]) -> std::i
     out.write_all(body)
 }
 
-fn file(out: &mut TcpStream, root: &Path, path: &str) -> std::io::Result<()> {
+fn file(out: &mut TcpStream, root: &Path, path: &str, query: &str) -> std::io::Result<()> {
     if path.split('/').any(|seg| seg == "..") {
         return respond(out, "400 Bad Request", "text/plain", b"no");
     }
@@ -418,7 +418,16 @@ fn file(out: &mut TcpStream, root: &Path, path: &str) -> std::io::Result<()> {
     }
     let rel = path.trim_start_matches('/');
     let mut p = root.join(rel);
-    if rel.is_empty() || rel.ends_with('/') || p.is_dir() {
+    // A page's folder without its slash (`/wandfall`): its own paths
+    // (`./pkg/`) would miss, so it is sent to the slash.
+    if !rel.is_empty() && !rel.ends_with('/') && p.is_dir() {
+        let q = if query.is_empty() { "" } else { "?" };
+        return write!(
+            out,
+            "HTTP/1.1 301 Moved Permanently\r\nLocation: {path}/{q}{query}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+    }
+    if rel.is_empty() || rel.ends_with('/') {
         p = p.join("index.html");
     }
     let kind = match p.extension().and_then(|e| e.to_str()) {

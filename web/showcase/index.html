@@ -10,6 +10,9 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0d1a'/%3E%3Cpath d='M16 6l9 17H7z' fill='%23ffd27a'/%3E%3C/svg%3E">
 <!-- The game server. Empty: this page's own origin. The deploy sets it. -->
 <meta name="server" content="">
+<!-- The page's code and its wasm, fetched at once rather than one after the other. -->
+<link rel="modulepreload" href="/showcase/pkg/showcase.js">
+<link rel="preload" href="/showcase/pkg/showcase_bg.wasm" as="fetch" type="application/wasm" crossorigin>
 <style>
   html, body { margin: 0; height: 100%; background: #0b0d1a; overflow: hidden; }
   /* kit sizes the canvas in CSS pixels: on a phone 100vh is taller than what shows. */
@@ -19,6 +22,6 @@
 <body>
 <canvas id="screen" aria-label="the engine showcase"></canvas>
 <noscript>the showcase is drawn by WebAssembly; it needs a browser that runs it.</noscript>
-<script type="module">import init from "./pkg/showcase.js"; init();</script>
+<script type="module">import init from "/showcase/pkg/showcase.js"; init();</script>
 </body>
 </html>
