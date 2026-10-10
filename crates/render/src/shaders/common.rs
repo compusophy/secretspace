@@ -165,18 +165,29 @@ fn shadow_in(m: mat4x4<f32>, c: i32, pos: vec3<f32>, off: vec3<f32>, bias: f32, 
     return sum / 8.0;
 }
 
+/// A layer's bias for a surface turned `tilt` from the sun (the tangent of
+/// its angle): edge on, its depth runs away across the taps of its soft
+/// edge, so it is let lie deeper, by as much as it runs over them
+/// (`offset`, how far out along its normal it is looked up, is the
+/// layer's texel in metres times `SHADOW_NORMAL`).
+fn tilted(bias: f32, offset: f32, tilt: f32) -> f32 {
+    return bias * (1.0 + SHADOW_SLOPE * offset * tilt);
+}
+
 /// The island's own layer at `pos` (`lean`: how far out along `n`).
-fn island_lit(pos: vec3<f32>, n: vec3<f32>, lean: f32, turn: f32) -> f32 {
-    return shadow_in(g.shadow[3], i32(g.island.x), pos, n * (g.offset.w * lean), g.bias.w, turn);
+fn island_lit(pos: vec3<f32>, n: vec3<f32>, lean: f32, tilt: f32, turn: f32) -> f32 {
+    let bias = tilted(g.bias.w, g.offset.w, tilt);
+    return shadow_in(g.shadow[3], i32(g.island.x), pos, n * (g.offset.w * lean), bias, turn);
 }
 
 /// Cascade `c` at `pos`; in the last of two or more, what stands still
 /// there is in the island's layer (the cascade holds only what moves:
 /// `cull::held`).
-fn cascade_lit(c: i32, pos: vec3<f32>, n: vec3<f32>, lean: f32, turn: f32) -> f32 {
-    var lit = shadow_in(g.shadow[c], c, pos, n * (g.offset[c] * lean), g.bias[c], turn);
+fn cascade_lit(c: i32, pos: vec3<f32>, n: vec3<f32>, lean: f32, tilt: f32, turn: f32) -> f32 {
+    let bias = tilted(g.bias[c], g.offset[c], tilt);
+    var lit = shadow_in(g.shadow[c], c, pos, n * (g.offset[c] * lean), bias, turn);
     if (c >= 1 && c == i32(g.view.w) - 1 && g.island.y > 0.5) {
-        lit = min(lit, island_lit(pos, n, lean, turn));
+        lit = min(lit, island_lit(pos, n, lean, tilt, turn));
     }
     return lit;
 }
@@ -206,24 +217,27 @@ fn sunlit(pos: vec3<f32>, n: vec3<f32>) -> f32 {
     // edge and not a pattern.
     let s = g.vp * vec4<f32>(pos, 1.0);
     let turn = ign((s.xy / s.w * vec2<f32>(0.5, -0.5) + 0.5) * g.view.xy) * 6.2831853;
-    // What faces the sun needs pushing out of its own shadow less.
-    let lean = 1.0 - 0.5 * max(dot(n, g.sun_dir.xyz), 0.0);
+    // What faces the sun needs pushing out of its own shadow less; what
+    // is edge on to it, letting lie deeper.
+    let nl = dot(n, g.sun_dir.xyz);
+    let lean = 1.0 - 0.5 * max(nl, 0.0);
+    let tilt = min(sqrt(max(1.0 - nl * nl, 0.0)) / max(abs(nl), 1e-3), SHADOW_TILT);
     var lit = 1.0;
     if (c < count) {
-        lit = cascade_lit(c, pos, n, lean, turn);
+        lit = cascade_lit(c, pos, n, lean, tilt, turn);
         let end = g.splits[c];
         let start = end * (1.0 - SHADOW_BAND);
         if (ahead > start) {
             var next = 1.0;
             if (c + 1 < count) {
-                next = cascade_lit(c + 1, pos, n, lean, turn);
+                next = cascade_lit(c + 1, pos, n, lean, tilt, turn);
             } else if (whole) {
-                next = island_lit(pos, n, lean, turn);
+                next = island_lit(pos, n, lean, tilt, turn);
             }
             lit = mix(lit, next, smoothstep(start, end, ahead));
         }
     } else if (whole) {
-        lit = island_lit(pos, n, lean, turn);
+        lit = island_lit(pos, n, lean, tilt, turn);
     }
     return mix(1.0, lit, g.splits.w);
 }

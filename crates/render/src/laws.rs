@@ -116,6 +116,11 @@ pub const SHADOW_BAND: f32 = 0.15;
 pub const SHADOW_BACK: f32 = 300.0;
 pub const SHADOW_RASTER: (i32, f32) = (2, 2.5);
 pub const SHADOW_TURN: f32 = 0.0087;
+/// A surface edge on to the sun is let lie deeper in its own shadow, by
+/// how far its depth runs across the soft edge's taps: by the tangent of
+/// its angle from the sun, up to this (so what is nearly edge on does
+/// not speckle itself, and nothing stands far off its own shadow).
+pub const SHADOW_TILT: f32 = 5.0;
 /// Culling what stands still: how far past its box a shadow cascade takes
 /// what casts (a share of its half width: it is laid out again once its
 /// box has moved this far); how much wider than the eye's the view's cone

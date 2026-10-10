@@ -47,6 +47,14 @@ pub fn depth_type(msaa: bool) -> &'static str {
 pub fn scene(msaa: bool, ssr: u32) -> String {
     let steps = ssr.max(2);
     let grow = (120.0f32 / 0.6).powf(1.0 / (steps - 1) as f32);
+    // How much a layer's bias grows a metre of its normal offset, a unit
+    // of tilt: its soft edge's reach (in texels) over the bias.
+    let laws = (
+        crate::laws::SHADOW_SOFT,
+        crate::laws::SHADOW_NORMAL,
+        crate::laws::SHADOW_BIAS,
+    );
+    let slope = laws.0 / (laws.1 * laws.2);
     format!("{}{IGN}{}{}", common::COMMON, world::WORLD, decal::DECAL)
         .replace("DEPTH_TYPE", depth_type(msaa))
         .replace("NEAR_PLANE", &format!("{:.4}", crate::laws::NEAR))
@@ -56,6 +64,8 @@ pub fn scene(msaa: bool, ssr: u32) -> String {
         .replace("GRASS_THIN", &format!("{:.3}", crate::laws::GRASS_THIN))
         .replace("SHADOW_SOFT", &format!("{:.3}", crate::laws::SHADOW_SOFT))
         .replace("SHADOW_BAND", &format!("{:.3}", crate::laws::SHADOW_BAND))
+        .replace("SHADOW_TILT", &format!("{:.3}", crate::laws::SHADOW_TILT))
+        .replace("SHADOW_SLOPE", &format!("{slope:.4}"))
         .replace("SSR_ON", if ssr > 0 { "true" } else { "false" })
         .replace("SSR_STEPS", &format!("{steps}"))
         .replace("SOFT_FADE", &format!("{:.3}", crate::laws::SOFT_FADE))
