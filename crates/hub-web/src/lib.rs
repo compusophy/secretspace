@@ -73,12 +73,8 @@ const GO: Rgba = Rgba::rgb(87, 227, 137);
 
 struct Hub {
     screen: kit::Screen,
-    socket: Option<kit::Socket>,
-    /// The first connection counts the visit.
-    counted: bool,
-    retry_at: f64,
-    retries: u32,
-    up: bool,
+    /// The live numbers (`/ws/hub`); its first connection counts the visit.
+    link: kit::Link,
     stats: Option<Stats>,
     pointer: Option<(f32, f32)>,
     /// Where each card was drawn last frame, for clicks.
@@ -107,31 +103,15 @@ fn with<R>(f: impl FnOnce(&mut Hub) -> R) -> Option<R> {
     HUB.with(|h| h.try_borrow_mut().ok()?.as_mut().map(f))
 }
 
-fn connect(h: &mut Hub) {
-    let url = kit::room_url("hub", if h.counted { "" } else { "v=1" });
-    h.counted = true;
-    h.socket = kit::Socket::open(
-        &url,
-        || {
-            with(|h| {
-                h.up = true;
-                h.retries = 0;
-            });
-        },
-        |bytes| {
-            if let Some(s) = Stats::decode(&bytes) {
-                with(|h| h.stats = Some(s));
+/// The live numbers, as they come.
+fn numbers(h: &mut Hub, now: f64) {
+    for ev in h.link.poll(now) {
+        if let kit::Net::Message(b) = ev {
+            if let Some(s) = Stats::decode(&b) {
+                h.stats = Some(s);
             }
-        },
-        || {
-            with(|h| {
-                h.up = false;
-                h.socket = None;
-                h.retries += 1;
-                h.retry_at = kit::now() + 500.0 * 2f64.powi(h.retries.min(5) as i32);
-            });
-        },
-    );
+        }
+    }
 }
 
 /// 2413 -> "2,413".
@@ -166,57 +146,20 @@ fn soon_preview(c: &mut Canvas, b: Rect, t: f32, u: f32, hue: f32) {
     );
 }
 
-/// Watch wyrm for its card: a watcher is never one of the people there.
-fn watch_wyrm(h: &mut Hub) {
-    let url = kit::room_url("wyrm", "watch=1");
-    h.watch.socket = kit::Socket::open(
-        &url,
-        || {
-            with(|h| {
-                h.watch.up = true;
-                h.watch.retries = 0;
-                // The server sends the part of the arena this screen would
-                // show a watcher; the card shows the middle of it.
-                let (w, ht) = h.screen.css;
-                let screen = wyrm::proto::Up::Screen {
-                    w: w as u16,
-                    h: ht as u16,
-                };
-                if let Some(s) = &h.watch.socket {
-                    s.send(&screen.encode());
-                }
-            });
-        },
-        |bytes| {
-            with(|h| h.watch.receive(kit::now(), &bytes));
-        },
-        || {
-            with(|h| h.watch.closed(kit::now()));
-        },
-    );
-}
-
 /// A game is open over the page: let its connections go (the player is
 /// counted in the game; the cards are not watched unseen). They come back
 /// once it is left.
 fn rest(h: &mut Hub) {
-    if let Some(s) = h.socket.take() {
-        s.close();
-    }
-    if let Some(s) = h.watch.socket.take() {
-        s.close();
-    }
+    // Hung up, not dropped: polled again, it connects again, uncounted.
+    h.link.close();
+    h.watch.rest();
     h.wand.rest();
 }
 
 fn draw(h: &mut Hub, now: f64) {
-    if h.socket.is_none() && now >= h.retry_at {
-        connect(h);
-    }
-    if h.watch.socket.is_none() && now >= h.watch.retry_at {
-        watch_wyrm(h);
-    }
+    numbers(h, now);
     let css = h.screen.css;
+    h.watch.poll(now, css);
     // A watcher's zoom in the game, pulled back a little: a card is small.
     let k = 0.8 * wyrm::laws::view_scale(18.0, css.0 as f32, css.1 as f32) / h.screen.scale as f32;
     let u = h.screen.ui();
@@ -225,7 +168,7 @@ fn draw(h: &mut Hub, now: f64) {
     let (w, ht) = (h.screen.px.w as f32, h.screen.px.h as f32);
     let pointer = h.pointer;
     let stats = h.stats.clone();
-    let up = h.up;
+    let up = h.link.up();
     let c = &mut h.screen.px;
     c.clear(BG);
 
@@ -424,11 +367,7 @@ pub fn start() -> Result<(), JsValue> {
     HUB.with(|h| {
         *h.borrow_mut() = Some(Hub {
             screen,
-            socket: None,
-            counted: false,
-            retry_at: 0.0,
-            retries: 0,
-            up: false,
+            link: kit::Link::open("hub", Vec::new(), false),
             stats: None,
             pointer: None,
             hits: Vec::new(),

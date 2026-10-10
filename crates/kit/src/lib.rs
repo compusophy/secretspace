@@ -1,7 +1,7 @@
 //! The browser end every page here shares, so a game's page is only its
 //! own drawing and rules: a pixel `Screen` the game draws into and shows
 //! once a frame (or a WebGL2 screen, `gl`, with a pixel layer over it), a
-//! `Link` to its room (or a plain `Socket`), the `Session` that says who
+//! `Link` to its room, the `Session` that says who
 //! this is, one `Pointer` at a time (or every hand at once, `input`), the
 //! page's `version`, an invisible `TextField` (so a phone still offers its
 //! keyboard), storage, `audio`, a frame loop, `report`s to the server
@@ -32,8 +32,8 @@ use pixels::Canvas;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{
-    BinaryType, CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement,
-    HtmlInputElement, ImageData, MessageEvent, WebSocket, Window,
+    CanvasRenderingContext2d, Document, HtmlCanvasElement, HtmlElement, HtmlInputElement,
+    ImageData, Window,
 };
 
 pub fn window() -> Window {
@@ -284,49 +284,6 @@ impl Screen {
         ) {
             let _ = self.ctx.put_image_data(&img, 0.0, 0.0);
         }
-    }
-}
-
-/// A WebSocket to a room. Messages arrive through the callback given to
-/// `open`; whether it is up is `up()`.
-pub struct Socket {
-    ws: WebSocket,
-}
-
-impl Socket {
-    pub fn open(
-        url: &str,
-        on_open: impl FnMut() + 'static,
-        mut on_message: impl FnMut(Vec<u8>) + 'static,
-        on_close: impl FnMut() + 'static,
-    ) -> Option<Socket> {
-        let ws = WebSocket::new(url).ok()?;
-        ws.set_binary_type(BinaryType::Arraybuffer);
-        let mut on_open = on_open;
-        on(&ws, "open", move |_| on_open());
-        on(&ws, "message", move |e| {
-            if let Ok(e) = e.dyn_into::<MessageEvent>() {
-                on_message(js_sys::Uint8Array::new(&e.data()).to_vec());
-            }
-        });
-        let mut on_close = on_close;
-        on(&ws, "close", move |_| on_close());
-        Some(Socket { ws })
-    }
-
-    pub fn up(&self) -> bool {
-        self.ws.ready_state() == WebSocket::OPEN
-    }
-
-    pub fn send(&self, bytes: &[u8]) {
-        if self.up() {
-            let _ = self.ws.send_with_u8_array(bytes);
-        }
-    }
-
-    /// Hang up (its `on_close` still comes).
-    pub fn close(&self) {
-        let _ = self.ws.close();
     }
 }
 
