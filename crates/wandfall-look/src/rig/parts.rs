@@ -16,6 +16,7 @@ use render::sculpt::{
 
 use super::pose::{ANKLE, FORE, SHIN, THIGH, TIP, UPPER};
 use crate::flora::steps;
+use crate::land::join;
 
 pub const SKIN: V3 = rgb(226, 170, 130);
 pub const GOLD: V3 = rgb(224, 178, 92);
@@ -37,13 +38,6 @@ fn mix(a: V3, b: V3, t: f32) -> V3 {
 
 fn scale(a: V3, k: f32) -> V3 {
     render::geo::scale(a, k)
-}
-
-/// One geometry onto another.
-fn join(g: &mut Geo, h: Geo) {
-    let base = g.len() as u32;
-    g.v.extend(h.v);
-    g.i.extend(h.i.into_iter().map(|k| k + base));
 }
 
 /// How much a sculpt's creases darken, over how far (m): cloth and

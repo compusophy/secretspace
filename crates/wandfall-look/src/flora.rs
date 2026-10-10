@@ -18,6 +18,8 @@ use render::sculpt::{bend, both, cone, ellipsoid, mesh, noise, sheet, smin};
 
 /// How much coarser the far ones are.
 pub const FAR: f32 = 2.6;
+/// A boulder's proportions as set down (times its prop's scale).
+pub const ROCK: V3 = [1.2, 1.4, 1.1];
 
 /// A broadleaf crown's colours: dark, light.
 pub type Leaves = (V3, V3);

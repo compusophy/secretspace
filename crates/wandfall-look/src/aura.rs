@@ -19,8 +19,24 @@ const PAD: V3 = rgb(255, 200, 110);
 /// The causeway's: sea-green.
 const SPRAY: V3 = rgb(150, 255, 214);
 use crate::look::Look;
-use wandfall::laws::RIFT_DEPTH;
+use wandfall::laws::{RIFT_DEPTH, TOWER_HEIGHT};
 use wandfall::places::Place;
+
+/// A flat thing laid at `at` with `up` as its upright, turned `turn`
+/// radians about it, sized `size` (across, up, across).
+fn laid(at: V3, up: V3, turn: f32, size: V3) -> render::M4 {
+    let x = geo::norm(geo::cross(up, [0.0, 0.0, 1.0]));
+    let z = geo::cross(x, up);
+    let (s, c) = turn.sin_cos();
+    let across = geo::add(geo::scale(x, c), geo::scale(z, s));
+    let along = geo::sub(geo::scale(z, c), geo::scale(x, s));
+    m4::basis(
+        at,
+        geo::scale(across, size[0]),
+        geo::scale(up, size[1]),
+        geo::scale(along, size[2]),
+    )
+}
 
 impl Look {
     /// What moves at the places, and their light, `t` seconds in.
@@ -52,21 +68,23 @@ impl Look {
         }
         // Launch runes: a circle of runes turning on the ground, a shaft
         // of light up out of it, motes rising; its light.
-        for (k, &p) in l.pads.iter().enumerate() {
+        for (k, &(p, up)) in l.pads.iter().enumerate() {
+            // Laid on the ground's slope, just over it.
+            let on = geo::add(p, geo::scale(up, 0.1));
             let floor = [p[0], p[1] + 0.25, p[2]];
             let pulse = 0.75 + 0.25 * (t * 2.6 + k as f32).sin();
             let r = wandfall::laws::PAD_R;
             glow(
                 d,
                 self.sigil,
-                m4::place(floor, t * 0.7, [r * 1.15, 1.0, r * 1.15]),
+                laid(on, up, t * 0.7, [r * 1.15, 1.0, r * 1.15]),
                 PAD,
                 0.9 * pulse,
             );
             glow(
                 d,
                 self.ring,
-                m4::place(floor, -t, [r * 1.5, 1.0, r * 1.5]),
+                laid(on, up, -t, [r * 1.5, 1.0, r * 1.5]),
                 PAD,
                 0.5,
             );
@@ -108,9 +126,10 @@ impl Look {
             match p.place {
                 Place::Spire => {
                     // The beacon: a crystal turning over the hat, its
-                    // light up into the sky, runes wheeling about it.
-                    let foot = base[1] - 0.3;
-                    let top = [p.x, foot + 45.0 + (t * 1.3).sin() * 0.4, p.z];
+                    // light up into the sky, runes wheeling about it
+                    // (clear of the hat).
+                    let roof = base[1] - 0.3 + TOWER_HEIGHT;
+                    let top = [p.x, roof + 15.0 + (t * 1.3).sin() * 0.4, p.z];
                     let m = m4::place(top, t * 0.8, [1.3, 2.0, 1.3]);
                     d.items
                         .push(Item::new(l.gem, m).tint(VIOLET, 1.0).glow(2.2));
@@ -134,8 +153,8 @@ impl Look {
                         c: geo::scale(VIOLET, 4.0),
                     });
                     for (y, r, w) in [
-                        (foot + 31.4, 6.2, 0.35),
-                        (foot + 35.4, 4.4, -0.5),
+                        (roof + 2.0, 6.2, 0.35),
+                        (roof + 5.4, 4.4, -0.5),
                         (top[1], 2.4, 0.9),
                     ] {
                         glow(
@@ -360,5 +379,43 @@ impl Look {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wandfall::map::Map;
+
+    #[test]
+    fn a_launch_rune_lies_on_its_slope() {
+        // Round the ring's edge, how far the circle is off the ground:
+        // laid on the slope, never far; flat, part of it is buried or
+        // floats on a hillside.
+        let r = wandfall::laws::PAD_R * 1.5;
+        let (mut laid_worst, mut flat_worst) = (0.0f32, 0.0f32);
+        for seed in [1, 2, 3, 9] {
+            let map = Map::new(seed);
+            for &q in &map.pads {
+                let up = crate::land::slope(&map, q);
+                let m = laid(q, up, 0.3, [r, 1.0, r]);
+                for k in 0..24 {
+                    let a = k as f32 / 24.0 * TAU;
+                    let p = [
+                        m[0] * a.cos() + m[8] * a.sin() + m[12],
+                        m[1] * a.cos() + m[9] * a.sin() + m[13],
+                        m[2] * a.cos() + m[10] * a.sin() + m[14],
+                    ];
+                    laid_worst = laid_worst.max((p[1] - map.height(p[0], p[2])).abs());
+                    let flat = map.height(q[0] + a.cos() * r, q[2] + a.sin() * r);
+                    flat_worst = flat_worst.max((q[1] - flat).abs());
+                }
+            }
+        }
+        println!("laid {laid_worst}, flat {flat_worst}");
+        assert!(
+            laid_worst < 0.35 && laid_worst * 3.0 < flat_worst,
+            "laid {laid_worst}, flat {flat_worst}"
+        );
     }
 }

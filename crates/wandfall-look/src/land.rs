@@ -14,7 +14,7 @@ use render::{m4, Item, Material, Mesh, Renderer, Terrain};
 
 use wandfall::laws::{MAP_HALF, SEA};
 use wandfall::map::{Kind, Map};
-use wandfall::places::Poi;
+use wandfall::places::{Place, Poi};
 
 use crate::flora;
 
@@ -51,8 +51,9 @@ pub struct Land {
     /// The beacon's crystal, and a ring of runes a metre across.
     pub(crate) gem: Mesh,
     pub(crate) runes: Mesh,
-    /// The launch runes (their middles, on the ground).
-    pub(crate) pads: Vec<V3>,
+    /// The launch runes: their middles, on the ground, and which way is
+    /// up off the ground about them.
+    pub(crate) pads: Vec<(V3, V3)>,
     /// The top of the causeway's crown.
     pub(crate) crown: V3,
 }
@@ -70,6 +71,13 @@ pub(crate) fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
     f(&mut g);
     g.smooth();
     r.mesh(&g)
+}
+
+/// One geometry onto another.
+pub(crate) fn join(g: &mut Geo, h: Geo) {
+    let base = g.len() as u32;
+    g.v.extend(h.v);
+    g.i.extend(h.i.into_iter().map(|k| k + base));
 }
 
 /// Lean the vertices from `from` on `lean` radians from upright, toward
@@ -150,6 +158,29 @@ fn rune_ring(g: &mut Geo, glyphs: usize, seed: u32) {
     }
 }
 
+/// Of sizes made, the index of the one nearest `want` (by how many times
+/// over or under it is).
+fn nearest(made: &[f32], want: f32) -> usize {
+    (0..made.len())
+        .min_by(|&a, &b| {
+            let off = |k: usize| (made[k] / want).ln().abs();
+            off(a).total_cmp(&off(b))
+        })
+        .unwrap_or(0)
+}
+
+/// Which way is up off the ground about `at` (its slope across a launch
+/// rune's breadth).
+pub(crate) fn slope(map: &Map, at: V3) -> V3 {
+    let d = 1.5;
+    let h = |dx: f32, dz: f32| map.height(at[0] + dx, at[2] + dz);
+    let (sx, sz) = (
+        (h(d, 0.0) - h(-d, 0.0)) / (2.0 * d),
+        (h(0.0, d) - h(0.0, -d)) / (2.0 * d),
+    );
+    geo::norm([-sx, 1.0, -sz])
+}
+
 impl Land {
     /// Build the island's meshes and set it down as statics.
     pub fn new(r: &mut Renderer, map: &Map) -> Land {
@@ -171,17 +202,14 @@ impl Land {
             |r: &mut Renderer, f: &dyn Fn(f32) -> Geo| (r.mesh(&f(1.0)), r.mesh(&f(flora::FAR)));
         let trunks = [3u32, 8].map(|s| near_far(r, &|q| flora::trunk(s, q)));
         // Crowns: green, a deep teal, and the wizard-wood's violet.
-        let leaves = [
-            (rgb(42, 78, 30), rgb(118, 150, 60)),
-            (rgb(22, 70, 62), rgb(70, 136, 108)),
-            (rgb(70, 44, 118), rgb(156, 108, 206)),
-        ];
-        let crowns = [11u32, 29, 47].map(|s| {
-            let colours = leaves[(s as usize / 18) % 3];
-            near_far(r, &|q| flora::crown(s, colours, q))
-        });
+        let crowns = [
+            (11u32, (rgb(42, 78, 30), rgb(118, 150, 60))),
+            (29, (rgb(22, 70, 62), rgb(70, 136, 108))),
+            (47, (rgb(70, 44, 118), rgb(156, 108, 206))),
+        ]
+        .map(|(s, colours)| near_far(r, &|q| flora::crown(s, colours, q)));
         let pine_trunk = near_far(r, &|q| flora::pine_trunk(q));
-        let pines = near_far(r, &|q| flora::pine(5, q));
+        let pines = [5u32, 12, 21].map(|s| near_far(r, &|q| flora::pine(s, q)));
         let rocks = [5u32, 17, 23].map(|s| near_far(r, &|q| flora::boulder(s, q)));
         let spire = Spire::new(r, map);
         let relics = Relics::new(r);
@@ -191,11 +219,26 @@ impl Land {
             .map(|&(m, at)| Item::new(m, m4::place(at, 0.0, [1.0; 3])).material(Material::Terrain))
             .collect();
         statics.push(Item::new(spire.decks, m4::ID).rough(0.85).detail(0.15));
+        // What lies on the ground finer than its samples: the paving, the
+        // lava.
+        let mut laid = Vec::new();
+        for p in &map.pois {
+            let (g, rough) = match p.place {
+                Place::Spire => (ground::paving(p), 0.8),
+                Place::Rift => (ground::lava(p, map.seed as u32, &t), 0.5),
+                _ => continue,
+            };
+            let m = r.mesh(&g);
+            statics.push(Item::new(m, m4::ID).rough(rough).detail(0.25));
+            laid.push(m);
+        }
         let mut lamps = Vec::new();
         let mut gems = Vec::new();
         let mut gate_at = ([0.0; 3], 0.0);
         let basalt = crate::basalt::Basalt::new(r);
-        let mut crown = [0.0, f32::MIN, 0.0];
+        // The causeway's crown: its tallest column.
+        let mut crown = ([0.0; 3], f32::MIN);
+        let far = |it: Item, near_far: (Mesh, Mesh)| it.far(near_far.1, FAR_AWAY);
         for (k, p) in map.props.iter().enumerate() {
             let at = [p.x, p.y, p.z];
             let h = hash(k as i32, 3, 5);
@@ -205,7 +248,7 @@ impl Land {
                     let m = m4::place(at, p.yaw, [s; 3]);
                     let pine = k % 7 == 0 || k % 7 == 4;
                     let (trunk, crown) = if pine {
-                        (pine_trunk, pines)
+                        (pine_trunk, pines[k % 3])
                     } else {
                         (
                             trunks[k % 2],
@@ -216,40 +259,38 @@ impl Land {
                             },
                         )
                     };
+                    // Each its own shade: lighter or darker, warmer or
+                    // cooler.
+                    let u = |i| unit(hash(k as i32, i, 17)) - 0.5;
+                    let shade = 0.95 + 0.1 * u(3);
+                    let tint = [
+                        (1.0 + 0.05 * u(0)) * shade,
+                        (1.0 + 0.04 * u(1)) * shade,
+                        (1.0 + 0.05 * u(2)) * shade,
+                    ];
+                    statics.push(far(Item::new(trunk.0, m), trunk).rough(0.9).detail(0.25));
                     statics.push(
-                        Item::new(trunk.0, m)
-                            .far(trunk.1, FAR_AWAY)
-                            .rough(0.9)
-                            .detail(0.25),
-                    );
-                    statics.push(
-                        Item::new(crown.0, m)
-                            .far(crown.1, FAR_AWAY)
+                        far(Item::new(crown.0, m), crown)
+                            .tint(tint, 1.0)
                             .material(Material::Foliage)
                             .rough(0.75),
                     );
                 }
                 Kind::Rock => {
-                    let s = p.scale;
-                    let m = m4::place(at, p.yaw, [s * 1.2, s * 1.4, s * 1.1]);
-                    let (near, far) = rocks[k % 3];
-                    statics.push(
-                        Item::new(near, m)
-                            .far(far, FAR_AWAY)
-                            .rough(0.85)
-                            .detail(0.35),
-                    );
+                    let m = m4::place(at, p.yaw, geo::scale(flora::ROCK, p.scale));
+                    let rock = rocks[k % 3];
+                    statics.push(far(Item::new(rock.0, m), rock).rough(0.85).detail(0.35));
                 }
                 Kind::Pillar => {
-                    let m = m4::place(at, p.yaw, [1.0, p.h, 1.0]);
-                    statics.push(Item::new(relics.pillar, m).rough(0.7).detail(0.3));
-                    if k % 2 == 0 {
-                        let top = [p.x, p.y + p.h, p.z];
-                        statics.push(
-                            Item::new(relics.cap, m4::place(top, p.yaw, [1.0; 3]))
-                                .rough(0.75)
-                                .detail(0.3),
-                        );
+                    let (shaft, cap) = relics::pillar_parts(p.h, k % 2 == 0);
+                    let v = nearest(&relics::PILLARS, shaft);
+                    let m = m4::place(at, p.yaw, [1.0, shaft / relics::PILLARS[v], 1.0]);
+                    let pillar = relics.pillars[v];
+                    statics.push(far(Item::new(pillar.0, m), pillar).rough(0.8).detail(0.3));
+                    if let Some(y) = cap {
+                        let m = m4::place([p.x, p.y + y, p.z], p.yaw, [1.0; 3]);
+                        let cap = relics.cap;
+                        statics.push(far(Item::new(cap.0, m), cap).rough(0.8).detail(0.3));
                     }
                 }
                 Kind::Shroom => {
@@ -259,30 +300,36 @@ impl Land {
                 Kind::Tower => {
                     let m = m4::place(at, 0.0, [1.0; 3]);
                     statics.push(Item::new(spire.tower, m).rough(0.8).detail(0.12));
-                    statics.push(Item::new(spire.trim, m).rough(0.85).detail(0.1));
+                    statics.push(Item::new(spire.trim, m).rough(0.85).detail(0.25));
                 }
                 Kind::Merlon => {
                     let m = m4::place(at, p.yaw, [1.0; 3]);
-                    statics.push(Item::new(spire.merlon, m).rough(0.85).detail(0.15));
+                    let merlon = spire.merlon;
+                    statics.push(far(Item::new(merlon.0, m), merlon).rough(0.85).detail(0.2));
                 }
                 Kind::Lamp => {
                     statics.push(Item::new(spire.lamp, m4::place(at, 0.0, [1.0; 3])).rough(0.5));
                     lamps.push([p.x, p.y + 3.15, p.z]);
                 }
                 Kind::Stone => {
-                    let m = m4::place(at, p.yaw, [1.1, p.h, 1.9]);
-                    statics.push(Item::new(relics.menhir, m).rough(0.9).detail(0.2));
+                    // Taller or shorter: stretched upright only.
+                    let m = m4::place(at, p.yaw, [1.0, p.h / relics::MENHIR, 1.0]);
+                    let stone = relics.menhir;
+                    statics.push(far(Item::new(stone.0, m), stone).rough(0.9).detail(0.25));
                 }
                 Kind::Altar => {
                     statics.push(
                         Item::new(relics.altar, m4::place(at, 0.4, [1.0; 3]))
                             .rough(0.85)
-                            .detail(0.5),
+                            .detail(0.3),
                     );
                 }
                 Kind::Spike => {
-                    let m = m4::place(at, p.yaw, [p.r * 1.1, p.h, p.r * 1.1]);
-                    statics.push(Item::new(relics.spike, m).rough(0.55));
+                    let (wide, tall) = relics::SPIKE;
+                    let w = p.r * 1.1 / wide;
+                    let m = m4::place(at, p.yaw, [w, p.h / tall, w]);
+                    let spike = relics.spikes[k % 3];
+                    statics.push(far(Item::new(spike.0, m), spike).rough(0.12));
                 }
                 Kind::Portal => {
                     statics
@@ -301,10 +348,26 @@ impl Land {
                 }
                 Kind::Column => {
                     basalt.put(&mut statics, p, k);
-                    if p.y + p.h > crown[1] {
-                        crown = [p.x, p.y + p.h, p.z];
+                    if p.h > crown.1 {
+                        crown = ([p.x, p.y + p.h, p.z], p.h);
                     }
                 }
+            }
+        }
+        // Shards of obsidian about the rift's lip (small: underfoot).
+        for p in map.pois.iter().filter(|p| p.place == Place::Rift) {
+            for k in 0..12 {
+                let u = |i| unit(hash(k, i, 0x5a4d));
+                let a = u(0) * TAU;
+                let d = p.r * (0.82 + 0.25 * u(1));
+                let (x, z) = (p.x + a.cos() * d, p.z + a.sin() * d);
+                let w = 0.25 + 0.15 * u(2);
+                let m = m4::place(
+                    [x, map.height(x, z) - 0.08, z],
+                    a,
+                    [w, 0.05 + 0.04 * u(3), w],
+                );
+                statics.push(Item::new(relics.spikes[k as usize % 3].1, m).rough(0.12));
             }
         }
         for k in 0..7 {
@@ -314,25 +377,24 @@ impl Land {
             let y = map.height(x, z).max(SEA) + 26.0 + 16.0 * unit(hash(k, 3, map.seed as u32));
             let s = 0.6 + 0.6 * unit(hash(k, 4, map.seed as u32));
             statics.push(
-                Item::new(relics.islet, m4::place([x, y, z], a, [s; 3]))
-                    .rough(0.9)
-                    .detail(0.6),
+                Item::new(
+                    relics.islets[k as usize % 3],
+                    m4::place([x, y, z], a, [s; 3]),
+                )
+                .rough(0.9)
+                .detail(0.4),
             );
             if k % 2 == 0 {
-                let m = m4::place([x, y + 0.6 * s, z], a, [s * 0.8; 3]);
+                let m = m4::place([x, y + 0.4 * s, z], a, [s * 0.8; 3]);
                 // Always far off: the coarser tree.
                 statics.push(Item::new(trunks[0].1, m).rough(0.9));
                 statics.push(Item::new(crowns[k as usize % 3].1, m).material(Material::Foliage));
             } else {
+                // A crystal hanging point down from its underside.
                 let c = mix(AMETHYST, AQUA, (k % 3) as f32 / 2.0);
-                let m = m4::basis(
-                    [x, y - 4.0 * s, z],
-                    [s * 1.4, 0.0, 0.0],
-                    [0.0, -3.0 * s, 0.0],
-                    [0.0, 0.0, s * 1.4],
-                );
+                let (m, light) = relics::hanging([x, y, z], s);
                 statics.push(Item::new(relics.crystals[0], m).tint(c, 1.0).rough(0.25));
-                gems.push(([x, y - 6.0 * s, z], c));
+                gems.push((light, c));
             }
         }
         r.statics(statics);
@@ -343,11 +405,13 @@ impl Land {
         let runes = one(r, |g| rune_ring(g, 18, 5));
         let mut held: Vec<Mesh> = spire.meshes().into_iter().chain(relics.meshes()).collect();
         held.extend(ground.iter().map(|g| g.0));
+        held.extend(laid);
         for (a, b) in trunks
             .into_iter()
             .chain(crowns)
             .chain(rocks)
-            .chain([pine_trunk, pines])
+            .chain(pines)
+            .chain([pine_trunk])
         {
             held.extend([a, b]);
         }
@@ -361,8 +425,8 @@ impl Land {
             gate: gate_at,
             gem,
             runes,
-            pads: map.pads.clone(),
-            crown,
+            pads: map.pads.iter().map(|&q| (q, slope(map, q))).collect(),
+            crown: crown.0,
         }
     }
 }
