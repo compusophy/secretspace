@@ -1,6 +1,7 @@
 //! The arena kept across a restart: every snake, people's by soul and the
 //! bots, but not the food, which grows back. A person's snake comes back
-//! frozen and harmless, waiting for them (`HOLD_TICKS`).
+//! frozen and harmless, waiting for them (`HOLD_TICKS`); a guest's (soul
+//! 0) does not, since nobody could claim it.
 
 use std::collections::VecDeque;
 
@@ -12,6 +13,9 @@ use crate::bots::Bot;
 use crate::laws::*;
 
 const SNAKES: u16 = 1;
+/// How many ticks each snake had lived, in the same order. Saves from
+/// before it have none, and their snakes count from the restart.
+const AGES: u16 = 2;
 /// More than an arena holds; a file that asks for more is not ours.
 const MAX_SNAKES: usize = 1024;
 const MAX_POINTS: usize = 4096;
@@ -32,8 +36,13 @@ impl World {
                 w.u32(x.to_bits()).u32(y.to_bits());
             }
         }
+        let mut ages = Writer::default();
+        for s in &self.snakes {
+            ages.u32(self.tick.wrapping_sub(s.born));
+        }
         let mut out = Sections::default();
         out.add(SNAKES, &w.0);
+        out.add(AGES, &ages.0);
         out.finish()
     }
 
@@ -43,10 +52,17 @@ impl World {
         let Ok(secs) = sections(bytes) else {
             return false;
         };
+        let mut ages = Vec::new();
+        if let Some(sec) = secs.iter().find(|s| s.0 == AGES) {
+            let mut r = Reader::new(sec.1);
+            while let Some(age) = r.u32() {
+                ages.push(age);
+            }
+        }
         let Some(snakes) = secs
             .iter()
             .find(|s| s.0 == SNAKES)
-            .and_then(|s| self.read_snakes(s.1))
+            .and_then(|s| self.read_snakes(s.1, &ages))
         else {
             return false;
         };
@@ -57,14 +73,14 @@ impl World {
         true
     }
 
-    fn read_snakes(&self, b: &[u8]) -> Option<Vec<Snake>> {
+    fn read_snakes(&self, b: &[u8], ages: &[u32]) -> Option<Vec<Snake>> {
         let mut r = Reader::new(b);
         let n = r.u16()? as usize;
         if n > MAX_SNAKES {
             return None;
         }
         let place = |v: f32| v.is_finite() && v.abs() <= ARENA * 2.0;
-        let mut out = Vec::with_capacity(n);
+        let mut out: Vec<Snake> = Vec::with_capacity(n);
         for i in 0..n {
             let soul = r.u64()?;
             let name = engine::who::clean_name(&r.str()?);
@@ -89,6 +105,9 @@ impl World {
                 return None;
             }
             let bot = (is_bot != 0).then_some(Bot { nerve });
+            if bot.is_none() && soul == 0 {
+                continue;
+            }
             let held_until = if bot.is_none() {
                 self.tick + HOLD_TICKS
             } else {
@@ -96,7 +115,7 @@ impl World {
             };
             let (x, y) = body[0];
             out.push(Snake {
-                id: i as u16 + 1,
+                id: out.len() as u16 + 1,
                 soul: if bot.is_none() { soul } else { 0 },
                 name,
                 hue,
@@ -109,7 +128,7 @@ impl World {
                 bot,
                 moved: 0,
                 kills,
-                born: self.tick,
+                born: self.tick.wrapping_sub(ages.get(i).copied().unwrap_or(0)),
                 ghost_until: 0,
                 held_until,
                 owed: 0.0,
@@ -173,6 +192,23 @@ mod tests {
         let gone = (0..HOLD_TICKS + 2).any(|_| back.step().iter().any(|d| d.human));
         assert!(gone);
         assert!(back.snakes.iter().all(|s| s.soul != 3));
+    }
+
+    #[test]
+    fn a_guests_snake_is_not_kept_and_ages_are() {
+        let mut w = World::new(5);
+        w.spawn("guest", None);
+        let me = w.spawn("me", None);
+        w.snakes.iter_mut().find(|s| s.id == me).unwrap().soul = 8;
+        for _ in 0..50 {
+            w.step();
+        }
+        let age = w.tick.wrapping_sub(w.find(me).expect("a ghost yet").born);
+        let mut back = World::new(6);
+        assert!(back.load(&w.save()));
+        assert_eq!(back.humans(), 1, "nobody could claim the guest's");
+        let mine = back.snakes.iter().find(|s| s.soul == 8).unwrap();
+        assert_eq!(back.tick.wrapping_sub(mine.born), age);
     }
 
     #[test]

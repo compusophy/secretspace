@@ -29,6 +29,7 @@ pub struct Snake {
     /// Points added to the head on the last tick.
     pub moved: u8,
     pub kills: u32,
+    /// The tick it was born at.
     pub born: u32,
     /// Until this tick it passes through everyone, and they through it.
     pub ghost_until: u32,
@@ -76,14 +77,13 @@ pub struct Death {
     pub id: u16,
     pub name: String,
     pub score: u32,
-    pub at: (f32, f32),
+    pub kills: u32,
+    /// Ticks it lived.
+    pub age: u32,
     /// Whose body it ran into; None for the arena's edge.
     pub killer: Option<(u16, String)>,
     pub human: bool,
 }
-
-/// Dropped food rots after this many ticks.
-const ROT: u32 = 60 * TICK_HZ;
 
 pub struct World {
     pub tick: u32,
@@ -149,7 +149,7 @@ impl World {
         }
         self.next_snake = id.wrapping_add(1);
         let (x, y) = self.clear_spot();
-        let angle = self.unit() * std::f32::consts::TAU;
+        let angle = wrap(self.unit() * std::f32::consts::TAU);
         let mass = START_MASS;
         let body: VecDeque<(f32, f32)> = (0..body_len(mass))
             .map(|k| {
@@ -163,12 +163,13 @@ impl World {
         } else {
             0
         };
+        // Someone who gave no name still needs one the feed can tell apart.
         let name = engine::who::clean_name(name);
         self.snakes.push(Snake {
             id,
             soul: 0,
             name: if name.is_empty() {
-                "anonymous".into()
+                format!("snake {id}")
             } else {
                 name
             },
@@ -195,19 +196,19 @@ impl World {
     /// A place well away from every body, inside the arena.
     fn clear_spot(&mut self) -> (f32, f32) {
         let mut best = (0.0, 0.0, -1.0f32);
-        for _ in 0..24 {
+        for _ in 0..SPAWN_TRIES {
             let a = self.unit() * std::f32::consts::TAU;
-            let r = self.unit().sqrt() * ARENA * 0.7;
+            let r = self.unit().sqrt() * ARENA * SPAWN_RING;
             let (x, y) = (a.cos() * r, a.sin() * r);
             let near = self
                 .bodies
-                .near(x, y, 320.0)
+                .near(x, y, SPAWN_CLEAR)
                 .map(|(s, k)| {
                     let p = self.snakes[s as usize].body[k as usize];
                     ((p.0 - x).powi(2) + (p.1 - y).powi(2)).sqrt()
                 })
                 .fold(f32::MAX, f32::min);
-            if near > 320.0 {
+            if near > SPAWN_CLEAR {
                 return (x, y);
             }
             if near > best.2 {
@@ -251,7 +252,7 @@ impl World {
     fn grow_food(&mut self) {
         let a = self.unit() * std::f32::consts::TAU;
         let r = self.unit().sqrt() * (ARENA - 30.0);
-        let value = 1 + self.rng.below(3) as u8;
+        let value = 1 + self.rng.below(NATURAL_FOOD_MAX as u64) as u8;
         let hue = self.rng.below(256) as u8;
         self.drop_food(a.cos() * r, a.sin() * r, value, hue, 0);
     }
@@ -302,17 +303,47 @@ impl World {
             self.spawn(&name, Some(bot));
             self.bot_at = self.tick + BOT_RESPAWN / 4;
         } else if bots > want {
-            // Too crowded: the smallest bot steps out quietly.
-            if let Some(i) = self
-                .snakes
+            self.retire();
+        }
+    }
+
+    /// Too crowded: a bot steps out quietly, with no burst and no food,
+    /// where nobody sees it go: the smallest out of every person's sight,
+    /// or else the one furthest from them all.
+    fn retire(&mut self) {
+        let heads: Vec<(f32, f32)> = self
+            .snakes
+            .iter()
+            .filter(|s| s.bot.is_none())
+            .map(|s| s.head())
+            .collect();
+        let seen = |s: &Snake| {
+            let (x, y) = s.head();
+            heads
                 .iter()
-                .enumerate()
-                .filter(|(_, s)| s.bot.is_some())
-                .min_by(|a, b| a.1.mass.total_cmp(&b.1.mass))
-                .map(|(i, _)| i)
-            {
-                self.burst(i, None);
-            }
+                .map(|h| (h.0 - x).powi(2) + (h.1 - y).powi(2))
+                .fold(f32::MAX, f32::min)
+                .sqrt()
+        };
+        let pick = self
+            .snakes
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.bot.is_some())
+            .map(|(i, s)| (i, seen(s), s.mass))
+            .min_by(|a, b| {
+                let (ua, ub) = (a.1 > BOT_UNSEEN, b.1 > BOT_UNSEEN);
+                // Unseen first; of those the smallest, else the furthest.
+                ub.cmp(&ua).then(if ua && ub {
+                    a.2.total_cmp(&b.2)
+                } else {
+                    b.1.total_cmp(&a.1)
+                })
+            })
+            .map(|(i, ..)| i);
+        if let Some(i) = pick {
+            self.snakes.remove(i);
+            self.rebuild_bodies();
         }
     }
 
@@ -347,23 +378,17 @@ impl World {
             let steps = if s.boosting { BOOST_STEPS } else { STEPS };
             let r = radius(s.mass);
             for _ in 0..steps {
-                let mut d = s.want - s.angle;
-                while d > std::f32::consts::PI {
-                    d -= std::f32::consts::TAU;
-                }
-                while d < -std::f32::consts::PI {
-                    d += std::f32::consts::TAU;
-                }
                 let t = turn(r);
-                s.angle += d.clamp(-t, t);
+                s.angle = wrap(s.angle + wrap(s.want - s.angle).clamp(-t, t));
                 let (x, y) = s.head();
                 s.body
                     .push_front((x + s.angle.cos() * STEP, y + s.angle.sin() * STEP));
             }
             s.moved = steps;
             if s.boosting {
-                s.mass -= BOOST_COST;
-                s.owed += BOOST_COST * BOOST_DROP;
+                let cost = boost_cost(s.mass);
+                s.mass -= cost;
+                s.owed += cost * BOOST_DROP;
                 if s.owed >= 1.0 {
                     let v = (s.owed as u8).min(FOOD_MAX);
                     s.owed -= v as f32;
@@ -375,7 +400,7 @@ impl World {
             s.body.truncate(body_len(s.mass).max(2));
         }
         for (x, y, v, h) in dropped {
-            self.drop_food(x, y, v, h, self.tick + ROT);
+            self.drop_food(x, y, v, h, self.tick + ROT_TICKS);
         }
 
         // Everyone eats what is under their mouth.
@@ -385,7 +410,7 @@ impl World {
             }
             let (hx, hy) = self.snakes[i].head();
             let r = self.snakes[i].radius();
-            let reach = r + 14.0;
+            let reach = r + MOUTH_REACH;
             let meals: Vec<u32> = self
                 .food_grid
                 .near(hx, hy, reach + 12.0)
@@ -433,7 +458,7 @@ impl World {
                     return false;
                 }
                 let p = other.body[k as usize];
-                let reach = (r + other.radius()) * 0.72;
+                let reach = (r + other.radius()) * HIT_FORGIVE;
                 (p.0 - hx).powi(2) + (p.1 - hy).powi(2) < reach * reach
             });
             if let Some((o, _)) = hit {
@@ -504,22 +529,31 @@ impl World {
         d
     }
 
-    /// Turn a snake into food along where its body lay.
+    /// Turn a snake into food along where its body lay: `DEATH_DROP` of
+    /// its mass, in pellets of at most `FOOD_MAX`, about one for every
+    /// other point of its body (more for a snake heavier than it is long).
     fn burst_with(&mut self, i: usize, killer: Option<(u16, String)>) -> Death {
         let s = self.snakes.remove(i);
         let (hx, hy) = s.head();
-        self.bursts.push((hx, hy, s.hue, s.radius()));
-        let total = s.mass * DEATH_DROP;
         let r = s.radius();
+        self.bursts.push((hx, hy, s.hue, r));
+        let total = (s.mass * DEATH_DROP).round().max(1.0) as usize;
         let points: Vec<(f32, f32)> = s.body.iter().step_by(2).copied().collect();
-        let count = points.len().min(total.max(1.0) as usize).max(1);
-        let per = (total / count as f32).round().clamp(1.0, FOOD_MAX as f32) as u8;
-        let stride = (points.len() / count).max(1);
-        for &(x, y) in points.iter().step_by(stride).take(count) {
+        let count = total
+            .div_ceil(FOOD_MAX as usize)
+            .max(points.len().min(total))
+            .max(1);
+        let (per, extra) = (total / count, total % count);
+        for j in 0..count {
+            let (x, y) = points
+                .get(j * points.len() / count)
+                .copied()
+                .unwrap_or((hx, hy));
             let jx = (self.unit() - 0.5) * r;
             let jy = (self.unit() - 0.5) * r;
-            let hue = s.hue.wrapping_add(self.rng.below(24) as u8);
-            self.drop_food(x + jx, y + jy, per, hue, self.tick + ROT);
+            let hue = s.hue.wrapping_add(self.rng.below(BURST_HUES as u64) as u8);
+            let value = (per + (j < extra) as usize) as u8;
+            self.drop_food(x + jx, y + jy, value, hue, self.tick + ROT_TICKS);
         }
         if s.bot.is_some() {
             self.bot_at = self.bot_at.max(self.tick + BOT_RESPAWN);
@@ -528,7 +562,8 @@ impl World {
             id: s.id,
             name: s.name.clone(),
             score: s.score(),
-            at: s.head(),
+            kills: s.kills,
+            age: self.tick.wrapping_sub(s.born),
             killer,
             human: s.bot.is_none(),
         }

@@ -114,6 +114,14 @@ pub fn draw(c: &mut Canvas, st: &State, look: &Look, now: f64) -> Spots {
             u,
             DIM,
         );
+        y += 11.0 * uf;
+        let ate = match d.kills {
+            0 => "ate nobody".to_string(),
+            1 => "ate 1 snake".to_string(),
+            n => format!("ate {n} snakes"),
+        };
+        let lived = format!("{ate} in {}:{:02}", d.secs / 60, d.secs % 60);
+        c.text_centred(w as i32 / 2, y as i32, &lived, u, DIM);
         y += 18.0 * uf;
     }
 

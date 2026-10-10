@@ -16,6 +16,9 @@ pub struct Toast {
 pub struct Death {
     pub by: String,
     pub score: u32,
+    pub kills: u32,
+    /// Seconds it lived.
+    pub secs: u32,
     pub at: f64,
 }
 
@@ -107,20 +110,28 @@ impl State {
                 }
             }
             Down::Board(b) => self.board = b,
-            Down::Died { by, score } => {
-                self.death = Some(Death { by, score, at: now });
+            Down::Died {
+                by,
+                score,
+                kills,
+                secs,
+            } => {
+                self.death = Some(Death {
+                    by,
+                    score,
+                    kills,
+                    secs,
+                    at: now,
+                });
             }
             Down::Feed {
+                killer_id,
                 killer,
                 victim,
                 score,
             } => {
-                let me = self
-                    .mirror
-                    .snakes
-                    .get(&self.mirror.you)
-                    .map(|s| s.name.as_str());
-                if me == Some(killer.as_str()) {
+                // Yours by its id: a name can be shared.
+                if self.playing() && killer_id == self.mirror.you {
                     self.toast = Some(Toast {
                         text: format!("you ate {victim}!"),
                         at: now,
@@ -150,5 +161,30 @@ impl State {
     /// How far between the last frame and the next we are now: 0..=1.
     pub fn alpha(&self, now: f64) -> f32 {
         ((now - self.frame_at) / self.gap).clamp(0.0, 1.0) as f32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_your_own_kill_is_toasted() {
+        let mut st = State::new(0);
+        st.mirror.you = 5;
+        let feed = |id: u16| Down::Feed {
+            killer_id: id,
+            killer: "snake 5".into(),
+            victim: "bean".into(),
+            score: 40,
+        };
+        st.receive(1.0, feed(6));
+        assert!(st.toast.is_none(), "another snake of the same name");
+        st.receive(2.0, feed(5));
+        assert_eq!(
+            st.toast.as_ref().map(|t| t.text.as_str()),
+            Some("you ate bean!")
+        );
+        assert_eq!(st.feed.len(), 2);
     }
 }

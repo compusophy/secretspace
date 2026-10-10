@@ -64,7 +64,7 @@ impl Room for Wyrm {
         };
         match up {
             Up::Join { .. } | Up::Steer { .. } if who.watch => {}
-            Up::Join { name } => {
+            Up::Join { .. } => {
                 if self.world.find(v.you).is_some() {
                     return;
                 }
@@ -79,10 +79,10 @@ impl Room for Wyrm {
                     }
                     return;
                 }
-                // A soul goes by the name the server gave it; only a page
-                // from before souls names itself.
-                let name = if who.soul != 0 { &who.name } else { &name };
-                v.you = self.world.spawn(name, None);
+                // Everyone goes by the name the server gave them, which it
+                // checked is nobody else's; what the page asks for is not
+                // read.
+                v.you = self.world.spawn(&who.name, None);
                 let soul = who.soul;
                 if let Some(s) = self.world.snakes.iter_mut().find(|s| s.id == v.you) {
                     s.soul = soul;
@@ -107,13 +107,14 @@ impl Room for Wyrm {
             if d.human {
                 if let Some((&conn, v)) = self.viewers.iter_mut().find(|(_, v)| v.you == d.id) {
                     let by = d.killer.as_ref().map_or("", |k| k.1.as_str());
-                    out.send(conn, proto::died(by, d.score));
+                    let secs = d.age / TICK_HZ;
+                    out.send(conn, proto::died(by, d.score, d.kills, secs));
                     v.you = 0;
                     v.watching = d.killer.as_ref().map_or(0, |k| k.0);
                 }
             }
-            if let Some((_, killer)) = &d.killer {
-                let line = proto::feed(killer, &d.name, d.score);
+            if let Some((id, killer)) = &d.killer {
+                let line = proto::feed(*id, killer, &d.name, d.score);
                 for &conn in self.viewers.keys() {
                     out.send(conn, line.clone());
                 }

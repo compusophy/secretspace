@@ -28,7 +28,8 @@ pub fn angle_from_u16(v: u16) -> f32 {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Up {
-    /// Start playing (again) under this name.
+    /// Start playing (again). The name is no longer read: a snake goes by
+    /// the name the server gave its soul (`engine::who`).
     Join { name: String },
     /// Head this way; boost or not.
     Steer { angle: u16, boost: bool },
@@ -121,7 +122,6 @@ pub struct Leader {
     pub name: String,
     pub score: u32,
     pub hue: u8,
-    pub human: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -145,14 +145,18 @@ pub enum Down {
     },
     Frame(Frame),
     Board(Board),
-    /// This browser's snake burst: who it ran into ("" for the edge), and
-    /// how long it got.
+    /// This browser's snake burst: who it ran into ("" for the edge), how
+    /// long it got, how many it ate, and how many seconds it lived.
     Died {
         by: String,
         score: u32,
+        kills: u32,
+        secs: u32,
     },
-    /// Someone ate someone, for the feed.
+    /// Someone ate someone, for the feed: the killer's snake id too, so a
+    /// browser knows it was its own.
     Feed {
+        killer_id: u16,
         killer: String,
         victim: String,
         score: u32,
@@ -216,7 +220,7 @@ pub fn encode_board(b: &Board) -> Vec<u8> {
     w.u8(BOARD).u16(b.people).u16(b.snakes).u16(b.rank);
     w.u8(b.top.len() as u8);
     for l in &b.top {
-        w.str(&l.name).u32(l.score).u8(l.hue).u8(l.human as u8);
+        w.str(&l.name).u32(l.score).u8(l.hue);
     }
     w.u16(b.dots.len() as u16);
     for &(x, y, s) in &b.dots {
@@ -225,15 +229,15 @@ pub fn encode_board(b: &Board) -> Vec<u8> {
     w.0
 }
 
-pub fn died(by: &str, score: u32) -> Vec<u8> {
+pub fn died(by: &str, score: u32, kills: u32, secs: u32) -> Vec<u8> {
     let mut w = Writer::default();
-    w.u8(DIED).str(by).u32(score);
+    w.u8(DIED).str(by).u32(score).u32(kills).u32(secs);
     w.0
 }
 
-pub fn feed(killer: &str, victim: &str, score: u32) -> Vec<u8> {
+pub fn feed(killer_id: u16, killer: &str, victim: &str, score: u32) -> Vec<u8> {
     let mut w = Writer::default();
-    w.u8(FEED).str(killer).str(victim).u32(score);
+    w.u8(FEED).u16(killer_id).str(killer).str(victim).u32(score);
     w.0
 }
 
@@ -249,13 +253,12 @@ impl Down {
             BOARD => {
                 let (people, snakes, rank) = (r.u16()?, r.u16()?, r.u16()?);
                 let n = r.u8()? as usize;
-                let mut top = Vec::with_capacity(r.room(n, 7)?);
+                let mut top = Vec::with_capacity(r.room(n, 6)?);
                 for _ in 0..n {
                     top.push(Leader {
                         name: r.str()?,
                         score: r.u32()?,
                         hue: r.u8()?,
-                        human: r.u8()? != 0,
                     });
                 }
                 let n = r.u16()? as usize;
@@ -274,8 +277,11 @@ impl Down {
             DIED => Down::Died {
                 by: r.str()?,
                 score: r.u32()?,
+                kills: r.u32()?,
+                secs: r.u32()?,
             },
             FEED => Down::Feed {
+                killer_id: r.u16()?,
                 killer: r.str()?,
                 victim: r.str()?,
                 score: r.u32()?,

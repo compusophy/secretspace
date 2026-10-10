@@ -3,12 +3,20 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::laws::{radius, view_scale, ARENA};
+use crate::laws::{radius, view, ARENA, TICK_HZ};
 use crate::proto::{self, angle_to_u16, q, Board, FoodInfo, Frame, Leader, SnakeUpdate};
 use crate::world::World;
 
 /// World units past the screen's edge that are sent anyway.
 const MARGIN: f32 = 120.0;
+/// When the view jumps (you died, the snake watched changed) or shrinks,
+/// the page eases its camera and zoom there; the box sent eases after it
+/// over about this long (ms), so nothing the page still shows is sent as
+/// gone. It never sends less than the new view.
+const SHOWN_MS: f32 = 300.0;
+
+/// A box in the world: (x0, y0, x1, y1).
+type Area = (f32, f32, f32, f32);
 
 pub struct Viewer {
     /// The snake this browser plays, 0 when it is not playing.
@@ -17,6 +25,8 @@ pub struct Viewer {
     pub watching: u16,
     pub screen: (f32, f32),
     pub centre: (f32, f32),
+    /// The box sent last frame.
+    shown: Option<Area>,
     known: HashSet<u16>,
     food: HashSet<u32>,
 }
@@ -28,6 +38,7 @@ impl Default for Viewer {
             watching: 0,
             screen: (1280.0, 800.0),
             centre: (0.0, 0.0),
+            shown: None,
             known: HashSet::new(),
             food: HashSet::new(),
         }
@@ -41,25 +52,18 @@ impl Viewer {
             .find(self.you)
             .or_else(|| w.find(self.watching))
             .or_else(|| w.snakes.iter().max_by(|a, b| a.mass.total_cmp(&b.mass)));
-        if let Some(s) = followed {
+        let followed = followed.map(|s| {
             if self.you == 0 {
                 self.watching = s.id;
             }
             self.centre = s.head();
-        }
+            s.id
+        });
         let r = match w.find(self.you) {
             Some(s) => radius(s.mass),
             None => 18.0,
         };
-        let scale = view_scale(r, self.screen.0, self.screen.1);
-        let hw = self.screen.0.clamp(200.0, 3840.0) / 2.0 / scale + MARGIN;
-        let hh = self.screen.1.clamp(200.0, 2160.0) / 2.0 / scale + MARGIN;
-        let (x0, y0, x1, y1) = (
-            self.centre.0 - hw,
-            self.centre.1 - hh,
-            self.centre.0 + hw,
-            self.centre.1 + hh,
-        );
+        let (x0, y0, x1, y1) = self.area(r);
 
         let mut f = Frame {
             tick: w.tick,
@@ -75,7 +79,7 @@ impl Viewer {
         for s in &w.snakes {
             let (bx0, by0, bx1, by1) = s.bbox;
             let inside = bx1 >= x0 && bx0 <= x1 && by1 >= y0 && by0 <= y1;
-            if !inside && s.id != self.you {
+            if !inside && s.id != self.you && Some(s.id) != followed {
                 continue;
             }
             seen.insert(s.id);
@@ -130,10 +134,29 @@ impl Viewer {
         proto::encode_frame(&f)
     }
 
-    /// Forget everything sent, so the next frame starts afresh.
-    pub fn reset(&mut self) {
-        self.known.clear();
-        self.food.clear();
+    /// The box to send this frame, for a snake of radius `r`: what its
+    /// screen shows around the centre, and what it still showed a moment
+    /// ago, easing away.
+    fn area(&mut self, r: f32) -> Area {
+        let (_, hw, hh) = view(r, self.screen.0, self.screen.1);
+        let (hw, hh) = (hw + MARGIN, hh + MARGIN);
+        let (cx, cy) = self.centre;
+        let t = (cx - hw, cy - hh, cx + hw, cy + hh);
+        let s = match self.shown {
+            None => t,
+            Some(s) => {
+                let k = 1.0 - (-1000.0 / (TICK_HZ as f32 * SHOWN_MS)).exp();
+                let e = |a: f32, b: f32| a + (b - a) * k;
+                (
+                    e(s.0, t.0).min(t.0),
+                    e(s.1, t.1).min(t.1),
+                    e(s.2, t.2).max(t.2),
+                    e(s.3, t.3).max(t.3),
+                )
+            }
+        };
+        self.shown = Some(s);
+        s
     }
 }
 
@@ -156,7 +179,6 @@ pub fn board(w: &World, you: u16, people: u16) -> Vec<u8> {
                 name: s.name.clone(),
                 score: s.score(),
                 hue: s.hue,
-                human: s.bot.is_none(),
             })
             .collect(),
         rank,
