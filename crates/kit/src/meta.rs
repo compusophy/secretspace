@@ -77,7 +77,7 @@ impl Meta {
             open: false,
             page: Page::Main,
             title,
-            field: TextField::new(FEEDBACK_MOST, "what's on your mind?"),
+            field: TextField::prose(FEEDBACK_MOST, "what's on your mind?"),
             spots: Vec::new(),
             panel: Rect::new(0.0, 0.0, 0.0, 0.0),
             sent: None,

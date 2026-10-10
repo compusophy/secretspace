@@ -352,7 +352,18 @@ pub struct TextField {
 }
 
 impl TextField {
+    /// A field for a name or words to keep as typed: a phone's keyboard
+    /// neither capitalises nor corrects them.
     pub fn new(max: u32, placeholder: &str) -> TextField {
+        let f = TextField::prose(max, placeholder);
+        let _ = f.input.set_attribute("autocapitalize", "none");
+        let _ = f.input.set_attribute("autocorrect", "off");
+        let _ = f.input.set_attribute("spellcheck", "false");
+        f
+    }
+
+    /// A field for sentences (feedback): the keyboard helps as it would.
+    pub fn prose(max: u32, placeholder: &str) -> TextField {
         let input: HtmlInputElement = document()
             .create_element("input")
             .ok()
@@ -360,8 +371,8 @@ impl TextField {
             .expect("an input");
         input.set_max_length(max as i32);
         input.set_placeholder(placeholder);
+        let _ = input.set_attribute("aria-label", placeholder);
         let _ = input.set_attribute("autocomplete", "off");
-        let _ = input.set_attribute("spellcheck", "false");
         let _ = input.set_attribute("enterkeyhint", "go");
         let _ = input.set_attribute(
             "style",
