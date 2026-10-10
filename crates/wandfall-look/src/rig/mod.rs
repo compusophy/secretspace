@@ -3,11 +3,13 @@
 //! - `gait`: how it moves, as watched (eased by springs): speed and
 //!   heading off its aim, its hips turning toward where it goes, its
 //!   stride and phase (advanced by distance, so its feet stay planted),
-//!   lean, bank, the drag of its robe and the lag of its hat;
+//!   lean, bank, the drag of its robe and the lag of its hat; rising and
+//!   falling, jumps made in the air; its feet held as it turns in place;
 //! - `pose`: its skeleton each frame: feet placed through stance and
-//!   swing, knees found by two-bone reach, the chest keeping its aim, arms
-//!   swinging against the legs, the wand arm rising to cast, the robe's
-//!   panels following the thighs; sitting on a broom; falling;
+//!   swing (and leaping, tucking and reaching down in the air), knees
+//!   found by two-bone reach, the chest keeping its aim, arms swinging
+//!   against the legs, the wand arm rising to cast, the robe's panels
+//!   following the thighs; sitting on a broom; falling;
 //! - `model`: its parts as meshes, each hung from its joint, near and far
 //!   (`parts` sculpts them);
 //! - `math`: the matrices, the reach and the springs they share.
@@ -35,18 +37,20 @@ use math::{chain, point, rz, tr};
 use model::Model;
 use pose::HIP;
 
+/// The wizards' colours (an id picks one).
+const HUES: [V3; 8] = [
+    rgb(70, 110, 230),
+    rgb(200, 60, 70),
+    rgb(60, 160, 110),
+    rgb(150, 80, 200),
+    rgb(220, 140, 40),
+    rgb(40, 170, 190),
+    rgb(220, 90, 160),
+    rgb(120, 120, 130),
+];
+
 /// A wizard's colour from its id.
 pub fn hue(id: u16) -> V3 {
-    const HUES: [V3; 8] = [
-        rgb(70, 110, 230),
-        rgb(200, 60, 70),
-        rgb(60, 160, 110),
-        rgb(150, 80, 200),
-        rgb(220, 140, 40),
-        rgb(40, 170, 190),
-        rgb(220, 90, 160),
-        rgb(120, 120, 130),
-    ];
     HUES[id as usize % HUES.len()]
 }
 
@@ -80,12 +84,13 @@ impl Rig {
         far: bool,
     ) -> Frames {
         let f = pose::wizard(at, yaw, a, p, id);
-        self.draw(d, id, &f, p, far);
+        self.draw(d, id, &f, p, (far, a.seat.x));
         f
     }
 
-    /// A wizard knocked out `t` seconds ago at `at`: it falls on its back
-    /// and sinks away.
+    /// A wizard knocked out `t` seconds ago at `at`: its knees give, it
+    /// topples back (turning a little, a different way each time) and
+    /// sinks away.
     pub fn fallen(&self, d: &mut Draw, id: u16, at: V3, yaw: f32, t: f32) {
         if t > 1.7 {
             return;
@@ -99,11 +104,14 @@ impl Rig {
             glide: false,
             t,
         };
-        let f = pose::fallen(at, yaw, &p, id, t);
-        self.draw(d, id, &f, &p, false);
+        let twist = (unit(hash(at[0] as i32, at[2] as i32, id as u32)) - 0.5) * 1.6;
+        let f = pose::fallen(at, yaw, &p, id, t, twist);
+        self.draw(d, id, &f, &p, (false, 0.0));
     }
 
-    fn draw(&self, d: &mut Draw, id: u16, f: &Frames, p: &Pose, far: bool) {
+    /// Its parts at their frames, in full or (`far`) coarser; its broom
+    /// under it as far as it sits on it (`seat`).
+    fn draw(&self, d: &mut Draw, id: u16, f: &Frames, p: &Pose, (far, seat): (bool, f32)) {
         let m = &self.m.lod[far as usize];
         let c = hue(id);
         let robe = mix(c, [1.0; 3], 0.7 * p.flash);
@@ -136,7 +144,8 @@ impl Rig {
         put(m.mantle, f.chest, Some(dark), cloth);
         put(m.collar, f.chest, Some(dark), cloth);
         put(m.trim, f.chest, None, gold);
-        put(m.head[id as usize % 2], f.head, None, skin);
+        // Bearded or not, whatever its colour.
+        put(m.head[(id as usize / HUES.len()) % 2], f.head, None, skin);
         put(m.hat, f.head, Some(dark), cloth);
         put(m.band, f.head, None, gold);
         put(m.hat_tip, f.hat, Some(dark), cloth);
@@ -166,15 +175,22 @@ impl Rig {
                 c: geo::scale(col, 2.5 * flare),
             });
         }
-        if p.glide {
-            self.broom(d, f.root, c, p.t, id);
+        if seat > 0.05 {
+            self.broom(d, f.root, c, (p.t, seat), id);
         }
     }
 
-    /// The broomstick under a sitting wizard, sparks trailing from its
-    /// bristles.
-    fn broom(&self, d: &mut Draw, root: M4, c: V3, t: f32, id: u16) {
-        let m = chain(&[root, tr([0.08, HIP - 0.1, 0.0]), rz(-FRAC_PI_2 + 0.08)]);
+    /// The broomstick under a wizard `seat` of the way sat on it (rising
+    /// into place as it gets on, dropping away as it gets off), sparks
+    /// trailing from its bristles.
+    fn broom(&self, d: &mut Draw, root: M4, c: V3, (t, seat): (f32, f32), id: u16) {
+        let k = seat.clamp(0.0, 1.0);
+        let below = 0.7 * (1.0 - k);
+        let m = chain(&[
+            root,
+            tr([0.08, HIP - 0.1 - below, 0.0]),
+            rz(-FRAC_PI_2 + 0.08),
+        ]);
         d.items.push(Item::new(self.m.broom, m).rough(0.85));
         let tail = point(&m, [0.0, -1.42, 0.0]);
         let back = geo::norm(geo::sub(tail, point(&m, [0.0, 0.0, 0.0])));
@@ -189,14 +205,14 @@ impl Rig {
                     tail[2] + back[2] * u * 2.2 + j(3),
                 ],
                 size: 0.12 * (1.0 - u) + 0.03,
-                c: [glow[0], glow[1], glow[2], 1.0 - u],
+                c: [glow[0], glow[1], glow[2], (1.0 - u) * k],
                 ..Default::default()
             });
         }
         d.lights.push(Light {
             p: tail,
             r: 4.0,
-            c: geo::scale(glow, 0.8),
+            c: geo::scale(glow, 0.8 * k),
         });
     }
 }

@@ -5,7 +5,7 @@
 //! collar; a head (bearded or not); the hat, its band and its tip (which
 //! sways); sleeves and cuffs; a hand and the wand hand; legs and boots.
 //! White parts take the wizard's colour; the rest keep their own. And the
-//! broomstick, the wand's glowing orb, and a plain ball.
+//! broomstick and the wand's glowing orb.
 
 use std::f32::consts::FRAC_PI_4;
 
@@ -103,7 +103,6 @@ pub struct Model {
     coarse: std::collections::HashMap<Mesh, Mesh>,
     pub broom: Mesh,
     pub orb: Mesh,
-    pub ball: Mesh,
 }
 
 fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
@@ -138,9 +137,6 @@ impl Model {
             orb: smooth(r, |g| {
                 g.sphere([0.0; 3], [1.0; 3], (2, 9, 0.0), rgb(255, 246, 225), 1.0)
             }),
-            ball: smooth(r, |g| {
-                g.sphere([0.0; 3], [1.0; 3], (2, 3, 0.0), [1.0; 3], 0.0)
-            }),
         }
     }
 
@@ -152,7 +148,7 @@ impl Model {
     pub fn all(&self) -> Vec<Mesh> {
         let mut v = self.lod[0].all();
         v.extend(self.lod[1].all());
-        v.extend([self.broom, self.orb, self.ball]);
+        v.extend([self.broom, self.orb]);
         v
     }
 }

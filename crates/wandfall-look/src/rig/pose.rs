@@ -1,12 +1,13 @@
 //! A wizard's skeleton for one frame, solved from how it moves (`Anim`)
 //! and what it does (`Pose`). Its feet are placed first: each foot, in
 //! turn, bears the weight (planted, moving back as the body goes over it)
-//! then swings through in an arc, its step as long as the gait says; two
-//! bones reach each foot from its hip (the knee bending forward), the
-//! hips turned the way it goes. Above them the chest keeps its aim, leaning
-//! and banking; the arms swing against the legs, elbows bending more at a
-//! run, the wand arm rising along its aim to cast; the robe's panels
-//! follow the thighs, and its hat's tip lags behind.
+//! then swings through in an arc, its step as long as the gait says; in
+//! the air they leap, tuck and reach down for the ground; two bones reach
+//! each foot from its hip (the knee bending forward), the hips turned the
+//! way it goes. Above them the chest keeps its aim, leaning and banking;
+//! the arms swing against the legs, elbows bending more at a run, the
+//! wand arm rising along its aim to cast (however the chest leans); the
+//! robe's panels follow the thighs, and its hat's tip lags behind.
 
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
@@ -33,6 +34,9 @@ pub const TIP: f32 = 0.77;
 /// less of its cycle on the ground (a run leaves it, a sprint more so),
 /// so a leg never has to reach further than it is long.
 const CONTACT: f32 = 0.7;
+/// How much of a cycle a foot bears the weight at a walk (and stepping
+/// where it stands).
+pub const REST_DUTY: f32 = 0.6;
 
 /// What it is doing this frame, besides moving.
 pub struct Pose {
@@ -99,11 +103,13 @@ fn foot(u: f32, step: f32, duty: f32, lift: f32) -> (f32, f32, f32) {
 
 /// The limbs' angles and body's place, before they become frames.
 struct Body {
-    /// The hips' height, sway to the side, turn (and their wobble).
-    hip: (f32, f32),
+    /// The hips' height, sway to the side, turn (and their wobble); each
+    /// foot's heading off the hips' (standing, as it turns where it is).
+    hip: f32,
     sway: f32,
     hips: f32,
     wobble: f32,
+    turn: [f32; 2],
     /// Leaning forward, banking right, breathing (scale), the head's nod.
     lean: f32,
     bank: f32,
@@ -113,10 +119,12 @@ struct Body {
     feet: [(V3, f32); 2],
     /// Each arm: forward swing, out, the elbow's bend.
     arms: [(f32, f32, f32); 2],
-    /// The robe's drag, the hat's lag; knocked out: rolled back, sinking.
+    /// The robe's drag, the hat's lag; the whole of it tipped back (as it
+    /// falls, or noses up on its broom), rolled to its right, and sunk.
     cloth: f32,
     hat: f32,
     fall: f32,
+    roll: f32,
     sink: f32,
 }
 
@@ -126,24 +134,26 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
     let moving = ease(0.25, 1.2, a.speed) * (1.0 - air);
     let crouch = a.crouch;
     let step = a.stride * moving;
-    let duty = (0.6 - 0.24 * run).min(CONTACT / (2.0 * step).max(0.01));
-    let lift = (0.11 + 0.15 * run) * (1.0 - 0.4 * crouch);
+    let duty = (REST_DUTY - 0.24 * run).min(CONTACT / (2.0 * step).max(0.01));
+    // Two quick steps lift the feet as it turns where it stands.
+    let shuffle = (a.shuffle > 0.0) as i32 as f32;
+    let lift = (0.11 + 0.15 * run) * (1.0 - 0.4 * crouch) * moving + 0.07 * shuffle;
+    // Its feet stay where they stood; the hips turn between them.
+    let held = (a.held[0] + a.held[1]) / 2.0;
+    let hips = a.hips.x + held;
     // Each foot steps along the way it goes, off the hips.
     let (cs, cc) = a.course.sin_cos();
     let cyc = a.phase;
+    let outs: [f32; 2] = std::array::from_fn(|side| {
+        (HIP_W + 0.02 + 0.06 * crouch - 0.025 * run) * if side == 0 { -1.0 } else { 1.0 }
+    });
+    let flying = aloft(a, outs, hips);
     let mut feet = [([0.0; 3], 0.0); 2];
     for (side, foot_at) in feet.iter_mut().enumerate() {
         let u = (cyc + 0.5 * side as f32).fract();
-        let (along, y, pitch) = foot(u, step, duty, lift * moving);
-        let (x, across) = (along * cc, along * cs);
-        let out = (HIP_W + 0.02 + 0.06 * crouch - 0.025 * run) * if side == 0 { -1.0 } else { 1.0 };
-        // In the air the legs tuck.
-        let tuck = [0.1 + 0.08 * side as f32, 0.36 - 0.06 * side as f32];
-        let at = [
-            x + (tuck[0] - x) * air,
-            y + (tuck[1] - y) * air,
-            out + across * (1.0 - air),
-        ];
+        let (along, y, pitch) = foot(u, step, duty, lift);
+        let on = [along * cc, y, outs[side] + along * cs];
+        let at = geo::add(on, geo::scale(geo::sub(flying[side], on), air));
         *foot_at = (at, pitch * moving * (1.0 - air));
     }
     // The hips ride over each step: highest over the planted foot at a
@@ -163,12 +173,15 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
     };
     let sprint = a.sprint.x;
     let elbow = 0.18 + 1.05 * run * moving + 0.3 * sprint + 0.3 * crouch;
+    // A jump made in the air flings the arms out and tips it forward.
+    let flip = (a.flip * 2.0).min(1.0) * air;
     // Out from the body, so the bell sleeves hang clear of the robe.
-    let out = 0.3 + 0.05 * run + 0.5 * air + 0.2 * a.land;
+    let out = 0.3 + 0.05 * run + 0.5 * air + 0.2 * a.land + 0.5 * flip;
     // The wand held forward, clear of the legs.
     let rest = (swing(1) + 0.15, out * 0.8, elbow.max(0.75));
     let up = FRAC_PI_2 + p.aim.clamp(-1.0, 1.0);
-    let cast = (up + 0.25 * p.tip.1, 0.05, 0.12);
+    // Along the aim: the upper arm short of it by the elbow's bend.
+    let cast = (up - 0.12 + 0.25 * p.tip.1, 0.05, 0.12);
     let k = p.arm.clamp(0.0, 1.0);
     let right = (
         rest.0 + (cast.0 - rest.0) * k,
@@ -176,11 +189,12 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
         rest.2 + (cast.2 - rest.2) * k,
     );
     let mut b = Body {
-        hip: (HIP - low + bob + 0.05 * air, a.land),
+        hip: HIP - low + bob + 0.05 * air,
         sway,
-        hips: a.hips.x,
+        hips,
         wobble: 0.09 * moving * (TAU * cyc).cos() * cc,
-        lean: a.lean.x + 0.3 * crouch + 0.15 * a.land - 0.35 * flinch,
+        turn: [a.held[0] - held, a.held[1] - held],
+        lean: a.lean.x + 0.3 * crouch + 0.15 * a.land - 0.35 * flinch + 0.3 * flip,
         bank: a.bank.x,
         breathe: 1.0 + 0.015 * (p.t * 2.4 + id as f32).sin() * (1.0 - moving),
         nod: 0.55 * p.aim.clamp(-0.9, 0.9) - 0.3 * flinch,
@@ -189,11 +203,51 @@ fn standing(a: &Anim, p: &Pose, id: u16) -> Body {
         cloth: a.cloth.x,
         hat: a.hat.x,
         fall: 0.0,
+        roll: 0.0,
         sink: 0.0,
     };
     gesture(&mut b, p.spell, up);
     slid(&mut b, a.slide.x, k);
+    // However the chest leans, the wand keeps to the aim and the head
+    // mostly level.
+    b.arms[1].0 += k * b.lean;
+    b.nod += 0.7 * b.lean;
     b
+}
+
+/// Where each foot goes in the air (forward, up, out, in the hips' turn
+/// `hips`; `out` each foot's way out from them): tucked at the top of a
+/// jump; rising, the leading knee up and the other leg trailing; falling,
+/// both reaching down for the ground; a jump made in the air tucks both
+/// knees up, and a kick off a wall stretches the leg on its side back
+/// toward it.
+fn aloft(a: &Anim, out: [f32; 2], hips: f32) -> [V3; 2] {
+    let rise = ease(0.5, 4.0, a.vy.x);
+    let fall = ease(-1.0, -5.0, a.vy.x);
+    let flip = (a.flip * 2.0).min(1.0);
+    // The foot that was swinging forward leads.
+    let lead = (a.phase < 0.5) as usize;
+    let mix =
+        |a: [f32; 2], b: [f32; 2], k: f32| [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+    std::array::from_fn(|side| {
+        let tuck = [0.1 + 0.08 * side as f32, 0.36 - 0.06 * side as f32];
+        let (leap, reach) = if side == lead {
+            ([0.3, 0.44], [0.16, 0.05])
+        } else {
+            ([-0.3, 0.2], [-0.06, 0.1])
+        };
+        let knees_up = [0.22, 0.55 - 0.05 * side as f32];
+        let f = mix(mix(mix(tuck, leap, rise), reach, fall), knees_up, flip);
+        let mut at = [f[0], f[1], out[side]];
+        if let Some(w) = a.wall {
+            let (s, c) = (w - hips).sin_cos();
+            if (s < 0.0) == (side == 0) {
+                let kick = [c * 0.55, 0.3, s * 0.55];
+                at = geo::add(at, geo::scale(geo::sub(kick, at), flip));
+            }
+        }
+        at
+    })
 }
 
 /// Each spell's gesture, `k` of the way into it (fresh casts most): fire
@@ -261,7 +315,7 @@ fn slid(b: &mut Body, s: f32, cast: f32) {
         return;
     }
     let mix = |a: f32, z: f32| a + (z - a) * s;
-    b.hip.0 = mix(b.hip.0, HIP - 0.5);
+    b.hip = mix(b.hip, HIP - 0.5);
     b.sway *= 1.0 - s;
     b.wobble *= 1.0 - s;
     b.lean = mix(b.lean, -0.42);
@@ -287,34 +341,41 @@ fn slid(b: &mut Body, s: f32, cast: f32) {
     b.hat = mix(b.hat, 0.5);
 }
 
-/// Sitting on its broom: legs forward, hands on the handle.
-fn sitting(p: &Pose, id: u16) -> Body {
+/// Sitting on its broom: legs forward, hands on the handle, bobbing
+/// (broom and all), banking into a turn and dipping its nose as it drops.
+fn sitting(a: &Anim, p: &Pose, id: u16) -> Body {
     let sway = (p.t * 1.3 + id as f32).sin();
     let foot = |z: f32| ([0.42, 0.28, z], 0.3);
     Body {
-        hip: (HIP - 0.04 + 0.08 * sway, 0.0),
+        hip: HIP - 0.04,
         sway: 0.0,
         hips: 0.0,
         wobble: 0.0,
+        turn: [0.0; 2],
         lean: 0.22,
-        bank: 0.06 * (p.t * 0.9 + id as f32).cos(),
+        bank: 0.0,
         breathe: 1.0,
         nod: 0.15,
         feet: [foot(-0.15), foot(0.15)],
         arms: [(1.05, 0.08, 0.55), (1.0 + 0.4 * p.arm, 0.04, 0.5)],
         cloth: 0.5,
         hat: 0.35,
-        fall: 0.0,
-        sink: 0.0,
+        fall: (0.025 * a.vy.x).clamp(-0.3, 0.2),
+        roll: (1.6 * a.bank.x).clamp(-0.45, 0.45) + 0.03 * (p.t * 0.9 + id as f32).cos(),
+        sink: -0.08 * sway,
     }
 }
 
 /// The frames for a body at `at`, facing `yaw`.
 fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
-    let root = chain(&[tr([at[0], at[1] - b.sink, at[2]]), ry(yaw), rz(b.fall)]);
-    let hips = ry(b.hips);
+    let root = chain(&[
+        tr([at[0], at[1] - b.sink, at[2]]),
+        ry(yaw),
+        rz(b.fall),
+        rx(b.roll),
+    ]);
     let turn = ry(b.hips + b.wobble);
-    let hip_y = b.hip.0;
+    let hip_y = b.hip;
     let pelvis = chain(&[tr([0.0, hip_y, b.sway]), turn, rz(-0.3 * b.lean)]);
     let mut legs = [(root, root, root); 2];
     // How far each thigh swings forward (radians), in the hips' turn; and
@@ -324,13 +385,15 @@ fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
     let (sh, ch) = b.hips.sin_cos();
     for (side, &(f, pitch)) in b.feet.iter().enumerate() {
         let s = if side == 0 { -1.0 } else { 1.0 };
+        let heading = b.hips + b.turn[side];
+        let hips = ry(heading);
         let hip = point(&pelvis, [0.0, 0.0, s * HIP_W]);
         let ankle = geo::add(point(&hips, f), [0.0, ANKLE, 0.0]);
         let pole = dir(&hips, [1.0, 0.0, 0.12 * s]);
         let (knee, ankle) = reach(hip, ankle, pole, (THIGH, SHIN));
         let d = geo::sub(knee, hip);
         swings[side] = (d[0] * ch + d[2] * sh).atan2(-d[1]);
-        let toe = b.hips + 0.1 * s;
+        let toe = heading + 0.1 * s;
         let boot = chain(&[tr(ankle), ry(toe), rz(pitch)]);
         let mid = |a: V3, b: V3| geo::scale(geo::add(a, b), 0.5);
         shins.extend([
@@ -351,8 +414,9 @@ fn frames(at: V3, yaw: f32, b: &Body) -> Frames {
     // The robe's panels: a front one swings out with its thigh going
     // forward, a back one with it going back; all drag behind at speed.
     let [sl, sr] = swings;
+    let into = unpelvis(b, hip_y);
     let panel = |c: f32, tilt: f32| {
-        let tilt = tilt.max(clear(c, &shins, &unpelvis(b, hip_y)));
+        let tilt = tilt.max(clear(c, &shins, &into));
         chain(&[pelvis_w, ry(c), rz(tilt), ry(-c)])
     };
     let drag = b.cloth;
@@ -448,11 +512,11 @@ fn m4mul(a: &M4, b: &M4) -> M4 {
 pub fn wizard(at: V3, yaw: f32, a: &Anim, p: &Pose, id: u16) -> Frames {
     let k = a.seat.x.clamp(0.0, 1.0);
     let b = if k > 0.99 {
-        sitting(p, id)
+        sitting(a, p, id)
     } else if k < 0.01 {
         standing(a, p, id)
     } else {
-        blend(&standing(a, p, id), &sitting(p, id), k)
+        blend(&standing(a, p, id), &sitting(a, p, id), k)
     };
     frames(at, yaw, &b)
 }
@@ -467,10 +531,11 @@ fn blend(a: &Body, b: &Body, k: f32) -> Body {
         (m(x.0, y.0), m(x.1, y.1), m(x.2, y.2))
     };
     Body {
-        hip: (m(a.hip.0, b.hip.0), m(a.hip.1, b.hip.1)),
+        hip: m(a.hip, b.hip),
         sway: m(a.sway, b.sway),
         hips: m(a.hips, b.hips),
         wobble: m(a.wobble, b.wobble),
+        turn: [m(a.turn[0], b.turn[0]), m(a.turn[1], b.turn[1])],
         lean: m(a.lean, b.lean),
         bank: m(a.bank, b.bank),
         breathe: m(a.breathe, b.breathe),
@@ -480,222 +545,36 @@ fn blend(a: &Body, b: &Body, k: f32) -> Body {
         cloth: m(a.cloth, b.cloth),
         hat: m(a.hat, b.hat),
         fall: m(a.fall, b.fall),
+        roll: m(a.roll, b.roll),
         sink: m(a.sink, b.sink),
     }
 }
 
-/// Knocked out `t` seconds ago: it falls on its back and sinks away.
-pub fn fallen(at: V3, yaw: f32, p: &Pose, id: u16, t: f32) -> Frames {
-    let k = (t / 0.45).min(1.0);
+/// Knocked out `t` seconds ago: its knees give (its feet staying put),
+/// then it topples back, turning `twist` radians as it goes, bounces once
+/// on the ground, and sinks away.
+pub fn fallen(at: V3, yaw: f32, p: &Pose, id: u16, t: f32, twist: f32) -> Frames {
+    let give = ease(0.0, 0.16, t);
+    let k = ((t - 0.1) / 0.42).clamp(0.0, 1.0);
+    let over = k * k;
+    let down = (t - 0.52).max(0.0);
+    let bounce = 0.12 * (-down * 9.0).exp() * (down * 18.0).sin().max(0.0);
     let mut b = standing(&Anim::default(), p, id);
-    b.fall = k * k * 1.45;
+    b.hip = HIP - 0.38 * give;
+    b.fall = over * 1.45 - bounce;
     b.feet = [
-        ([0.25 * k, 0.15 * k, -0.15], 0.0),
-        ([0.4 * k, 0.08 * k, 0.16], 0.0),
+        ([0.08 * give + 0.17 * over, 0.15 * over, -0.15], 0.0),
+        ([0.12 * give + 0.28 * over, 0.08 * over, 0.16], 0.0),
     ];
-    b.arms = [(0.6 * k, 0.9 * k, 0.4), (0.8 * k, 0.9 * k, 0.3)];
-    b.nod = 0.4 * k;
+    b.arms = [
+        (0.3 * give + 0.3 * over, 0.4 * give + 0.5 * over, 0.4),
+        (0.4 * give + 0.4 * over, 0.4 * give + 0.5 * over, 0.3),
+    ];
+    b.lean = 0.25 * give * (1.0 - over);
+    b.nod = 0.4 * over;
     b.sink = (t - 1.0).max(0.0) * 1.6;
-    frames(at, yaw, &b)
+    frames(at, yaw + twist * ease(0.0, 1.0, k), &b)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn pose() -> Pose {
-        Pose {
-            spell: None,
-            flash: 0.0,
-            arm: 0.0,
-            aim: 0.0,
-            tip: ([1.0; 3], 0.0),
-            glide: false,
-            t: 0.0,
-        }
-    }
-
-    fn sole(f: &Frames, side: usize) -> V3 {
-        point(&f.boot[side], [0.0, -ANKLE, 0.0])
-    }
-
-    fn run(a: &mut Anim, from: V3, v: (f32, f32), yaw: f32, frames: usize) -> V3 {
-        let mut p = from;
-        for _ in 0..frames {
-            p = [p[0] + v.0 / 60.0, 0.0, p[2] + v.1 / 60.0];
-            a.step(p, (yaw, 0.0), (true, false, false), 1.0 / 60.0);
-        }
-        p
-    }
-
-    #[test]
-    fn it_stands_on_its_feet_and_falls_on_its_back() {
-        let f = wizard([0.0; 3], 0.0, &Anim::default(), &pose(), 1);
-        let head = point(&f.head, [0.0, 0.14, 0.0]);
-        assert!(head[1] > 1.4, "the head is up: {head:?}");
-        for side in 0..2 {
-            assert!(
-                sole(&f, side)[1].abs() < 0.02,
-                "on the ground: {:?}",
-                sole(&f, side)
-            );
-        }
-        let f = fallen([0.0; 3], 0.0, &pose(), 1, 1.0);
-        let head = point(&f.head, [0.0, 0.14, 0.0]);
-        assert!(head[1] < 0.5 && head[0] < -1.0, "fallen backward: {head:?}");
-    }
-
-    #[test]
-    fn a_cast_points_the_wand_along_its_aim() {
-        let mut p = pose();
-        p.arm = 1.0;
-        let f = wizard([0.0; 3], 0.0, &Anim::default(), &p, 1);
-        let shoulder = point(&f.upper[1], [0.0; 3]);
-        assert!(f.tip()[0] - shoulder[0] > 0.8, "ahead: {:?}", f.tip());
-    }
-
-    #[test]
-    fn a_planted_foot_does_not_slide() {
-        // Facing east and running every way (ahead, strafing, backing
-        // away, on the diagonals): while a foot bears the weight it stays
-        // put on the ground, though the body moves on over it.
-        for (vx, vz) in [
-            (6.5, 0.0),
-            (0.0, 6.0),
-            (0.0, -6.0),
-            (-4.5, 0.0),
-            (4.5, 4.5),
-            (-3.5, 3.5),
-        ] {
-            let mut a = Anim::default();
-            let mut at = run(&mut a, [0.0; 3], (vx, vz), 0.0, 90);
-            let mut planted: Option<(V3, usize)> = None;
-            let mut worst: f32 = 0.0;
-            for _ in 0..60 {
-                at = run(&mut a, at, (vx, vz), 0.0, 1);
-                let f = wizard(at, 0.0, &a, &pose(), 1);
-                let left = sole(&f, 0);
-                if left[1] < 0.01 {
-                    match planted {
-                        Some((p, n)) => {
-                            let d = ((left[0] - p[0]).powi(2) + (left[2] - p[2]).powi(2)).sqrt();
-                            worst = worst.max(d);
-                            planted = Some((p, n + 1));
-                        }
-                        None => planted = Some((left, 0)),
-                    }
-                } else if planted.is_some_and(|p| p.1 > 3) {
-                    break;
-                } else {
-                    planted = None;
-                }
-            }
-            let v = (vx, vz);
-            assert!(planted.is_some_and(|p| p.1 > 3), "{v:?}: it plants a foot");
-            assert!(worst < 0.12, "{v:?}: and it stays: slid {worst}");
-        }
-    }
-
-    #[test]
-    fn crouched_or_landing_its_feet_stay_on_the_ground() {
-        let mut a = Anim::default();
-        a.crouch = 1.0;
-        let f = wizard([0.0; 3], 0.0, &a, &pose(), 1);
-        let head = point(&f.head, [0.0, 0.14, 0.0]);
-        assert!(head[1] < 1.3, "crouched low: {head:?}");
-        for side in 0..2 {
-            assert!(sole(&f, side)[1].abs() < 0.03, "feet down");
-        }
-    }
-
-    #[test]
-    fn running_at_any_pace_nothing_jumps_between_frames() {
-        // At 144 frames a second, from a walk to past a sprint: no joint
-        // moves (against the body) much faster than the body does, and the
-        // hips rise and fall in a wave, never turning sharply; a knee that
-        // snaps straight, or hips that drop when a foot is far, flicker.
-        for v in [2.0f32, 5.0, 7.0, 10.0, 14.0] {
-            let fps = 144.0;
-            let mut a = Anim::default();
-            let mut p = [0.0f32; 3];
-            let mut was: Option<(Vec<V3>, f32, f32)> = None;
-            for k in 0..(fps as usize * 3) {
-                p[0] += v / fps;
-                a.step(p, (0.0, 0.0), (true, false, false), 1.0 / fps);
-                let f = wizard(p, 0.0, &a, &pose(), 1);
-                let joints: Vec<V3> = (0..2)
-                    .flat_map(|s| {
-                        let hand = point(&f.fore[s], [0.0, -FORE, 0.0]);
-                        [sole(&f, s), point(&f.shin[s], [0.0; 3]), hand]
-                    })
-                    .map(|j| geo::sub(j, p))
-                    .collect();
-                let hip = point(&f.pelvis, [0.0; 3])[1];
-                let mut rise = 0.0;
-                if let Some((old, oh, or)) = &was {
-                    rise = (hip - oh) * fps;
-                    if k > fps as usize {
-                        for (j, o) in joints.iter().zip(old) {
-                            let d = geo::dot(geo::sub(*j, *o), geo::sub(*j, *o)).sqrt() * fps;
-                            assert!(d < 1.25 * v + 3.0, "{v} m/s: a joint at {d} m/s");
-                        }
-                        let turn = (rise - or).abs() * fps;
-                        // A wave quickens with the pace; the old flicker
-                        // turned at some 1,800.
-                        let most = 60.0 + 0.5 * v * v;
-                        assert!(turn < most, "{v} m/s: the hips turned at {turn} m/s/s");
-                    }
-                }
-                was = Some((joints, hip, rise));
-            }
-        }
-    }
-
-    #[test]
-    fn an_aim_that_jumps_turns_it_smoothly() {
-        // What the crosshair is on can jump (near ground, the sky): the
-        // body turns after it, never in a frame.
-        let mut a = Anim::default();
-        let fps = 144.0;
-        let mut last = 0.0;
-        for k in 0..300 {
-            let aim = if (k / 20) % 2 == 0 { 0.0 } else { 0.3 };
-            a.step([0.0; 3], (aim, 0.0), (true, false, false), 1.0 / fps);
-            let turn = (a.face.x - last).abs();
-            assert!(k == 0 || turn < 0.06, "turned {turn} in a frame");
-            last = a.face.x;
-        }
-    }
-
-    #[test]
-    fn sliding_it_sits_low_with_a_leg_out_ahead() {
-        let mut a = Anim::default();
-        let mut p = [0.0; 3];
-        for _ in 0..30 {
-            p = [p[0] + 11.0 / 60.0, 0.0, 0.0];
-            a.step(p, (0.0, 0.0), (true, true, true), 1.0 / 60.0);
-        }
-        let f = wizard(p, 0.0, &a, &pose(), 1);
-        let hip = point(&f.root, [0.0, HIP, 0.0]);
-        let pelvis = point(&f.thigh[1], [0.0; 3]);
-        assert!(pelvis[1] < 0.6, "low: {pelvis:?} ({hip:?})");
-        let lead = sole(&f, 1);
-        assert!(lead[0] - p[0] > 0.4, "the lead foot ahead: {lead:?}");
-        assert!(lead[1].abs() < 0.12, "and on the ground: {lead:?}");
-    }
-
-    #[test]
-    fn strafing_its_legs_go_its_way_and_its_chest_keeps_its_aim() {
-        // Facing +x, running right (+z).
-        let mut a = Anim::default();
-        let at = run(&mut a, [0.0; 3], (0.0, 6.0), 0.0, 60);
-        let f = wizard(at, 0.0, &a, &pose(), 1);
-        let hips_fwd = dir(&f.pelvis, [1.0, 0.0, 0.0]);
-        let chest_fwd = dir(&f.chest, [1.0, 0.0, 0.0]);
-        assert!(
-            hips_fwd[2] > 0.4 && hips_fwd[2] < 0.7,
-            "hips turned partly right: {hips_fwd:?}"
-        );
-        assert!(chest_fwd[0] > 0.9, "chest ahead: {chest_fwd:?}");
-    }
-}
+mod tests;
