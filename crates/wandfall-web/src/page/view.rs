@@ -11,6 +11,12 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     pace(p, dt);
     net(p, now, dt);
     hands(p);
+    let (w, h) = p.g.css;
+    let aspect = (w / h.max(1.0)) as f32;
+    // Where you aim, from the view as the mouse just turned it: the inputs
+    // about to go carry it, not the frame before's.
+    let mut others = p.st.others(now);
+    let aimed = aim(p, &others, aspect);
     inputs(p, dt);
     p.version.poll(now, false);
     if p.version.newer() && calm(p) {
@@ -22,17 +28,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             kit::save(RESUME, "");
         }
     }
-    let mut others = p.st.others(now);
-    let (w, h) = p.g.css;
-    let aspect = (w / h.max(1.0)) as f32;
-    // Your feet, between the last tick predicted and this one.
-    let k = (p.acc / MS_A_TICK) as f32;
-    let (a, b) = (p.prev.p, p.pred.body.p);
-    let feet = [
-        a[0] + (b[0] - a[0]) * k,
-        a[1] + (b[1] - a[1]) * k,
-        a[2] + (b[2] - a[2]) * k,
-    ];
+    let feet = feet(p);
     // Your own wizard as you predict it, not as the room last said (a
     // tenth of a second behind).
     if p.alive {
@@ -139,14 +135,10 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         _ => 0.0,
     };
     p.sounds.music.tune(&p.sounds.audio, music);
-    // What the crosshair is on: you aim there from your own eyes (the
-    // camera's place over your shoulder taken out); where Lightning would
-    // strike, aiming with it ready.
+    // What the crosshair is on (a wizard in the Lance's reach turns it
+    // red); where Lightning would strike, aiming with it ready.
     let mut on_target = false;
-    if let (Some(i), true) = (&p.island, p.alive && orbit.is_none()) {
-        let eye = [feet[0], feet[1] + p.pred.body.eye(), feet[2]];
-        let (at, who) = camera::crosshair(&i.map, &others, p.st.you, &cam, eye, 400.0);
-        p.aim = camera::toward(eye, at, &cam);
+    if let (Some(i), Some((at, who, eye))) = (&p.island, aimed.filter(|_| orbit.is_none())) {
         let d2 = render::geo::sub(at, eye);
         on_target = who.is_some() && render::geo::dot(d2, d2) <= LANCE_RANGE * LANCE_RANGE;
         let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
@@ -397,6 +389,44 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             kit::document().set_title(&line);
         }
     }
+}
+
+/// Your feet, between the last tick predicted and the next.
+fn feet(p: &Page) -> [f32; 3] {
+    let k = (p.acc / MS_A_TICK) as f32;
+    let (a, b) = (p.prev.p, p.pred.body.p);
+    [
+        a[0] + (b[0] - a[0]) * k,
+        a[1] + (b[1] - a[1]) * k,
+        a[2] + (b[2] - a[2]) * k,
+    ]
+}
+
+/// Where you aim (into `p.aim`): from your own eyes to what the crosshair
+/// is on, the camera's place over your shoulder taken out. Seen through
+/// the view as it stands now, the mouse's last turn in it (a copy of the
+/// camera, not stepped on: the one drawn eases on after the inputs).
+/// The point, the wizard there if one, and your eyes.
+fn aim(
+    p: &mut Page,
+    others: &[proto::Seen],
+    aspect: f32,
+) -> Option<([f32; 3], Option<u16>, [f32; 3])> {
+    let i = p.island.as_ref().filter(|_| p.alive && p.orbit.is_none())?;
+    let feet = feet(p);
+    let b = &p.pred.body;
+    let stance = camera::Stance {
+        aiming: p.aiming,
+        crouch: b.crouch,
+        glide: b.glide,
+        fast: b.sprint || b.slide,
+    };
+    let mut chase = p.chase;
+    let cam = chase.view(&i.map, feet, (p.yaw, p.pitch), stance, aspect, 0.0);
+    let eye = [feet[0], feet[1] + b.eye(), feet[2]];
+    let (at, who) = camera::crosshair(&i.map, others, p.st.you, &cam, eye, 400.0);
+    p.aim = camera::toward(eye, at, &cam);
+    Some((at, who, eye))
 }
 
 /// Whether a newer page may load now, at a moment that costs nothing:
