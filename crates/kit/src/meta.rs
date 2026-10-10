@@ -233,9 +233,10 @@ impl Meta {
         let (w, h) = (c.w as f32, c.h as f32);
         let bw = (210.0 * u).min(w - 32.0 * u);
         let n = items.len() as f32 + 3.0;
-        // Buttons as tall as fit, the help let go first.
+        // Buttons as tall as fit, the help let go first (a phone held
+        // sideways gets low ones, every one on the screen).
         let fixed = 40.0 * u + 12.0 * u + 20.0 * u;
-        let bh = ((h - 16.0 * u - fixed) / n - 6.0 * u).clamp(16.0 * u, 26.0 * u);
+        let bh = ((h - 16.0 * u - fixed) / n - 6.0 * u).clamp(11.0 * u, 26.0 * u);
         let body = fixed + n * (bh + 6.0 * u);
         let help: &[String] = if body + help.len() as f32 * 10.0 * u <= h - 16.0 * u {
             help

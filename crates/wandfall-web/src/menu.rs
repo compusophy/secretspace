@@ -513,23 +513,33 @@ pub fn book(
     );
 }
 
-/// The online lobby: who is here, waiting for the match; under them,
-/// the hall of wizards.
-pub fn lobby(c: &mut Canvas, ui: i32, names: &[String], hall: &[(String, u32, u32)]) {
-    let w = c.w;
-    let mut y = 30 * ui;
+/// The online lobby: who is here, waiting for the match, in the band the
+/// HUD keeps for it; the hall of wizards under them, down the left (on a
+/// touch screen at `hall_at`, under your health).
+pub fn lobby(
+    c: &mut Canvas,
+    ui: i32,
+    names: &[String],
+    hall: &[(String, u32, u32)],
+    band: Rect,
+    hall_at: Option<(i32, i32)>,
+) {
+    let (cx, bw) = ((band.x + band.w / 2.0) as i32, band.w as i32);
+    let mut y = band.y as i32 + 2 * ui;
     let head = format!("{} in the lobby - warm up, nothing hurts here", names.len());
-    let k = pixels::fit_scale(&head, w - 20 * ui, ui);
-    c.text_centred(w / 2, y, &head, k, DIM);
-    y += 11 * ui;
+    for l in pixels::wrap(&head, bw, ui) {
+        c.text_centred(cx, y, &l, ui, DIM);
+        y += 10 * ui;
+    }
+    y += ui;
     let line = names
         .iter()
         .take(12)
         .cloned()
         .collect::<Vec<_>>()
         .join("   ");
-    for l in pixels::wrap(&line, w * 2 / 3, ui) {
-        c.text_centred(w / 2, y, &l, ui, INK);
+    for l in pixels::wrap(&line, bw, ui).into_iter().take(3) {
+        c.text_centred(cx, y, &l, ui, INK);
         y += 10 * ui;
     }
     // The hall of wizards, down the left.
@@ -537,10 +547,13 @@ pub fn lobby(c: &mut Canvas, ui: i32, names: &[String], hall: &[(String, u32, u3
         return;
     }
     let rows = hall.len().min(5) as i32;
-    let pw = (164 * ui).min(w / 2 - 12 * ui);
+    let (px, py, pw) = match hall_at {
+        Some((x, y)) => (x, y, 140 * ui),
+        None => (8 * ui, y + 8 * ui, (164 * ui).min(c.w / 2 - 12 * ui)),
+    };
     let panel = Rect::new(
-        (8 * ui) as f32,
-        (y + 8 * ui) as f32,
+        px as f32,
+        py as f32,
         pw as f32,
         (18 * ui + rows * 10 * ui) as f32,
     );

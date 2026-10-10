@@ -31,7 +31,7 @@ use crate::settings::Settings;
 use crate::sky::{self, Hour, Sky, Weather};
 use crate::sound::Sounds;
 use crate::state::State;
-use crate::touch::Touch;
+use crate::touch::{self, Touch};
 
 mod input;
 mod net;
@@ -63,7 +63,7 @@ enum Mode {
 struct Island {
     map: Map,
     look: Look,
-    mini: pixels::Canvas,
+    mini: hud::Mini,
 }
 
 struct Page {
@@ -86,8 +86,10 @@ struct Page {
     /// from your eyes to what the crosshair is on), sent each tick.
     chase: Chase,
     aim: (f32, f32),
-    /// Spells asked for since the last input (a bit a slot).
+    /// Spells asked for since the last input (a bit a slot), and when
+    /// each slot's cast was last heard.
     asked: u8,
+    cast_heard: [f64; 4],
     pad: Touch,
     /// Inputs until your wand may fire again.
     cool: u32,
@@ -121,9 +123,10 @@ struct Page {
     sounds: Sounds,
     /// `?hold=ms`: every effect held at that age.
     hold: Option<f64>,
-    /// The range's first lessons, and where their panel is (to tap).
+    /// The range's first lessons, and where the chip that skips one is
+    /// (to tap).
     lessons: Lessons,
-    lesson_panel: Option<pixels::Rect>,
+    lesson_skip: Option<pixels::Rect>,
     /// `?fx=name` (`fx::NAMES`): that effect shown by you, again and
     /// again, or (`&age=ms`) held at that age.
     gallery: Option<(String, Option<f64>)>,
@@ -202,8 +205,11 @@ fn island(p: &mut Page, seed: u64) {
     }
     let map = Map::new(seed);
     let look = Look::new(&mut p.r, &map);
-    let mini = hud::island(&map);
-    p.island = Some(Island { map, look, mini });
+    p.island = Some(Island {
+        map,
+        look,
+        mini: hud::Mini::default(),
+    });
 }
 
 /// The picture redrawn at `q`: a new renderer, the island built again.
@@ -225,6 +231,7 @@ fn fresh(p: &mut Page) {
     p.meta.hide();
     p.inbox.clear();
     p.pred.reset(Body::default());
+    p.pad.reset();
 }
 
 fn leave(p: &mut Page) {
@@ -241,14 +248,67 @@ fn online(p: &mut Page) {
     leave(p);
     let link = kit::Link::open("wandfall", p.session.hello(&p.session.name(), false), false);
     p.mode = Mode::Online(link);
-    if !p.touch {
-        grab(p);
+    grab(p);
+}
+
+/// Take the screen, keys and mouse to play (`?windowed`: the mouse only);
+/// on a phone, the whole screen, held sideways (`sideways`).
+fn grab(p: &Page) {
+    if p.touch {
+        if !query("windowed") {
+            sideways();
+        }
+    } else {
+        kit::input::play(p.g.canvas(), !query("windowed"));
     }
 }
 
-/// Take the screen, keys and mouse to play (`?windowed`: the mouse only).
-fn grab(p: &Page) {
-    kit::input::play(p.g.canvas(), !query("windowed"));
+/// A phone: the whole screen (the hub's frame has it already) and the
+/// phone turned sideways, as the buttons are laid out for. It must come
+/// from a press; a browser that will not (iOS) is left as it is.
+fn sideways() {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::js_sys::{Function, Promise, Reflect};
+    use wasm_bindgen_futures::JsFuture;
+    // `obj.name(arg)`, if it is there, as the promise it gives.
+    let call = |obj: &JsValue, name: &str, arg: Option<&JsValue>| -> Option<Promise> {
+        let f: Function = Reflect::get(obj, &name.into()).ok()?.dyn_into().ok()?;
+        let r = match arg {
+            Some(a) => f.call1(obj, a),
+            None => f.call0(obj),
+        };
+        r.ok()?.dyn_into::<Promise>().ok()
+    };
+    let full = if kit::shell::framed() || kit::input::full() {
+        None
+    } else {
+        let root = kit::document().document_element().map(JsValue::from);
+        root.and_then(|r| call(&r, "requestFullscreen", None))
+    };
+    // The window holding the screen: the hub's, in its frame.
+    let win = kit::window();
+    let outer = match win.parent() {
+        Ok(Some(parent)) if kit::shell::framed() => parent,
+        _ => win,
+    };
+    let screen = Reflect::get(&outer.into(), &"screen".into());
+    let turn = screen.and_then(|s| Reflect::get(&s, &"orientation".into()));
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Some(p) = full {
+            let _ = JsFuture::from(p).await;
+        }
+        if let Some(p) = turn
+            .ok()
+            .and_then(|o| call(&o, "lock", Some(&"landscape".into())))
+        {
+            let _ = JsFuture::from(p).await;
+        }
+    });
+}
+
+/// Whether a phone is held upright (the game wants it sideways).
+fn upright(p: &Page) -> bool {
+    p.touch && p.g.css.1 > p.g.css.0
 }
 
 /// Whether a menu is up (the title, the spellbook, the shared menu, or
@@ -262,15 +322,28 @@ fn in_menu(p: &Page) -> bool {
 
 /// This game's own entries in the shared menu, as it stands.
 fn items(p: &Page) -> Vec<(&'static str, Act)> {
+    // The spellbook (a phone has no B to press).
+    let book = (
+        if p.touch {
+            "spellbook"
+        } else {
+            "spellbook (B)"
+        },
+        Act::Book,
+    );
     match p.mode {
         Mode::Title => vec![("settings", Act::Settings)],
         Mode::Practice(_) => vec![
-            ("spellbook (B)", Act::Book),
+            book,
             ("lessons", Act::Lessons),
             ("settings", Act::Settings),
             ("leave the range", Act::Leave),
         ],
-        Mode::Online(_) => vec![("settings", Act::Settings), ("leave the match", Act::Leave)],
+        Mode::Online(_) => vec![
+            book,
+            ("settings", Act::Settings),
+            ("leave the match", Act::Leave),
+        ],
     }
 }
 
@@ -372,6 +445,7 @@ pub fn start() {
                 chase: Chase::default(),
                 aim: (0.0, 0.0),
                 asked: 0,
+                cast_heard: [f64::NEG_INFINITY; 4],
                 pad: Touch::default(),
                 cool: 0,
                 hands,
@@ -395,7 +469,7 @@ pub fn start() {
                 sounds: Sounds::new(),
                 hold: query_value("hold").and_then(|v| v.parse().ok()),
                 lessons: Lessons::new(),
-                lesson_panel: None,
+                lesson_skip: None,
                 gallery: query_value("fx")
                     .map(|n| (n, query_value("age").and_then(|v| v.parse().ok()))),
                 sky: Sky::default(),

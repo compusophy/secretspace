@@ -53,9 +53,7 @@ pub(super) fn practise(p: &mut Page) {
         p.yaw = it.next().unwrap_or(0.0).to_radians();
         p.pitch = it.next().unwrap_or(0.0).to_radians();
     }
-    if !p.touch {
-        grab(p);
-    }
+    grab(p);
 }
 
 /// `?cam=x,y,z,yaw,pitch` (metres, degrees): the camera held there, to
@@ -103,6 +101,8 @@ pub(super) fn act(p: &mut Page, a: Act) {
             p.meta.game_panel();
         }
         Act::CloseSettings => p.meta.back(),
+        // Out, there is no book of yours to open: back to watching.
+        Act::Book if !p.alive => resume(p),
         Act::Book => {
             p.book = true;
             p.meta.hide();

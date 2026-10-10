@@ -219,7 +219,8 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     p.g.hud.wipe();
     p.spots = Spots::default();
     let practice = matches!(p.mode, Mode::Practice(_));
-    match (&p.island, &p.mode) {
+    let held_up = upright(p);
+    match (&mut p.island, &p.mode) {
         (Some(_), Mode::Title) => {
             let note = "the island is drawn by the secretspace engine, on WebGPU";
             menu::title(&mut p.g.hud, &mut p.spots, ui, note);
@@ -228,6 +229,10 @@ pub(super) fn frame(p: &mut Page, now: f64) {
             if p.alive {
                 sight(&mut p.sighted, &p.st, &i.map, &others, cam.eye, now);
             }
+            // The range's lessons, while you play (not under a menu).
+            let menu = p.book || p.meta.is_open() || (!p.touch && !kit::input::locked());
+            let lesson = practice && p.alive && p.orbit.is_none() && !menu && !held_up;
+            let lost = matches!(&p.mode, Mode::Online(link) if !link.up()) && p.st.joined;
             let view = hud::View {
                 st: &p.st,
                 others: &others,
@@ -235,6 +240,7 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                 eye: cam.eye,
                 me,
                 own: p.st.frame.as_ref().and_then(|f| f.you.as_ref()),
+                body: p.alive.then_some(&p.pred.body),
                 sighted: p.alive.then_some(&p.sighted),
                 watching,
                 in_storm,
@@ -245,12 +251,17 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                 practice,
                 on_target,
                 book: p.book,
+                lesson: lesson && p.lessons.showing(),
+                lost,
             };
-            if p.orbit.is_none() {
-                hud::draw(&mut p.g.hud, &i.mini, &view);
-            }
-            // The range's lessons, while you play.
-            p.lesson_panel = None;
+            let (w, h) = (p.g.hud.w, p.g.hud.h);
+            let mini = i.mini.at(&i.map, hud::map_spot(w, h, ui).2);
+            let lay = if p.orbit.is_none() {
+                hud::draw(&mut p.g.hud, mini, &view)
+            } else {
+                hud::layout(w, h, ui, p.touch, 8 * ui)
+            };
+            p.lesson_skip = None;
             if practice && p.alive && p.orbit.is_none() {
                 let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
                 let you = p.st.you;
@@ -270,14 +281,21 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                     cast_at,
                     book: p.book,
                 });
-                let menu = p.book || p.meta.is_open() || (!p.touch && !kit::input::locked());
-                if !menu {
-                    p.lesson_panel = p.lessons.draw(&mut p.g.hud, ui, p.touch, now);
+                if lesson {
+                    let drawn = p.lessons.draw(&mut p.g.hud, lay.band, ui, p.touch, now);
+                    p.lesson_skip = drawn.and_then(|d| d.1);
                 }
             }
             let own = p.st.frame.as_ref().and_then(|f| f.you.as_ref());
-            if p.touch && p.alive && !p.book && !p.meta.is_open() {
-                p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale);
+            if p.touch && !p.book && !p.meta.is_open() {
+                if p.alive && !held_up {
+                    p.pad.draw(&mut p.g.hud, own, p.g.css, p.g.scale, ui);
+                } else {
+                    Touch::draw_menu(&mut p.g.hud, p.g.scale);
+                }
+                if held_up {
+                    turn_sideways(&mut p.g.hud, ui);
+                }
             }
             // The online lobby: who is waiting.
             if !practice && p.st.frame.as_ref().is_some_and(|f| f.phase == 0) {
@@ -287,7 +305,10 @@ pub(super) fn frame(p: &mut Page, now: f64) {
                         .filter(|n| !n.1)
                         .map(|n| n.0.clone())
                         .collect();
-                menu::lobby(&mut p.g.hud, ui, &names, &p.st.hall);
+                let hall_at = p
+                    .touch
+                    .then_some((hud::column::X * ui, hud::column::FEED * ui));
+                menu::lobby(&mut p.g.hud, ui, &names, &p.st.hall, lay.band, hall_at);
             }
             if p.book {
                 // The range's tools (ranks, levels, rules) only there.
@@ -351,6 +372,31 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         if (now as u64 / 500).is_multiple_of(2) {
             kit::document().set_title(&line);
         }
+    }
+}
+
+/// A phone held upright: a word to turn it (the stick and the buttons
+/// are laid out for it sideways, and wait till it is).
+fn turn_sideways(c: &mut pixels::Canvas, ui: i32) {
+    let (w, h) = (c.w, c.h);
+    let u = ui as f32;
+    let (cw, ch) = ((w - 24 * ui).min(240 * ui), 52 * ui);
+    let b = pixels::Rect::new(
+        ((w - cw) / 2) as f32,
+        ((h - ch) / 2) as f32,
+        cw as f32,
+        ch as f32,
+    );
+    c.round_rect(b, 8.0 * u, pixels::Rgba(8, 10, 22, 225));
+    c.round_rect_line(b, 8.0 * u, u, pixels::Rgba::rgb(255, 214, 128).fade(0.5));
+    let mut y = b.y as i32 + 10 * ui;
+    let head = "turn your phone sideways";
+    let k = pixels::fit_scale(head, cw - 16 * ui, 2 * ui);
+    c.text_centred(w / 2, y, head, k, pixels::Rgba::rgb(255, 214, 128));
+    y += 9 * k + 6 * ui;
+    for l in pixels::wrap("the stick and the spells wait for it", cw - 16 * ui, ui) {
+        c.text_centred(w / 2, y, &l, ui, pixels::Rgba::rgb(200, 206, 220));
+        y += 10 * ui;
     }
 }
 

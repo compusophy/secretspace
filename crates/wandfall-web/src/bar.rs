@@ -56,16 +56,23 @@ pub fn layout(w: i32, h: i32, ui: i32) -> Layout {
     }
 }
 
+/// What lies underfoot is shown of these feet, in a band of its own (a
+/// touch screen) or, with none, over the bar.
+pub struct Under {
+    pub feet: [f32; 3],
+    pub band: Option<Rect>,
+}
+
 /// The bar, your level, and what is underfoot.
 /// `slots`: draw the four slots (a touch screen has buttons instead);
-/// `under`: what is underfoot (not with the spellbook open).
+/// `under`: what is underfoot, and where (not with the spellbook open).
 pub fn draw(
     c: &mut Canvas,
     own: &Own,
     st: &State,
     now: f64,
     ui: i32,
-    (slots, under): (bool, bool),
+    (slots, under): (bool, Option<Under>),
 ) {
     let (w, h) = (c.w, c.h);
     let u = ui as f32;
@@ -114,7 +121,7 @@ pub fn draw(
         c.text_centred(x - 3 * ui + 5 * ui, y - ui, key, ui, INK);
     }
     // Your level, and XP toward the next: under the bar (on a touch
-    // screen the level is in the health line, and XP under its bar).
+    // screen the level is in the health column, and XP under its bar).
     let (xx, xy, xw) = if slots {
         let (lx, ly) = (x0 - 24 * ui, y + s / 2);
         c.circle(lx as f32, ly as f32, 13.0 * u, SHADE);
@@ -122,7 +129,8 @@ pub fn draw(
         c.text_centred(lx, ly - 3 * ui, &format!("{}", own.level), ui, GOLD);
         (x0, y + s + 10 * ui, total)
     } else {
-        (12 * ui, 50 * ui, 120 * ui)
+        use crate::hud::column;
+        (column::X * ui, column::XP * ui, column::WIDE * ui)
     };
     let xp = if own.level >= MAX_LEVEL {
         1.0
@@ -131,17 +139,16 @@ pub fn draw(
     };
     c.fill_rect(xx, xy, xw, 2 * ui, SHADE);
     c.fill_rect(xx, xy, (xw as f32 * xp) as i32, 2 * ui, GOLD);
-    // What lies underfoot: over the bar, or (touch) at the top.
-    let at = if slots {
-        (Some(x0 + total), y - 10 * ui)
-    } else {
-        (None, 108 * ui)
-    };
-    if under {
-        underfoot(c, own, st, at, ui);
+    // What lies underfoot: over the bar, or (touch) at the top of its band.
+    if let Some(Under { feet, band }) = under {
+        let at = match band {
+            Some(b) => Spot::Band(b),
+            None => Spot::Over(x0 + total, y - 10 * ui),
+        };
+        underfoot(c, own, st, feet, at, ui);
     }
     // A level gained.
-    learned(c, st, now, ui);
+    learned(c, st, now, ui, !slots);
     let age = now - st.levelled.0;
     if age < 1800.0 && st.levelled.1 > 1 {
         let f = (1.0 - (age - 1200.0).max(0.0) / 600.0) as f32;
@@ -150,9 +157,10 @@ pub fn draw(
     }
 }
 
-/// A spell just learned or ranked up, over the middle of the screen; a
-/// reminder of the spellbook when it is not in a slot.
-fn learned(c: &mut Canvas, st: &State, now: f64, ui: i32) {
+/// A spell just learned or ranked up, under the middle of the screen
+/// (clear of the crosshair); a reminder of the spellbook when it is not
+/// in a slot (on a touch screen it is in the menu).
+fn learned(c: &mut Canvas, st: &State, now: f64, ui: i32, touch: bool) {
     let (at, sp, rank, slotted) = st.learned;
     let age = now - at;
     if rank == 0 || age > 2600.0 {
@@ -166,36 +174,41 @@ fn learned(c: &mut Canvas, st: &State, now: f64, ui: i32) {
     } else {
         format!("{name} {}", "I".repeat(rank as usize))
     };
-    let (w, y) = (c.w, c.h * 2 / 3 - 30 * ui);
+    let (w, h) = (c.w, c.h);
+    let y = (h * 2 / 3 - 30 * ui).max(h / 2 + 40 * ui);
     let k = pixels::fit_scale(&t, w - 16 * ui, 2 * ui);
     c.text_centred(w / 2, y, &t, k, col);
     if !slotted {
-        c.text_centred(
-            w / 2,
-            y + 18 * ui,
-            "B: the spellbook, to use it",
-            ui,
-            DIM.fade(f),
-        );
+        let book = if touch {
+            "the spellbook is in the menu: put it in a slot"
+        } else {
+            "B: the spellbook, to use it"
+        };
+        let k = pixels::fit_scale(book, w - 16 * ui, ui);
+        c.text_centred(w / 2, y + 18 * ui, book, k, DIM.fade(f));
     }
 }
 
-/// What lies underfoot: its icon, what it is, and what running over it
-/// does, on a card whose foot is at `y` (its right edge at `right`, or
-/// across the middle).
-fn underfoot(c: &mut Canvas, own: &Own, st: &State, (right, y): (Option<i32>, i32), ui: i32) {
-    let me = own.body.p;
+/// Where the card of what lies underfoot goes: at the top of a band of
+/// its own, or with its foot at (right, y), over the bar.
+enum Spot {
+    Band(Rect),
+    Over(i32, i32),
+}
+
+/// What lies underfoot (by `feet`): its icon, what it is, and what
+/// running over it does, on a card at `at`; the words wrapped to fit it.
+fn underfoot(c: &mut Canvas, own: &Own, st: &State, feet: [f32; 3], at: Spot, ui: i32) {
     let near = st
         .loot
         .scrolls
         .iter()
-        .map(|s| (s, (s.3[0] - me[0]).powi(2) + (s.3[2] - me[2]).powi(2)))
+        .map(|s| (s, (s.3[0] - feet[0]).powi(2) + (s.3[2] - feet[2]).powi(2)))
         .filter(|(_, d2)| *d2 < 16.0)
         .min_by(|a, b| a.1.total_cmp(&b.1));
     let Some((&(_, sp, rank, _), _)) = near else {
         return;
     };
-    let w = c.w;
     let info = &SPELLS[sp as usize % SPELLS.len()];
     let col = rgba(colour(sp));
     let known = own.book[sp as usize % SPELLS.len()];
@@ -211,14 +224,26 @@ fn underfoot(c: &mut Canvas, own: &Own, st: &State, (right, y): (Option<i32>, i3
     };
     let u = ui as f32;
     let title = format!("{}  {}", info.name, "I".repeat(rank as usize));
-    let line = info.what;
     let tw = pixels::text_width(&title, 2 * ui)
-        .max(pixels::text_width(line, ui))
+        .max(pixels::text_width(info.what, ui))
         .max(pixels::text_width(&hint, ui));
-    let cw = (tw + 46 * ui).min(w - 8 * ui);
-    let ch = 38 * ui;
-    let x = right.map_or((w - cw) / 2, |r| (r - cw).max(4 * ui));
-    let card = Rect::new(x as f32, (y - ch) as f32, cw as f32, ch as f32);
+    let most = match &at {
+        Spot::Band(b) => b.w as i32,
+        Spot::Over(..) => c.w - 8 * ui,
+    };
+    let cw = (tw + 46 * ui).min(most);
+    let room = cw - 44 * ui;
+    let lines: Vec<(String, Rgba)> = pixels::wrap(info.what, room, ui)
+        .into_iter()
+        .map(|l| (l, DIM))
+        .chain(pixels::wrap(&hint, room, ui).into_iter().map(|l| (l, INK)))
+        .collect();
+    let ch = (21 + 9 * lines.len() as i32 + 3).max(38) * ui;
+    let (x, y) = match at {
+        Spot::Band(b) => (b.x as i32 + (b.w as i32 - cw) / 2, b.y as i32),
+        Spot::Over(right, foot) => ((right - cw).max(4 * ui), foot - ch),
+    };
+    let card = Rect::new(x as f32, y as f32, cw as f32, ch as f32);
     c.round_rect(card, 6.0 * u, Rgba(8, 10, 20, 200));
     c.round_rect_line(card, 6.0 * u, u, col.fade(0.6));
     icon(
@@ -228,20 +253,9 @@ fn underfoot(c: &mut Canvas, own: &Own, st: &State, (right, y): (Option<i32>, i3
     );
     let tx = (card.x + 39.0 * u) as i32;
     let ty = card.y as i32;
-    let k = pixels::fit_scale(&title, cw - 44 * ui, 2 * ui);
+    let k = pixels::fit_scale(&title, room, 2 * ui);
     c.text_shadowed(tx, ty + 5 * ui, &title, k, col.mix(INK, 0.3));
-    c.text_shadowed(
-        tx,
-        ty + 19 * ui,
-        line,
-        pixels::fit_scale(line, cw - 44 * ui, ui),
-        DIM,
-    );
-    c.text_shadowed(
-        tx,
-        ty + 28 * ui,
-        &hint,
-        pixels::fit_scale(&hint, cw - 44 * ui, ui),
-        INK,
-    );
+    for (n, (l, ink)) in lines.iter().enumerate() {
+        c.text_shadowed(tx, ty + (21 + 9 * n as i32) * ui, l, ui, *ink);
+    }
 }

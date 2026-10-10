@@ -88,7 +88,15 @@ fn receive(p: &mut Page, b: &[u8], now: f64) {
                     p.pred.confirm(own.body, own.seq, &i.map);
                 }
             }
-            _ => p.alive = false,
+            // Out: every finger and toggle let go for the next life, and
+            // the spellbook shut (there is no book of yours to show).
+            _ => {
+                if p.alive {
+                    p.pad.reset();
+                    p.book = false;
+                }
+                p.alive = false;
+            }
         }
         p.st.take(f, now);
     }
