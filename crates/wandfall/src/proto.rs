@@ -10,7 +10,7 @@ use crate::laws::{MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
 
 /// This protocol; older pages are told to reload.
-pub const PROTO: u8 = 17;
+pub const PROTO: u8 = 18;
 
 pub mod tag {
     pub const JOIN: u8 = 1;
@@ -263,6 +263,7 @@ impl Frame {
                     .u8(b.wall);
                 f32s(&mut w, b.anchor);
                 w.u32(b.wall_n[0].to_bits()).u32(b.wall_n[1].to_bits());
+                w.u32(b.carry.to_bits());
                 w.u16(o.body.chill)
                     .u16(o.seq)
                     .u16(o.hp)
@@ -339,6 +340,7 @@ impl Frame {
             let (tether, walls, wall) = (r.u8()?, r.u8()?, r.u8()?);
             let anchor = read_f32s(&mut r)?;
             let wall_n = [f32::from_bits(r.u32()?), f32::from_bits(r.u32()?)];
+            let carry = f32::from_bits(r.u32()?);
             let mut o = Own {
                 body: Body {
                     p,
@@ -358,6 +360,7 @@ impl Frame {
                     walls,
                     wall,
                     wall_n,
+                    carry,
                     slide_cd,
                     spent,
                     breath,
@@ -723,6 +726,7 @@ mod tests {
                     walls: 2,
                     wall: 4,
                     wall_n: [0.6, -0.8],
+                    carry: 11.5,
                 },
                 seq: 65535,
                 hp: 252,

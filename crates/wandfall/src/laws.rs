@@ -15,10 +15,29 @@ pub const SHORE: f32 = 140.0;
 pub const HILLS: f32 = 9.0;
 pub const HILL_SIZE: f32 = 48.0;
 /// Trees, rocks, giant mushrooms and ruined pillars on the island.
+/// Trees grow in woods about this wide (m), where the woods' noise (0..1)
+/// is over the edge, thick this much over it; out in the meadows, one
+/// takes root alone at these odds. A tree's crown (a pine's boughs)
+/// reaches this far out from its trunk, for each of its scale's units
+/// (m, as drawn, its leaves and all), never over a ruin's pillar or a
+/// mushroom's cap. Mushrooms grow by the woods under open sky: their
+/// caps clear of every crown, within this far (m) of one.
 pub const TREES: usize = 400;
+pub const WOODS: f32 = 40.0;
+pub const WOOD_EDGE: f32 = 0.4;
+pub const WOOD_SOFT: f32 = 0.2;
+pub const WOOD_LONE: f32 = 0.06;
+pub const CROWN: f32 = 3.4;
+pub const SHROOM_WOOD: f32 = 2.5;
 pub const ROCKS: usize = 130;
 pub const SHROOMS: usize = 40;
 pub const RUINS: usize = 8;
+/// A giant mushroom's cap, for every metre the mushroom stands, as it is
+/// drawn: its top, out from its middle (how far, how high: a dome, down
+/// to its rim); its underside; and how far out its top holds you up.
+pub const SHROOM_DOME: [(f32, f32); 4] = [(0.0, 1.19), (0.22, 1.16), (0.4, 1.06), (0.47, 0.94)];
+pub const SHROOM_UNDER: f32 = 0.88;
+pub const SHROOM_CAP: f32 = 0.44;
 /// The Spire at the centre: a plaza this high and this wide, falling to
 /// the hills over this far, and its tower.
 pub const PLATEAU_TOP: f32 = 7.0;
@@ -51,6 +70,9 @@ pub const COLUMN_CROWN: f32 = 12.0;
 pub const COLUMN_PITS: f32 = 0.09;
 pub const COLUMN_SINK: f32 = 2.4;
 pub const COLUMN_STACKS: usize = 8;
+/// A place's spikes and crystals stand this far clear of its caches (m,
+/// past their own width).
+pub const CACHE_CLEAR: f32 = 2.0;
 
 // Moving.
 pub const RUN: f32 = 7.0;
@@ -64,7 +86,12 @@ pub const STAMINA_SPEND: u16 = 10;
 pub const STAMINA_BACK: u16 = 15;
 pub const STAMINA_BREATH: u8 = TICK_HZ as u8;
 pub const WINDED_UNTIL: u16 = STAMINA * 2 / 3;
+/// Wading in the sea: this share of the pace; every step in it keeps
+/// this share of the speed over that pace; a jump out of it this share
+/// of a jump.
 pub const WADE: f32 = 0.55;
+pub const WADE_KEEP: f32 = 0.5;
+pub const WADE_JUMP: f32 = 0.75;
 /// Speeding up toward where you steer, on the ground and in the air;
 /// slowing with no keys held; and how fast speed above your pace bleeds
 /// away on the ground (in the air it holds): momentum, so a slide or a
@@ -73,19 +100,28 @@ pub const ACCEL_GROUND: f32 = 48.0;
 pub const ACCEL_AIR: f32 = 16.0;
 pub const BRAKE: f32 = 36.0;
 pub const OVERSPEED: f32 = 5.0;
+/// Momentum holds steering more or less its way (a cosine): in the air
+/// more than this; on the ground, bleeding at OVERSPEED steering more
+/// than the first, and as fast as it speeds up by the second.
+pub const AIR_ALONG: f32 = -0.3;
+pub const MOMENTUM_ALONG: (f32, f32) = (0.2, -0.2);
 /// Hills: walking up a slope of 1 (45°) this much slower, down it this
 /// much faster (and less, gentler).
 pub const HILL: f32 = 0.45;
 /// Sliding: crouch while going fast (sprinting, or landing at speed). A
-/// boost (unless the last came within the cooldown, in ticks), friction
-/// on the flat, gravity down a slope, a little steering, a top speed; it
-/// ends below a crouch's pace, or standing up.
+/// boost, from slower than a timed hop's most and up to no faster than
+/// this (once a cooldown, in ticks, has passed since the last); friction
+/// on the flat, gravity down a slope, a little steering, a top speed (and
+/// over it, slowing this fast: m/s a second, more than any hill speeds
+/// it); it ends below a crouch's pace, or standing up.
 pub const SLIDE_MIN: f32 = 7.5;
 pub const SLIDE_BOOST: f32 = 3.0;
+pub const SLIDE_BOOST_TO: f32 = 14.0;
 pub const SLIDE_COOLDOWN: u8 = 30;
 pub const SLIDE_FRICTION: f32 = 4.5;
 pub const SLIDE_STEER: f32 = 1.6;
 pub const SLIDE_MAX: f32 = 18.0;
+pub const SLIDE_OVER: f32 = 18.0;
 /// Falling is quicker than rising; holding jump rises on the lighter
 /// pull, so a held jump goes higher than a tapped one.
 pub const GRAVITY: f32 = 30.0;
@@ -103,16 +139,24 @@ pub const HOP_WINDOW: u8 = 3;
 pub const HOP_BOOST: f32 = 0.6;
 pub const HOP_MAX: f32 = 12.5;
 /// Once in the air, a second jump (magic): this fast up, the way you
-/// steer; it costs stamina, so not when winded.
+/// steer; it costs stamina, so not when winded. Turned straight back, it
+/// keeps this share of the speed it had over a run (more, turned less).
 pub const AIR_JUMP: f32 = 7.0;
+pub const AIR_JUMP_KEEP: f32 = 0.5;
 /// Wall jumps: off a wall touched in the last few ticks, out from it and
-/// up (m/s), keeping a share of the speed along it; so many before you
-/// land.
+/// up (m/s), turned toward where you steer (by this much: 1 would turn a
+/// kick steered along the wall half way to it; never nearer the wall
+/// than this, a cosine), keeping a share of the speed along it; so many
+/// before you land. Pushing into a wall you can still kick off, you
+/// slide down it no faster than this (m/s).
 pub const WALL_GRACE: u8 = 6;
 pub const WALL_KICK: f32 = 7.5;
 pub const WALL_JUMP: f32 = 8.5;
-pub const WALL_KEEP: f32 = 0.8;
+pub const WALL_AIM: f32 = 0.8;
+pub const WALL_OUT: f32 = 0.25;
+pub const WALL_KEEP: f32 = 0.95;
 pub const WALL_JUMPS: u8 = 3;
+pub const WALL_SLIDE_FALL: f32 = 2.5;
 /// Climbing a ledge (a rock, a pillar, a stone, the altar) in the air,
 /// pushing toward it: its top no more than this far over your feet (and
 /// more than the low mark), its edge this close beyond your body, ahead
@@ -124,6 +168,9 @@ pub const MANTLE_NEAR: f32 = 0.35;
 pub const MANTLE_AHEAD: f32 = 0.5;
 pub const MANTLE_OVER: f32 = 0.35;
 pub const MANTLE_PUSH: f32 = 3.5;
+/// Come at a ledge faster than a run, you go on over it at this share of
+/// that speed (a hop timed to the landing keeps it).
+pub const MANTLE_KEEP: f32 = 0.75;
 /// Launch runes: how many out in the wild (and one by each place), how
 /// wide one is (m), how far apart they lie (m), and how hard one throws
 /// you up (m/s; onto your broom, to glide where you will).
@@ -144,6 +191,29 @@ pub const HEIGHT: f32 = 1.85;
 pub const EYE: f32 = 1.6;
 /// Steps up this high without jumping; sticks to the ground going down.
 pub const STEP: f32 = 0.6;
+/// Chilled by Frost, speed over a chilled run drains this fast (m/s a
+/// second), in the air as on the ground.
+pub const CHILL_DRAG: f32 = 16.0;
+/// On the broom (the drop's, a launch rune's): steering this quick (m/s
+/// a second); let go, speed drifting away this slowly, as speed over its
+/// pace does. Looking straight down it dives, falling this fast and
+/// going this share faster (less, looking less steeply); out of a dive
+/// it pulls up this quickly (m/s a second).
+pub const GLIDE_ACCEL: f32 = 14.0;
+pub const GLIDE_DRAG: f32 = 2.0;
+pub const GLIDE_DIVE: f32 = 20.0;
+pub const GLIDE_DIVE_FAST: f32 = 0.3;
+pub const GLIDE_PULL: f32 = 60.0;
+/// Your own wizard, drawn: a correction to the page's prediction eases
+/// away over about this long (ms), unless it is this far (m: a Blink, a
+/// respawn), drawn at once.
+pub const SMOOTH_MS: f64 = 90.0;
+pub const SMOOTH_SNAP: f32 = 4.0;
+/// The Tether: steering square to its rope swings you across the ground
+/// (m/s a second), and a swing dies away this much a second (a sag up or
+/// down is taken up as fast as the pull takes hold, `TETHER_GRIP`).
+pub const TETHER_STEER: f32 = 16.0;
+pub const TETHER_SWAY: f32 = 2.0;
 
 // The match.
 pub const MATCH_SIZE: usize = 16;
