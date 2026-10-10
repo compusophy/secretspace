@@ -21,6 +21,13 @@ fn main() {
         1,
         Rgba::rgb(255, 210, 150),
     );
+    c.text(
+        8,
+        84,
+        "José Zoë Łukasz Ñandú Åsa Ørjan straße ğüş - playing",
+        1,
+        Rgba::rgb(190, 220, 255),
+    );
     for k in 0..8 {
         let x = 20.0 + k as f32 * 22.0;
         c.glow(
