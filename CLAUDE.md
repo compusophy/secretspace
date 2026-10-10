@@ -43,11 +43,8 @@ engine's first consumer.
    (`the_browser_rebuilds_every_body_exactly`). Never send a lossy update.
 6. **Caps:** a source file holds at most 1,000 lines; this file at most
    8,000 characters. At a cap: split, shrink, or delete. Never raise one.
-7. **wasm32 always green:** `cargo clippy -p secretspace-hub -p
-   secretspace-wyrm-web -p secretspace-luciphon-web -p
-   secretspace-showcase-web -p secretspace-wandfall-web --target
-   wasm32-unknown-unknown -- -D warnings`. Every WGSL string has a naga
-   test.
+7. **wasm32 always green:** the wasm32 clippy in Commands, every page
+   crate in it. Every WGSL string has a naga test.
 
 ## Map
 
@@ -78,6 +75,8 @@ crates/wandfall   game #3's core: laws trig map places motion storm world bots
 crates/wandfall-look  its look (page + hub): look land basalt aura
                   rig/ fx/ state icon scene spectate camera sky
 crates/wandfall-web  its page: page/ bar hud menu sound ambience steps touch lessons
+crates/battlestation*  desk sim: laws keys hands demo term; -web: gear scene
+                  body glass monitor light sound page/ (?capture=1: shots)
 crates/server     main (routes) host (a Room's thread; panics rebuild it)
                   store (snapshots) souls (names) signal (SIGTERM) feedback
 web/index.html    the hub page; web/<game>/index.html each game's page
@@ -114,7 +113,7 @@ wide at most); `ui()` is the text scale (2 phone, 1 desktop).
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web -p secretspace-wandfall-web --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-web -p secretspace-showcase-web -p secretspace-wandfall-web -p secretspace-battlestation-web --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 bash scripts/caps.sh
 bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen
@@ -127,9 +126,8 @@ up` of `ship/`, secret RAILWAY_TOKEN, variable RAILWAY_SERVICE) and the
 pages to Vercel (secrets VERCEL_*), pointed at the server by the variable
 RELAY (`wss://<railway domain>/ws`). No RELAY, no page deploy.
 
-Browser checks: Playwright, `executablePath` the installed Chromium;
-separate contexts are separate players; `hasTouch, isMobile,
-deviceScaleFactor: 3` at 390x844 for a phone.
+Browser checks: Playwright on the installed Chromium; each context a
+player; `hasTouch, isMobile, deviceScaleFactor: 3` at 390x844 a phone.
 
 ## Gotchas
 

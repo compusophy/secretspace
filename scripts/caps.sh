@@ -17,6 +17,7 @@ done
   || say "crates/luciphon depends on more than the engine: $(deps luciphon)"
 [ "$(deps wandfall)" = 'engine = { package = "secretspace-engine", path = "../engine" }' ] \
   || say "crates/wandfall depends on more than the engine: $(deps wandfall)"
+[ -z "$(deps battlestation)" ] || say "crates/battlestation has dependencies: $(deps battlestation)"
 
 # 1. No hand-written JavaScript or TypeScript.
 js=$(git ls-files '*.js' '*.ts' '*.mjs' '*.jsx' '*.tsx')
