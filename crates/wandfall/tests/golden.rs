@@ -16,7 +16,7 @@ use wandfall::proto::PROTO;
 use wandfall::trig;
 
 /// The protocol the hash below was taken at, and the hash.
-const GOLDEN: (u8, &str) = (17, "cfd194e6430102c11435c176b4a623592e97b0ea");
+const GOLDEN: (u8, &str) = (18, "6da20b4b7c89e4979ddf5c2651819f8537130706");
 
 /// A body's every field, as bits.
 fn bits(b: &Body, out: &mut Vec<u8>) {
