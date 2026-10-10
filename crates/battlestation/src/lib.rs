@@ -1,14 +1,14 @@
 //! Battlestation: a desk seen from the chair. Your own keyboard and mouse
 //! move the ones on the desk: each key you press is pressed there by the
 //! finger that types it (`keys`, `hands`), the mouse slides under a hand
-//! that leaves the keys for it, and what you type lands in the terminal
-//! on the monitor (`term`). Everything here is plain std, so the page and
-//! its tests share it; the look is the page's.
+//! that leaves the keys for it, and what you type lands on the monitor:
+//! compusophyOS on the page, the desk's own terminal (`term`) where that
+//! cannot run. Everything here is plain std, so the page and its tests
+//! share it; the look is the page's.
 //!
 //! Space as the engine has it: metres, x east, y up, z south. You sit
 //! facing north (-z); the desk's front edge is at z = 0.
 
-pub mod demo;
 pub mod hands;
 pub mod keys;
 pub mod laws;

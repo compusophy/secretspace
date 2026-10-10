@@ -3,7 +3,7 @@
 //! and how many visits there have ever been. The numbers come live from
 //! the server's `/ws/hub`; wyrm's card shows the real game, live (`watch`),
 //! Wandfall's its match while one is on (`wand`), and Battlestation's the
-//! real desk typing by itself (`desk`). A card opens its
+//! real desk, compusophyOS on it (`desk`). A card opens its
 //! game over the page, full screen at once (`kit::shell`); the page rests
 //! till the game is left.
 //! Every pixel is drawn here, in Rust.
@@ -62,7 +62,7 @@ const CARDS: &[Card] = &[
         // No room: each desk is its own.
         id: "",
         title: "BATTLESTATION",
-        blurb: ["sit at a desk at night:", "its hands type your keys"],
+        blurb: ["sit at a desk at night,", "a real computer on it"],
         path: "/battlestation/",
         hue: 300.0,
         hidden: false,
@@ -92,7 +92,7 @@ struct Hub {
     luci: Option<luci::LuciWatch>,
     /// Wandfall, live while a match is on, for its card.
     wand: wand::WandWatch,
-    /// Battlestation's desk, typing by itself, for its card.
+    /// Battlestation's desk, its computer on, for its card.
     desk: desk::DeskWatch,
     /// The cards on the shelf, by index into CARDS.
     shown: Vec<usize>,
@@ -458,9 +458,12 @@ pub fn start() -> Result<(), JsValue> {
             if let Ok(off) = gpu::Offscreen::new().await {
                 with(|h| h.wand.give(off));
             }
-            // Battlestation's desk, drawn the same way on its own device.
+            // Battlestation's desk, drawn the same way on its own device,
+            // its computer starting.
             if let Ok(off) = gpu::Offscreen::new().await {
                 with(|h| h.desk.give(off));
+                let os = desk::mount().await;
+                with(|h| h.desk.mounted(os));
             }
         });
     }
@@ -468,9 +471,13 @@ pub fn start() -> Result<(), JsValue> {
     kit::shell::listen();
     kit::frames(|now| {
         // A game is open over the page: nothing here to see.
-        if !kit::shell::playing() {
-            with(|h| draw(h, now));
-        }
+        let playing = kit::shell::playing();
+        with(|h| {
+            h.desk.rest(playing);
+            if !playing {
+                draw(h, now);
+            }
+        });
     });
     kit::on(&kit::window(), "resize", |_| {
         with(|h| h.screen.fit());
