@@ -43,46 +43,45 @@ engine's first consumer.
    (`the_browser_rebuilds_every_body_exactly`). Never send a lossy update.
 6. **Caps:** a source file holds at most 1,000 lines; this file at most
    8,000 characters. At a cap: split, shrink, or delete. Never raise one.
-7. **wasm32 always green:** `cargo clippy -p secretspace-hub -p
-   secretspace-wyrm-web -p secretspace-luciphon-web -p
-   secretspace-showcase-web -p secretspace-wandfall-web --target
-   wasm32-unknown-unknown -- -D warnings`. Every WGSL string has a naga
-   test.
+7. **wasm32 always green:** the wasm clippy in Commands. Every WGSL
+   string has a naga test; Wandfall's predicted code calls `crate::trig`,
+   never platform floats (`caps.sh` checks both).
 
 ## Map
 
 ```
-crates/engine     wire rng room (the Room trait) hub (Stats) who (Hello, Seen,
-                  Still, names) words snap (save files) fixed (Q16.16) sha1
-                  synth (sounds from numbers)
-crates/pixels     Canvas (RGBA buffer, AA shapes, glow, blend), font (5x7),
-                  wrap, fit_scale; examples/sheet.rs draws a test sheet
-crates/kit        the browser end: Screen (buffer -> canvas, pixel scale,
-                  ui text scale), gl (WebGL2 + a pixel layer), input (keys,
-                  fingers, mouse, pointer lock), Link (reconnects, Hello
-                  first), Session (the key), Pointer, Version, Socket,
+crates/engine     wire rng room (Room trait) hub (Stats) who (Hello, Seen,
+                  names) words snap (save files) fixed sha1 synth (sounds)
+crates/pixels     Canvas (RGBA buffer, AA shapes, glow), font (5x7), wrap,
+                  fit_scale; examples/sheet.rs draws a test sheet
+crates/kit        the browser end: Screen, place/snap/on_resize (whole
+                  device pixels), gl (WebGL2), input (keys, fingers, pointer
+                  lock), Link (reconnects, Hello first), Session, Version,
                   TextField, storage, audio, meta (every game's Esc menu),
                   shell (games open over the hub, full screen), report
-crates/gpu        WebGPU device (wgpu), Caps, the pixel layer
-crates/render     the engine: retained scene, geo, sculpt, terrain, shadows,
-                  HDR + AO + bloom + ACES, grass, sea, decals, light
-                  grid; its test page crates/showcase-web (/showcase/)
-crates/hub-web    the front page (cards, live counts, scroll, footer), watch
-                  (wyrm's card, live, as a watcher), wand (Wandfall's)
+crates/gpu        WebGPU device (wgpu), Caps, Health, the pixel layer
+crates/render     the engine: retained scene, geo, sculpt, terrain, shadows
+                  (cascades + island layer), HDR + AO + bloom + ACES, grass,
+                  sea, decals, slots (bind tables), light grid; its test page
+                  crates/showcase-web (/showcase/)
+crates/hub-web    the front page: shelf (layout) backdrop tag; watch (wyrm's
+                  card, live), wand (Wandfall's)
 crates/wyrm       the game: laws world bots grid proto view mirror room
-crates/wyrm-look  how it looks: ground, food, snakes, bursts (page + hub)
+crates/wyrm-look  how it looks: ground, food, snake, bursts, live (page + hub)
 crates/wyrm-web   its page: lib (input, socket) state render (HUD) menu
 crates/luciphon*  game #2, legacy: core, -look (2D), -web (WebGL2 3D)
-crates/wandfall   game #3's core: laws trig map places motion storm world bots
-                  predict proto view room (spec: docs/plunder.md)
-crates/wandfall-look  its look (page + hub): look land basalt aura
-                  rig/ fx/ state icon scene spectate camera sky
-crates/wandfall-web  its page: page/ bar hud menu sound ambience steps touch lessons
-crates/server     main (routes) host (a Room's thread; panics rebuild it)
-                  store (snapshots) souls (names) signal (SIGTERM) feedback
+crates/wandfall   game #3's core: laws trig map places motion/ (run jump
+                  ledge collide) storm world/ bots/ spells loot hall predict
+                  proto view room (spec: docs/plunder.md)
+crates/wandfall-look  its look (page + hub): look land/ flora basalt aura
+                  make rig/ fx/ state icon scene spectate camera sky
+crates/wandfall-web  its page: page/ hud/ menu/ bar sound ambience steps
+                  touch lessons reload settings
+crates/server     main (routes) http sockets host (a Room's thread; panics
+                  rebuild it) store souls signal (SIGTERM) feedback
 web/index.html    the hub page; web/<game>/index.html each game's page
-scripts/          build-web.sh (dist/: hub at /, games at /<id>/),
-                  ship.sh (ship/: image for Railway), caps.sh
+scripts/          build-web.sh (dist/: hub at /, games at /<id>/), ship.sh
+                  (ship/: image for Railway), caps.sh (+ shaders.awk)
 ```
 
 Server routes: `/ws/<room>` a game (`/ws` and `/ws/arena` are wyrm, for
@@ -90,10 +89,9 @@ old pages; `?watch=1` only looks), `/ws/hub` the live Stats once a second,
 `/health` (`ok <build> ...`), `/stats` (JSON), `/feedback` (POST a report;
 GET `?key=$FEEDBACK_KEY` reads them); with `--static dist` the pages (`/arena`
 redirects to `/wyrm/`, as `web/vercel.json` does). A page's first connection carries
-`?v=1` and counts a visit; visits persist in `$DATA_DIR/visits` (the image
-sets `/data`; a volume there keeps them across deploys), as are `souls`
-and `rooms/<id>/snap-*.bin`. A deploy is a Stillness: SIGTERM, each room
-`still()`s and saves, pages keep their picture and resume on reconnect.
+`?v=1` and counts a visit. `$DATA_DIR` (`/data` in the image, a volume)
+keeps `visits`, `souls`, `feedback`, `rooms/<id>/snap-*.bin`. A deploy is
+a Stillness: SIGTERM, rooms `still()` and save, pages resume after.
 CI ships the server only when its build hash differs from live /health.
 
 Pixels: `kit::Screen` makes a buffer pixel `scale` CSS pixels (~960
@@ -118,7 +116,7 @@ cargo clippy -p secretspace-hub -p secretspace-wyrm-web -p secretspace-luciphon-
 cargo fmt --all --check
 bash scripts/caps.sh
 bash scripts/build-web.sh   # needs wasm-bindgen-cli = Cargo.lock's wasm-bindgen
-cargo run -p secretspace-server --release -- --static dist   # :8787, everything
+cargo run -p secretspace-server --profile server -- --static dist   # :8787
 ```
 
 Deploys are automatic (`.github/workflows/deploy.yml`) on every push to
@@ -135,6 +133,8 @@ deviceScaleFactor: 3` at 390x844 for a phone.
 
 - **`pkill -f server` kills your shell** when the command line holds
   the pattern. Track its PID.
+- Worktrees sharing a CARGO_TARGET_DIR run each other's code (path crates
+  are fingerprinted by relative path): one target dir per worktree.
 - New people are ghosts for `GHOST_TICKS` (else test players die in 8 s).
 - Bodies are rebuilt into the grid after deaths and before spawning; a
   stale grid indexes snakes that are gone.
