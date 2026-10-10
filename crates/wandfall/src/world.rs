@@ -106,7 +106,7 @@ pub struct Bolt {
     pub power: i32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
     /// `what` hurt: `WAND`, a spell, or `STORM`.
     Hit {

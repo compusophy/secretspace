@@ -6,8 +6,11 @@
 
 use engine::wire::{Reader, Writer};
 
-use crate::laws::{MAX_RANK, SPELLS};
+use crate::laws::{COYOTE, JUMP_BUFFER, MAX_RANK, SPELLS};
 use crate::motion::{Body, Input};
+
+/// Events as the wire carries them: the world's own.
+pub use crate::world::Event as Ev;
 
 /// This protocol; older pages are told to reload.
 pub const PROTO: u8 = 17;
@@ -103,6 +106,17 @@ pub fn q(v: f32) -> i16 {
 
 pub fn dq(v: i16) -> f32 {
     v as f32 / 32.0
+}
+
+/// A point on the wire (1/32 m each way), and back.
+fn pos(w: &mut Writer, p: [f32; 3]) {
+    for x in p {
+        w.i16(q(x));
+    }
+}
+
+fn read_pos(r: &mut Reader) -> Option<[f32; 3]> {
+    Some([dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)])
 }
 
 /// Your own wizard, exactly.
@@ -219,6 +233,11 @@ fn read_f32s(r: &mut Reader) -> Option<[f32; 3]> {
     ])
 }
 
+// Your body's jump timers travel in four bits each (below): counted in
+// ticks, they must stay under 16, or prediction would part from the
+// server after every frame.
+const _: () = assert!(COYOTE <= 15 && JUMP_BUFFER <= 15);
+
 impl Frame {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::default();
@@ -284,11 +303,9 @@ impl Frame {
         let n = self.players.len().min(255);
         w.u8(n as u8);
         for s in &self.players[..n] {
-            w.u16(s.id)
-                .i16(q(s.p[0]))
-                .i16(q(s.p[1]))
-                .i16(q(s.p[2]))
-                .u16(s.yaw)
+            w.u16(s.id);
+            pos(&mut w, s.p);
+            w.u16(s.yaw)
                 .i16(s.pitch)
                 .u16(s.hp)
                 .u8(s.flags)
@@ -299,9 +316,7 @@ impl Frame {
         w.u8(n as u8);
         for b in &self.bolts[..n] {
             w.u16(b.id).u16(b.by).u8(b.kind);
-            for x in b.p {
-                w.i16(q(x));
-            }
+            pos(&mut w, b.p);
             for x in b.v {
                 w.i16((x * 8.0).round().clamp(-32767.0, 32767.0) as i16);
             }
@@ -393,7 +408,7 @@ impl Frame {
         for _ in 0..n {
             f.players.push(Seen {
                 id: r.u16()?,
-                p: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
+                p: read_pos(&mut r)?,
                 yaw: r.u16()?,
                 pitch: r.i16()?,
                 hp: r.u16()?,
@@ -408,7 +423,7 @@ impl Frame {
             let id = r.u16()?;
             let by = r.u16()?;
             let kind = r.u8()?;
-            let p = [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)];
+            let p = read_pos(&mut r)?;
             let mut v = [0.0; 3];
             for x in v.iter_mut() {
                 *x = r.i16()? as f32 / 8.0;
@@ -486,44 +501,6 @@ pub fn read_roster(b: &[u8]) -> Option<Vec<(u16, bool, String)>> {
     Some(v)
 }
 
-/// Events as the wire carries them.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Ev {
-    /// `what`: `world::WAND`, a spell, or `world::STORM`.
-    Hit {
-        by: u16,
-        to: u16,
-        amount: u16,
-        what: u8,
-    },
-    Out {
-        who: u16,
-        by: u16,
-        place: u16,
-    },
-    Win {
-        who: u16,
-    },
-    Begin,
-    Lobby,
-    Cast {
-        by: u16,
-        spell: u8,
-        stage: u8,
-        at: [f32; 3],
-    },
-    Beam {
-        by: u16,
-        spell: u8,
-        from: [f32; 3],
-        to: [f32; 3],
-    },
-    Level {
-        who: u16,
-        level: u8,
-    },
-}
-
 pub fn events(list: &[Ev]) -> Vec<u8> {
     let mut w = Writer::default();
     let n = list.len().min(255);
@@ -535,24 +512,30 @@ pub fn events(list: &[Ev]) -> Vec<u8> {
                 to,
                 amount,
                 what,
-            } => w.u8(1).u16(by).u16(to).u16(amount).u8(what),
-            Ev::Out { who, by, place } => w.u8(2).u16(who).u16(by).u16(place),
-            Ev::Win { who } => w.u8(3).u16(who),
-            Ev::Begin => w.u8(4),
-            Ev::Lobby => w.u8(5),
+            } => {
+                w.u8(1).u16(by).u16(to).u16(amount).u8(what);
+            }
+            Ev::Out { who, by, place } => {
+                w.u8(2).u16(who).u16(by).u16(place);
+            }
+            Ev::Win { who } => {
+                w.u8(3).u16(who);
+            }
+            Ev::Begin => {
+                w.u8(4);
+            }
+            Ev::Lobby => {
+                w.u8(5);
+            }
             Ev::Cast {
                 by,
                 spell,
                 stage,
                 at,
-            } => w
-                .u8(6)
-                .u16(by)
-                .u8(spell)
-                .u8(stage)
-                .i16(q(at[0]))
-                .i16(q(at[1]))
-                .i16(q(at[2])),
+            } => {
+                w.u8(6).u16(by).u8(spell).u8(stage);
+                pos(&mut w, at);
+            }
             Ev::Beam {
                 by,
                 spell,
@@ -560,13 +543,13 @@ pub fn events(list: &[Ev]) -> Vec<u8> {
                 to,
             } => {
                 w.u8(7).u16(by).u8(spell);
-                for x in from.into_iter().chain(to) {
-                    w.i16(q(x));
-                }
-                &mut w
+                pos(&mut w, from);
+                pos(&mut w, to);
             }
-            Ev::Level { who, level } => w.u8(8).u16(who).u8(level),
-        };
+            Ev::Level { who, level } => {
+                w.u8(8).u16(who).u8(level);
+            }
+        }
     }
     w.0
 }
@@ -599,13 +582,13 @@ pub fn read_events(b: &[u8]) -> Option<Vec<Ev>> {
                 by: r.u16()?,
                 spell: r.u8()?,
                 stage: r.u8()?,
-                at: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
+                at: read_pos(&mut r)?,
             },
             7 => Ev::Beam {
                 by: r.u16()?,
                 spell: r.u8()?,
-                from: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
-                to: [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
+                from: read_pos(&mut r)?,
+                to: read_pos(&mut r)?,
             },
             8 => Ev::Level {
                 who: r.u16()?,
@@ -630,12 +613,8 @@ impl Loot {
         let n = self.scrolls.len().min(u16::MAX as usize);
         w.u8(tag::LOOT).u16(n as u16);
         for (id, spell, rank, p) in &self.scrolls[..n] {
-            w.u16(*id)
-                .u8(*spell)
-                .u8(*rank)
-                .i16(q(p[0]))
-                .i16(q(p[1]))
-                .i16(q(p[2]));
+            w.u16(*id).u8(*spell).u8(*rank);
+            pos(&mut w, *p);
         }
         w.0
     }
@@ -649,12 +628,8 @@ impl Loot {
         let n = r.u16()? as usize;
         r.room(n, 10)?;
         for _ in 0..n {
-            l.scrolls.push((
-                r.u16()?,
-                r.u8()?,
-                r.u8()?,
-                [dq(r.i16()?), dq(r.i16()?), dq(r.i16()?)],
-            ));
+            l.scrolls
+                .push((r.u16()?, r.u8()?, r.u8()?, read_pos(&mut r)?));
         }
         Some(l)
     }
@@ -681,6 +656,102 @@ mod tests {
         }
         let rows = vec![("ash".to_string(), 3, 17), ("bo".to_string(), 0, 2)];
         assert_eq!(read_hall(&hall(&rows)), Some(rows));
+    }
+
+    /// Every decoder, on bytes that may be anything.
+    fn decode_all(b: &[u8]) {
+        let _ = Up::decode(b);
+        let _ = Frame::decode(b);
+        let _ = read_roster(b);
+        let _ = read_events(b);
+        let _ = read_welcome(b);
+        let _ = Loot::decode(b);
+        let _ = read_hall(b);
+    }
+
+    #[test]
+    fn damaged_messages_never_panic() {
+        // Random bytes rarely get past a message's first byte; real ones,
+        // damaged a byte at a time or cut short, reach every branch.
+        use crate::world::{Phase, World};
+        let mut w = World::new(3);
+        let me = w.join("ash", 9);
+        let mut ev = Vec::new();
+        for _ in 0..3000 {
+            ev.extend(w.step());
+            if w.phase == Phase::Fight && w.bolts.len() >= 3 {
+                break;
+            }
+        }
+        let mut f = crate::view::frame(&w, me);
+        f.you.get_or_insert_with(Own::default);
+        f.bolts.push(BoltSeen::default());
+        ev.extend([
+            Ev::Hit {
+                by: 1,
+                to: 2,
+                amount: 3,
+                what: 4,
+            },
+            Ev::Out {
+                who: 2,
+                by: 1,
+                place: 9,
+            },
+            Ev::Win { who: 1 },
+            Ev::Begin,
+            Ev::Lobby,
+            Ev::Cast {
+                by: 1,
+                spell: 2,
+                stage: 1,
+                at: [1.0, 2.0, 3.0],
+            },
+            Ev::Beam {
+                by: 1,
+                spell: 1,
+                from: [0.0; 3],
+                to: [9.0; 3],
+            },
+            Ev::Level { who: 1, level: 2 },
+        ]);
+        ev.truncate(255);
+        let said = events(&ev);
+        assert_eq!(read_events(&said).map(|v| v.len()), Some(ev.len()));
+        let input = Input {
+            seq: 1,
+            yaw: 2,
+            pitch: -3,
+            keys: 4,
+            cast: 5,
+            view: 6,
+        };
+        let msgs = [
+            f.encode(),
+            said,
+            Up::Inputs(vec![input; 3]).encode(),
+            Up::Join { proto: PROTO }.encode(),
+            Up::Equip { slot: 1, spell: 2 }.encode(),
+            roster(&[(1, false, "ash".into()), (2, true, "Rook".into())]),
+            welcome(me, 99, 30),
+            crate::view::loot(&w).encode(),
+            hall(&[("ash".into(), 3, 4)]),
+        ];
+        for m in &msgs {
+            for i in 0..m.len() {
+                for x in [0x01, 0x80, 0xff] {
+                    let mut b = m.clone();
+                    b[i] ^= x;
+                    decode_all(&b);
+                }
+                for v in [0, 255] {
+                    let mut b = m.clone();
+                    b[i] = v;
+                    decode_all(&b);
+                }
+                decode_all(&m[..i]);
+            }
+        }
     }
 
     #[test]
