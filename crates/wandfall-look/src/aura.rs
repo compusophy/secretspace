@@ -94,12 +94,13 @@ impl Look {
                 PAD,
                 0.5,
             );
-            glow(
-                d,
-                self.beam,
-                m4::place(floor, 0.0, [r * 0.7, 9.0, r * 0.7]),
-                PAD,
-                0.12 * pulse,
+            // Its shaft of light, soft at its edge, fading as it rises.
+            d.items.push(
+                Item::new(self.shaft, m4::place(floor, 0.0, [r * 0.4, 9.0, r * 0.4]))
+                    .tint(PAD, 0.35 * pulse)
+                    .glow(1.0)
+                    .material(Material::Rim)
+                    .pass(Pass::Glow),
             );
             for n in 0..if near(p[0], p[2]) { 10 } else { 0 } {
                 let u = |i: u32| unit(hash(k as i32, n, 61 + i));
@@ -143,14 +144,14 @@ impl Look {
                         .push(Item::new(l.gem, m).tint(VIOLET, 1.0).glow(2.2));
                     glow(
                         d,
-                        self.beam,
+                        self.shaft,
                         m4::place(top, 0.0, [0.5, 260.0, 0.5]),
                         VIOLET,
                         0.25,
                     );
                     glow(
                         d,
-                        self.beam,
+                        self.shaft,
                         m4::place(top, 0.0, [1.6, 260.0, 1.6]),
                         VIOLET,
                         0.06,

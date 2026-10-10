@@ -1,37 +1,32 @@
 //! The marks spells leave on wizards (a ward's bubble, frost's chill,
-//! mending) and on the island (burns, rime), wizards knocked out, and
-//! dust where they land.
+//! mending) and on the island (burns, rime), light bursting where
+//! something struck, wizards knocked out, and dust where they land.
 
 use render::geo::{self, mix, rgb, V3};
-use render::{Decal, Mark, Spark};
+use render::{Decal, Mark, Shape, Spark};
 use wandfall::laws::spell;
 use wandfall::proto::{fx, Seen};
 
 use super::{
-    colour, crystal, glint, light, plasma, puffs, ring, rnd, shell, sigil, spray, Draw, Spray,
-    WHITE,
+    colour, crystal, cycle, glint, light, plasma, puffs, ring, rnd, shell, sigil, spray, twinkle,
+    Clock, Draw, Spray, UP, WHITE,
 };
 use crate::look::{Look, GOLD};
 
-const UP: V3 = [0.0, 1.0, 0.0];
-
 /// The marks spells leave on a wizard.
-/// `me`: it is you (seen from inside: no bubble about your eyes).
-pub fn on_wizard(look: &Look, d: &mut Draw, s: &Seen, t: f32, me: bool) {
+pub fn on_wizard(look: &Look, d: &mut Draw, s: &Seen, t: f32) {
     let at = s.p;
     let id = s.id as i32;
     let floor = [at[0], at[1] + 0.06, at[2]];
     if s.fx & fx::SHIELD != 0 {
         let c = colour(spell::WARD);
         sigil(look, d, floor, UP, 1.05, (c, 0.75), t * 0.6);
-        if !me {
-            let wob = 1.0 + 0.03 * (t * 6.0 + id as f32).sin();
-            let mid = [at[0], at[1] + 0.95, at[2]];
-            let r = [0.95 * wob, 1.2 * wob, 0.95 * wob];
-            plasma(look, d, mid, r, (mix(c, WHITE, 0.2), 0.16), (3.5, 0.0), 1.0);
-            shell(look, d, mid, r, c, 0.45);
-            light(d, [at[0], at[1] + 1.0, at[2]], 3.5, c, 0.8);
-        }
+        let wob = 1.0 + 0.03 * (t * 6.0 + id as f32).sin();
+        let mid = [at[0], at[1] + 0.95, at[2]];
+        let r = [0.95 * wob, 1.2 * wob, 0.95 * wob];
+        plasma(look, d, mid, r, (mix(c, WHITE, 0.2), 0.16), (3.5, 0.0), 1.0);
+        shell(look, d, mid, r, c, 0.45);
+        light(d, [at[0], at[1] + 1.0, at[2]], 3.5, c, 0.8);
     }
     if s.fx & fx::CHILLED != 0 {
         let c = colour(spell::FROST);
@@ -53,9 +48,8 @@ pub fn on_wizard(look: &Look, d: &mut Draw, s: &Seen, t: f32, me: bool) {
             (0.5, 0.2),
         );
         for k in 0..3 {
-            let u = ((t * 1.3 + rnd(id, k, 4)) % 1.0).abs();
-            let a = rnd(id, k + (t * 1.3) as i32, 5) * std::f32::consts::TAU;
-            let twinkle = (1.0 - (u * 2.0 - 1.0).abs()).powi(2);
+            let (u, life) = cycle(t, 1.3, rnd(id, k, 4));
+            let a = rnd(id, k * 7 + life, 5) * std::f32::consts::TAU;
             glint(
                 d,
                 [
@@ -65,7 +59,7 @@ pub fn on_wizard(look: &Look, d: &mut Draw, s: &Seen, t: f32, me: bool) {
                 ],
                 0.4,
                 WHITE,
-                twinkle,
+                twinkle(u),
             );
         }
         light(d, [at[0], at[1] + 0.4, at[2]], 2.5, c, 0.7);
@@ -92,9 +86,9 @@ pub fn on_wizard(look: &Look, d: &mut Draw, s: &Seen, t: f32, me: bool) {
 
 /// Wizards knocked out: a burst of their colour going up where they fell,
 /// a flare, a ring along the ground, a puff of their colour.
-pub fn falls(look: &Look, d: &mut Draw, list: &[(f64, V3, u16)], now: f64) {
+pub fn falls(look: &Look, d: &mut Draw, list: &[(f64, V3, u16)], clock: Clock) {
     for &(when, at, who) in list {
-        let t = ((now - when) / 1000.0) as f32;
+        let t = (clock.age(when) / 1000.0) as f32;
         let f = 1.0 - t / 1.4;
         if f <= 0.0 {
             continue;
@@ -122,15 +116,7 @@ pub fn falls(look: &Look, d: &mut Draw, list: &[(f64, V3, u16)], now: f64) {
                 1.0,
             );
         }
-        ring(
-            look,
-            d,
-            [at[0], at[1] + 0.06, at[2]],
-            0.5 + t * 4.0,
-            c,
-            f,
-            0.0,
-        );
+        super::wave(look, d, at, 0.5 + t * 4.0, c, f);
         spray(
             d,
             [at[0], at[1] + 1.0, at[2]],
@@ -139,6 +125,7 @@ pub fn falls(look: &Look, d: &mut Draw, list: &[(f64, V3, u16)], now: f64) {
             Spray {
                 fall: 9.0,
                 streak: 0.04,
+                floor: Some(at[1] + 0.05),
                 ..Spray::new(16, 7.0, 0.8, (WHITE, GOLD), 0.1)
             },
         );
@@ -184,15 +171,7 @@ pub fn dust(look: &Look, d: &mut Draw, list: &[(f64, V3, f32)], now: f64) {
         );
         if hard > 0.5 {
             let f = 1.0 - t / 0.6;
-            ring(
-                look,
-                d,
-                [at[0], at[1] + 0.05, at[2]],
-                0.4 + t * 4.0,
-                c,
-                0.3 * f.max(0.0),
-                0.0,
-            );
+            super::wave(look, d, at, 0.4 + t * 4.0, c, 0.3 * f.max(0.0));
         }
     }
 }
@@ -242,20 +221,30 @@ fn splash(look: &Look, d: &mut Draw, at: V3, (t, seed): (f32, i32), hard: f32) {
     }
 }
 
+/// How long a spell's scar lies on the island (ms): a burn, the Lance's
+/// small one, frost's rime.
+pub fn scar_life(s: u8) -> f64 {
+    match s {
+        spell::FIREBALL | spell::LIGHTNING => 25_000.0,
+        spell::LANCE => 12_500.0,
+        _ => 9_000.0,
+    }
+}
+
 /// The scars spells leave on the island, as decals: a fireball's burn
-/// (embers in it a while, a shockwave out of it), lightning's (a flash
-/// ringing out), the Lance's small one, frost's rime; fading at the end.
+/// (embers in it a while), lightning's, the Lance's small one, frost's
+/// rime; fading at the end.
 pub fn scars(d: &mut Draw, list: &[(f64, V3, u8)], now: f64) {
     for &(when, at, s) in list {
         let t = ((now - when) / 1000.0) as f32;
         let seed = when as i32 ^ (at[0] * 17.0) as i32;
         let yaw = rnd(seed, 0, 61) * std::f32::consts::TAU;
-        let last = crate::state::SCARS_MS as f32 / 1000.0;
-        let (r, depth, mark, col, hot, life) = match s {
-            spell::FIREBALL => (2.8, 2.2, Mark::Scorch, rgb(255, 110, 30), 4.0, last),
-            spell::LIGHTNING => (1.8, 1.6, Mark::Scorch, rgb(150, 190, 255), 1.5, last),
-            spell::LANCE => (0.5, 0.8, Mark::Scorch, rgb(255, 210, 120), 1.5, last * 0.5),
-            _ => (2.2, 2.0, Mark::Frost, rgb(205, 236, 255), 0.0, 9.0),
+        let life = (scar_life(s) / 1000.0) as f32;
+        let (r, depth, mark, col, hot) = match s {
+            spell::FIREBALL => (2.8, 2.2, Mark::Scorch, rgb(255, 110, 30), 4.0),
+            spell::LIGHTNING => (1.8, 1.6, Mark::Scorch, rgb(150, 190, 255), 1.5),
+            spell::LANCE => (0.5, 0.8, Mark::Scorch, rgb(255, 210, 120), 1.5),
+            _ => (2.2, 2.0, Mark::Frost, rgb(205, 236, 255), 0.0),
         };
         let fade = (1.0 - (t - life * 0.7) / (life * 0.3)).clamp(0.0, 1.0);
         if fade <= 0.0 {
@@ -281,18 +270,40 @@ pub fn scars(d: &mut Draw, list: &[(f64, V3, u8)], now: f64) {
             mark,
             seed: rnd(seed, 1, 62),
         });
-        // A ring of light rushing out over the ground.
-        let k = t / 0.45;
-        if mark == Mark::Scorch && s != spell::LANCE && k < 1.0 {
-            d.decals.push(Decal {
-                p: at,
-                r: r * (0.6 + 1.6 * k),
-                depth,
-                yaw,
-                c: [col[0], col[1], col[2], (1.0 - k) * 1.5],
-                mark: Mark::Ring,
-                seed: 0.0,
-            });
-        }
     }
+}
+
+/// Light bursting where something struck (at `at`, `age` ms ago, in the
+/// colour of what struck): a flare, a glint, sparks streaking out and
+/// falling, onto `floor` if it struck someone standing on it.
+pub fn burst(d: &mut Draw, at: V3, (age, seed): (f32, i32), c: V3, floor: Option<f32>) {
+    let k = 1.0 - age / 600.0;
+    if k <= 0.0 || age < 0.0 {
+        return;
+    }
+    light(d, at, 6.0, c, 2.0 * k);
+    let hot = mix(c, WHITE, 0.5);
+    if age < 120.0 {
+        let f = 1.0 - age / 120.0;
+        d.sparks.push(Spark {
+            p: at,
+            size: 1.1 * f,
+            c: [hot[0], hot[1], hot[2], f],
+            shape: Shape::Star,
+            ..Default::default()
+        });
+    }
+    spray(
+        d,
+        at,
+        age / 1000.0,
+        seed,
+        Spray {
+            fall: 9.0,
+            streak: 0.03,
+            up: true,
+            floor,
+            ..Spray::new(14, 6.0, 0.6, (hot, c), 0.1)
+        },
+    );
 }

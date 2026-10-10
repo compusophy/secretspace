@@ -135,7 +135,7 @@ pub fn cast(w: &mut World, k: usize, slot: usize, aim: Aim, ev: &mut Vec<Event>)
     let (by, level, eye) = (p.id, p.level, aim.eye);
     let d = trig::look(aim.yaw, aim.pitch);
     let hit = level_scale(level, pw);
-    let from = ahead(eye, d, 0.6);
+    let from = ahead(eye, d, CAST_AHEAD);
     // Others where its caster's page saw them (not too far back).
     let then = tick.saturating_sub(aim.behind.min(REWIND));
     let bolt = |d: [f32; 3], speed: f32, life| Bolt {

@@ -494,6 +494,16 @@ impl Map {
 
     /// Props whose cylinder comes within `d` of (x, z) on the ground.
     pub fn near(&self, x: f32, z: f32, d: f32) -> impl Iterator<Item = &Prop> + '_ {
+        self.near_indexed(x, z, d).map(|(_, p)| p)
+    }
+
+    /// As `near`, each with its place in `props` (a look keyed by it).
+    pub fn near_indexed(
+        &self,
+        x: f32,
+        z: f32,
+        d: f32,
+    ) -> impl Iterator<Item = (usize, &Prop)> + '_ {
         let c = |v: f32| (((v + MAP_HALF) / CELL).floor() as i32).clamp(0, CELLS - 1);
         let (x0, x1, z0, z1) = (c(x - d), c(x + d), c(z - d), c(z + d));
         let mut seen: Vec<u16> = Vec::new();
@@ -508,8 +518,8 @@ impl Map {
         }
         seen.sort_unstable();
         seen.into_iter()
-            .map(move |i| &self.props[i as usize])
-            .filter(move |p| {
+            .map(move |i| (i as usize, &self.props[i as usize]))
+            .filter(move |(_, p)| {
                 let (dx, dz) = (p.x - x, p.z - z);
                 let reach = p.r + d;
                 dx * dx + dz * dz < reach * reach

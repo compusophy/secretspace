@@ -41,6 +41,12 @@ const AQUA: V3 = rgb(60, 190, 255);
 pub(crate) const EMBER: V3 = rgb(255, 92, 30);
 pub(crate) const GOLDEN: V3 = rgb(255, 206, 120);
 
+/// Whether the island's `k`th prop, a tree, is drawn a pine (else a
+/// broadleaf).
+pub(crate) fn pine(k: usize) -> bool {
+    matches!(k % 7, 0 | 4)
+}
+
 /// The island's meshes and where its lights and moving things are.
 pub struct Land {
     pub held: Vec<Mesh>,
@@ -225,8 +231,7 @@ impl Land {
                 Kind::Tree => {
                     let s = p.scale;
                     let m = m4::place(at, p.yaw, [s; 3]);
-                    let pine = k % 7 == 0 || k % 7 == 4;
-                    let (trunk, crown) = if pine {
+                    let (trunk, crown) = if pine(k) {
                         (pine_trunk, pines[k % 3])
                     } else {
                         (

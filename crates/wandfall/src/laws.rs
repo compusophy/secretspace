@@ -593,6 +593,8 @@ pub const SPELLS: [Spell; 9] = [
 ];
 
 // The spells' shapes.
+/// How far ahead of its caster's eyes a spell leaves the wand (m).
+pub const CAST_AHEAD: f32 = 0.6;
 pub const FIREBALL_SPEED: f32 = 48.0;
 pub const FIREBALL_LIFE: u32 = 45;
 pub const FIREBALL_RADIUS: f32 = 3.5;
