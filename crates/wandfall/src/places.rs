@@ -7,7 +7,7 @@
 use engine::rng::Rng;
 
 use crate::laws::*;
-use crate::map::{smooth, Kind, Map, Prop};
+use crate::map::{smooth, unit, Kind, Map, Prop};
 use crate::trig;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -144,10 +144,6 @@ impl Poi {
     }
 }
 
-fn unit(rng: &mut Rng) -> f32 {
-    (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32
-}
-
 /// Where the places are, from the seed and the bare hills.
 pub fn find(seed: u64, hills: impl Fn(f32, f32) -> f32) -> Vec<Poi> {
     let mut rng = Rng::new(seed ^ 0x9a1ce);
@@ -187,6 +183,14 @@ pub fn find(seed: u64, hills: impl Fn(f32, f32) -> f32) -> Vec<Poi> {
 fn about(p: &Poi, turn: u16, d: f32) -> (f32, f32) {
     let (s, c) = trig::sin_cos(turn);
     (p.x + c * d, p.z + s * d)
+}
+
+/// Whether something `r` wide at `at` would stand over one of `caches`.
+fn crowds(caches: &[(f32, f32)], at: (f32, f32), r: f32) -> bool {
+    let clear = r + CACHE_CLEAR;
+    caches
+        .iter()
+        .any(|c| (c.0 - at.0).powi(2) + (c.1 - at.1).powi(2) < clear * clear)
 }
 
 /// Set each place's stones, spikes and crystals; mark its caches.
@@ -288,7 +292,8 @@ pub fn set(m: &mut Map) {
                     6.5,
                     unit(&mut rng) * std::f32::consts::PI,
                 );
-                // Obsidian thrust up about the gate.
+                // Obsidian thrust up about the gate, clear of its caches.
+                let caches = [1, 3].map(|k| about(&p, quarter(k), 7.0));
                 let mut n = 0;
                 let mut tries = 0;
                 while n < 13 && tries < 200 {
@@ -296,19 +301,18 @@ pub fn set(m: &mut Map) {
                     let turn = (rng.next_u64() >> 48) as u16;
                     let at = about(&p, turn, p.r * (0.3 + 0.75 * unit(&mut rng)));
                     let r = 0.5 + 0.6 * unit(&mut rng);
-                    if m.near(at.0, at.1, r + 1.6).next().is_some() {
+                    if m.near(at.0, at.1, r + 1.6).next().is_some() || crowds(&caches, at, r) {
                         continue;
                     }
                     let h = 2.5 + 4.5 * unit(&mut rng);
                     stand(m, Kind::Spike, at, r, h, trig::radians(turn));
                     n += 1;
                 }
-                for k in [1, 3] {
-                    let at = about(&p, quarter(k), 7.0);
-                    m.caches.push([at.0, at.1]);
-                }
+                m.caches.extend(caches.map(|c| [c.0, c.1]));
             }
             Place::Grove => {
+                // Crystals, clear of its caches.
+                let caches = [0, 2].map(|k| about(&p, quarter(k) + 4096, 6.0));
                 let mut n = 0;
                 let mut tries = 0;
                 while n < 14 && tries < 200 {
@@ -316,7 +320,7 @@ pub fn set(m: &mut Map) {
                     let turn = (rng.next_u64() >> 48) as u16;
                     let at = about(&p, turn, p.r * 0.95 * unit(&mut rng).sqrt());
                     let r = 0.5 + 0.7 * unit(&mut rng);
-                    if m.near(at.0, at.1, r + 1.4).next().is_some() {
+                    if m.near(at.0, at.1, r + 1.4).next().is_some() || crowds(&caches, at, r) {
                         continue;
                     }
                     let h = 2.0 + 4.0 * unit(&mut rng);
@@ -331,10 +335,7 @@ pub fn set(m: &mut Map) {
                         stand(m, Kind::Shroom, at, 0.4, h, trig::radians(turn));
                     }
                 }
-                for k in [0, 2] {
-                    let at = about(&p, quarter(k) + 4096, 6.0);
-                    m.caches.push([at.0, at.1]);
-                }
+                m.caches.extend(caches.map(|c| [c.0, c.1]));
             }
             Place::Causeway => causeway(m, &p, &mut rng),
         }

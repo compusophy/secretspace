@@ -85,7 +85,11 @@ fn receive(p: &mut Page, b: &[u8], now: f64) {
                     p.prev = own.body;
                     p.alive = true;
                 } else {
+                    // Corrected: drawn on from where it was (`offset`).
+                    let was = p.pred.body.p;
                     p.pred.confirm(own.body, own.seq, &i.map);
+                    let is = p.pred.body.p;
+                    p.prev.p = [0, 1, 2].map(|k| p.prev.p[k] + is[k] - was[k]);
                 }
             }
             _ => p.alive = false,

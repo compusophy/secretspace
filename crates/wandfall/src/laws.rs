@@ -56,6 +56,9 @@ pub const COLUMN_CROWN: f32 = 12.0;
 pub const COLUMN_PITS: f32 = 0.09;
 pub const COLUMN_SINK: f32 = 2.4;
 pub const COLUMN_STACKS: usize = 8;
+/// A place's spikes and crystals stand this far clear of its caches (m,
+/// past their own width).
+pub const CACHE_CLEAR: f32 = 2.0;
 
 // Moving.
 pub const RUN: f32 = 7.0;
@@ -185,6 +188,11 @@ pub const GLIDE_DRAG: f32 = 2.0;
 pub const GLIDE_DIVE: f32 = 20.0;
 pub const GLIDE_DIVE_FAST: f32 = 0.3;
 pub const GLIDE_PULL: f32 = 60.0;
+/// Your own wizard, drawn: a correction to the page's prediction eases
+/// away over about this long (ms), unless it is this far (m: a Blink, a
+/// respawn), drawn at once.
+pub const SMOOTH_MS: f64 = 90.0;
+pub const SMOOTH_SNAP: f32 = 4.0;
 /// The Tether: steering square to its rope swings you (m/s a second),
 /// and a swing dies away this much a second.
 pub const TETHER_STEER: f32 = 16.0;

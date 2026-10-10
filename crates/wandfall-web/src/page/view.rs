@@ -19,13 +19,16 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     let mut others = p.st.others(now);
     let (w, h) = p.g.css;
     let aspect = (w / h.max(1.0)) as f32;
-    // Your feet, between the last tick predicted and this one.
+    // Your feet, between the last tick predicted and this one (and
+    // gliding off where a correction left them).
     let k = (p.acc / MS_A_TICK) as f32;
     let (a, b) = (p.prev.p, p.pred.body.p);
+    p.pred.settle(dt);
+    let o = p.pred.offset;
     let feet = [
-        a[0] + (b[0] - a[0]) * k,
-        a[1] + (b[1] - a[1]) * k,
-        a[2] + (b[2] - a[2]) * k,
+        a[0] + (b[0] - a[0]) * k + o[0],
+        a[1] + (b[1] - a[1]) * k + o[1],
+        a[2] + (b[2] - a[2]) * k + o[2],
     ];
     // Your own wizard as you predict it, not as the room last said (a
     // tenth of a second behind).

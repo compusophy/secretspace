@@ -120,10 +120,19 @@ pub fn smooth(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// 0..1 from 64 random bits (their top 24).
+fn unit_of(h: u64) -> f32 {
+    (h >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// 0..1, the next from `rng`.
+pub fn unit(rng: &mut Rng) -> f32 {
+    unit_of(rng.next_u64())
+}
+
 /// 0..1 from a lattice point.
 fn lattice(seed: u64, x: i32, z: i32) -> f32 {
-    let h = splitmix(seed ^ ((x as u32 as u64) << 32 | z as u32 as u64));
-    (h >> 40) as f32 / (1u64 << 24) as f32
+    unit_of(splitmix(seed ^ ((x as u32 as u64) << 32 | z as u32 as u64)))
 }
 
 /// Smooth value noise, 0..1.
@@ -174,7 +183,6 @@ impl Map {
     /// apart; from a stream of their own, so nothing else moves.
     fn launchers(&mut self) {
         let mut rng = Rng::new(self.seed ^ 0x1a0c_4e55);
-        let mut unit = move || (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
         let fits = |m: &Map, x: f32, z: f32| {
             m.land(x, z)
                 && m.height(x, z) > SEA + 1.0
@@ -186,7 +194,7 @@ impl Map {
         for k in 0..self.pois.len() {
             let p = self.pois[k];
             for _ in 0..16 {
-                let (s, c) = crate::trig::sin_cos((unit() * 65536.0) as u16);
+                let (s, c) = crate::trig::sin_cos((unit(&mut rng) * 65536.0) as u16);
                 let (x, z) = (p.x + c * p.r * 1.25, p.z + s * p.r * 1.25);
                 if fits(self, x, z) {
                     self.pads.push([x, self.height(x, z), z]);
@@ -198,8 +206,8 @@ impl Map {
         while n < PADS_WILD && tries < 600 {
             tries += 1;
             let (x, z) = (
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
             );
             if fits(self, x, z) && self.wild(x, z, 6.0) {
                 self.pads.push([x, self.height(x, z), z]);
@@ -302,24 +310,23 @@ impl Map {
 
     fn scatter(&mut self) {
         let mut rng = Rng::new(self.seed ^ 0x51ab);
-        let mut unit = move || (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
-        let put = |m: &mut Map, p: Prop| m.put(p);
         // Ruins first: rings of pillars, the island's landmarks.
-        let mut ruins = 0;
-        while ruins < RUINS {
+        let (mut ruins, mut tries) = (0, 0);
+        while ruins < RUINS && tries < RUINS * 200 {
+            tries += 1;
             let (x, z) = (
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
-                (unit() * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
+                (unit(&mut rng) * 2.0 - 1.0) * SHORE * 0.8,
             );
             if !self.land(x, z) || !self.wild(x, z, 10.0) {
                 continue;
             }
             ruins += 1;
-            let ring = 5.0 + unit() * 4.0;
-            let n = 6 + (unit() * 5.0) as usize;
+            let ring = 5.0 + unit(&mut rng) * 4.0;
+            let n = 6 + (unit(&mut rng) * 5.0) as usize;
             for k in 0..n {
                 // Some pillars have fallen.
-                if unit() < 0.25 {
+                if unit(&mut rng) < 0.25 {
                     continue;
                 }
                 let turn = (k * 65536 / n) as u16;
@@ -329,33 +336,33 @@ impl Map {
                 if !self.land(px, pz) {
                     continue;
                 }
-                let h = 2.0 + unit() * 3.5;
+                let h = 2.0 + unit(&mut rng) * 3.5;
                 let y = self.height(px, pz) - 0.3;
-                put(
-                    self,
-                    Prop {
-                        kind: Kind::Pillar,
-                        x: px,
-                        z: pz,
-                        y,
-                        r: 0.55,
-                        h,
-                        yaw: a,
-                        scale: h,
-                    },
-                );
+                self.put(Prop {
+                    kind: Kind::Pillar,
+                    x: px,
+                    z: pz,
+                    y,
+                    r: 0.55,
+                    h,
+                    yaw: a,
+                    scale: h,
+                });
             }
         }
-        let place = |m: &mut Map, kind: Kind, count: usize, unit: &mut dyn FnMut() -> f32| {
+        let place = |m: &mut Map, kind: Kind, count: usize, rng: &mut Rng| {
             let mut n = 0;
             let mut tries = 0;
             while n < count && tries < count * 20 {
                 tries += 1;
-                let (x, z) = ((unit() * 2.0 - 1.0) * SHORE, (unit() * 2.0 - 1.0) * SHORE);
+                let (x, z) = (
+                    (unit(rng) * 2.0 - 1.0) * SHORE,
+                    (unit(rng) * 2.0 - 1.0) * SHORE,
+                );
                 if !m.land(x, z) || m.height(x, z) < SEA + 1.0 || !m.wild(x, z, 3.0) {
                     continue;
                 }
-                let s = 0.8 + unit() * 0.6;
+                let s = 0.8 + unit(rng) * 0.6;
                 let (r, h) = match kind {
                     Kind::Rock => (1.1 * s, 1.3 * s),
                     Kind::Shroom => (0.4 * s, 3.5 * s),
@@ -366,26 +373,23 @@ impl Map {
                     continue;
                 }
                 let y = m.height(x, z) - 0.2;
-                let yaw = unit() * std::f32::consts::TAU;
-                put(
-                    m,
-                    Prop {
-                        kind,
-                        x,
-                        z,
-                        y,
-                        r,
-                        h,
-                        yaw,
-                        scale: s,
-                    },
-                );
+                let yaw = unit(rng) * std::f32::consts::TAU;
+                m.put(Prop {
+                    kind,
+                    x,
+                    z,
+                    y,
+                    r,
+                    h,
+                    yaw,
+                    scale: s,
+                });
                 n += 1;
             }
         };
-        place(self, Kind::Tree, TREES, &mut unit);
-        place(self, Kind::Rock, ROCKS, &mut unit);
-        place(self, Kind::Shroom, SHROOMS, &mut unit);
+        place(self, Kind::Tree, TREES, &mut rng);
+        place(self, Kind::Rock, ROCKS, &mut rng);
+        place(self, Kind::Shroom, SHROOMS, &mut rng);
     }
 
     /// Props whose cylinder comes within `d` of (x, z) on the ground.
@@ -495,13 +499,12 @@ impl Map {
         first
     }
 
-    /// A random spot on land, from `r` (0..1 numbers).
+    /// A random spot on land with nothing standing near, from `rng`.
     pub fn spot(&self, rng: &mut Rng) -> [f32; 2] {
         for _ in 0..200 {
-            let u = |rng: &mut Rng| (rng.next_u64() >> 40) as f32 / (1u64 << 24) as f32;
             let (x, z) = (
-                (u(rng) * 2.0 - 1.0) * SHORE * 0.85,
-                (u(rng) * 2.0 - 1.0) * SHORE * 0.85,
+                (unit(rng) * 2.0 - 1.0) * SHORE * 0.85,
+                (unit(rng) * 2.0 - 1.0) * SHORE * 0.85,
             );
             if self.land(x, z) && self.near(x, z, 1.5).next().is_none() {
                 return [x, z];
@@ -598,6 +601,11 @@ mod tests {
                 assert!(m.props.iter().any(|p| p.kind == k), "seed {seed}: {k:?}");
             }
             assert!(m.caches.len() >= 8);
+            // Each cache lies clear, or on something to stand on.
+            for c in &m.caches {
+                let mut under = m.near(c[0], c[1], RADIUS);
+                assert!(under.all(|q| q.top().is_some()), "seed {seed}: {c:?}");
+            }
         }
     }
 
