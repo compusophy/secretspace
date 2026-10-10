@@ -48,8 +48,12 @@ impl World {
                 let i = match p.queue.pop_front() {
                     Some(i) => {
                         p.idle = 0;
+                        p.credit -= 1;
                         i
                     }
+                    // A stalled page: its wizard stands in, at no cost
+                    // (the inputs it is late with are its record of these
+                    // ticks, and are caught up on when they come).
                     None => {
                         p.idle += 1;
                         if p.idle < INPUT_IDLE {
@@ -62,7 +66,6 @@ impl World {
                         }
                     }
                 };
-                p.credit -= 1;
                 p.yaw = i.yaw;
                 p.pitch = i.pitch.clamp(-16000, 16000);
                 motion::step(&mut p.body, &i, &self.map);

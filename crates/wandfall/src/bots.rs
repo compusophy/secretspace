@@ -124,7 +124,8 @@ fn dummy(w: &World, me: &Player, m: &mut Mind, tick: u32) -> Option<Input> {
             ..Input::default()
         }),
         2 | 3 if !(m.dummy == 3 && sparring) => {
-            // Side to side about its post, turning now and then.
+            // Side to side about its post: back the other way when a
+            // leg is done or it strays too far, a hop now and then.
             let (s, c) = trig::sin_cos(me.yaw);
             let off = (me.body.p[0] - m.home[0]) * -s + (me.body.p[2] - m.home[1]) * c;
             let strayed = off * m.strafe as f32 > DUMMY_LEASH;

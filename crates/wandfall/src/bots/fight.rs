@@ -133,13 +133,17 @@ pub(super) fn aim(me: &Player, mk: &Mark, spell: Option<u8>, tick: u32, seed: u6
         // Low, so a near miss still bursts by them.
         Some(spell::FIREBALL) => (mk.d / FIREBALL_SPEED, BOT_FIREBALL_LOW),
         Some(spell::FROST) => (mk.d / FROST_SPEED, 0.0),
-        // At their feet, where they will be (half of it: they may turn).
-        Some(spell::LIGHTNING) => (LIGHTNING_DELAY as f32 * DT * 0.5, mk.chest[1] - mk.feet[1]),
+        // At their feet, where they will be (some of the way: they may
+        // turn).
+        Some(spell::LIGHTNING) => (
+            LIGHTNING_DELAY as f32 * DT * BOT_LIGHTNING_LEAD,
+            mk.chest[1] - mk.feet[1],
+        ),
         _ => (mk.d / BOLT_SPEED, 0.0),
     };
     let to = [
         mk.chest[0] + mk.v[0] * lead,
-        mk.chest[1] - low + mk.v[1] * lead * 0.5,
+        mk.chest[1] - low + mk.v[1] * lead * BOT_LEAD_UP,
         mk.chest[2] + mk.v[2] * lead,
     ];
     let (dx, dy, dz) = (to[0] - eye[0], to[1] - eye[1], to[2] - eye[2]);
@@ -188,7 +192,7 @@ fn duel(w: &World, me: &Player, m: &mut Mind, mk: &Mark, yaw: u16, tick: u32) ->
     let under = w.zones.iter().find(|z| {
         z.by != me.id
             && z.land.saturating_sub(tick) <= BOT_DODGE
-            && (z.at[0] - p[0]).hypot(z.at[2] - p[2]) < LIGHTNING_RADIUS + 1.0
+            && (z.at[0] - p[0]).hypot(z.at[2] - p[2]) < LIGHTNING_RADIUS + BOT_DODGE_MARGIN
     });
     if let Some(z) = under {
         let away = trig::heading((p[2] - z.at[2]).atan2(p[0] - z.at[0]));
@@ -242,9 +246,8 @@ fn incoming(w: &World, me: &Player) -> bool {
 
 /// Which spells a bot casts now: at its mark (each from the distance it
 /// is good at; Lightning at one still, warded, mending or on the ground,
-/// not in the air), to save itself when
-/// hurt, to blow away what comes at it, to run when the storm comes or a
-/// fight is lost, or to chase.
+/// not in the air), to save itself when hurt, to blow away what comes at
+/// it, to run when the storm comes or a fight is lost, or to chase.
 fn spells(w: &World, me: &Player, mark: Option<&Mark>, plan: &Plan, tick: u32, seed: u64) -> u8 {
     let mut bits = 0;
     let hurt = me.hp * 100 / me.max_hp().max(1);

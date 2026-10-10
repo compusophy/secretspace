@@ -72,7 +72,7 @@ fn clear(w: &World, at: [f32; 2], r: f32) -> Option<[f32; 2]> {
 /// Whether one standing at `a` sees the chest of one at `b`.
 fn sees(w: &World, a: [f32; 2], b: [f32; 2]) -> bool {
     let eye = [a[0], w.map.height(a[0], a[1]) + EYE, a[1]];
-    let to = [b[0], w.map.height(b[0], b[1]) + 1.1, b[1]];
+    let to = [b[0], w.map.height(b[0], b[1]) + CHEST, b[1]];
     w.map.strikes(eye, to).is_none()
 }
 
@@ -93,18 +93,20 @@ fn start(w: &World) -> [f32; 2] {
         let capped = |q: &crate::map::Prop| matches!(q.kind, PropKind::Tree | PropKind::Shroom);
         w.map.land(p[0], p[1])
             && w.map.near(p[0], p[1], RANGE_CLEAR).next().is_none()
-            && !w.map.near(p[0], p[1], RANGE_CLEAR * 2.0).any(capped)
+            && !w.map.near(p[0], p[1], RANGE_CAPS).any(capped)
             && sees(w, p, [p[0] + RANGE_VIEW, p[1]])
     };
     // Ring after ring about the ruin, its own pillars and all.
-    (0..12)
-        .flat_map(|ring| (0..12).map(move |k| (ring, k)))
+    let round = (360.0 / RANGE_RING_DEG) as u32;
+    (0..RANGE_RINGS)
+        .flat_map(|ring| (0..round).map(move |k| (ring, k)))
         .map(|(ring, k)| {
-            let (a, d) = ((k as f32 * 30.0).to_radians(), 5.0 + ring as f32 * 1.5);
+            let a = (k as f32 * RANGE_RING_DEG).to_radians();
+            let d = RANGE_RING_FROM + ring as f32 * RANGE_RING_STEP;
             [ruin[0] + a.cos() * d, ruin[1] + a.sin() * d]
         })
         .find(|&p| open(p))
-        .or_else(|| clear(w, ruin, 1.2))
+        .or_else(|| clear(w, ruin, RANGE_ROOM))
         .unwrap_or(ruin)
 }
 
@@ -113,10 +115,17 @@ fn start(w: &World) -> [f32; 2] {
 fn post(w: &World, spawn: [f32; 2], d: f32, deg: f32) -> [f32; 2] {
     let at = |turn: f32| {
         let a = (deg + turn).to_radians();
-        clear(w, [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d], 1.2)
+        clear(
+            w,
+            [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d],
+            RANGE_ROOM,
+        )
     };
-    [0.0, 10.0, -10.0, 20.0, -20.0, 30.0, -30.0, 40.0, -40.0]
-        .into_iter()
+    // Straight, then a step further each way at a time.
+    let steps = (DUMMY_TURN_MAX / DUMMY_TURN_STEP) as u32;
+    let turns = (1..=steps).flat_map(|k| [1.0, -1.0].map(|s| s * k as f32 * DUMMY_TURN_STEP));
+    std::iter::once(0.0)
+        .chain(turns)
         .filter_map(at)
         .find(|&p| sees(w, spawn, p))
         .or_else(|| at(0.0))
@@ -133,11 +142,13 @@ fn lesson_cubes(w: &mut World, spawn: [f32; 2]) {
         spell::BLINK,
         spell::TETHER,
     ];
+    // In a fan, about the way east.
+    let middle = (first.len() - 1) as f32 / 2.0;
     for (k, &sp) in first.iter().enumerate() {
-        let a = (k as f32 - 2.0) * 0.35;
-        let d = 4.5 + k as f32 * 1.2;
+        let a = (k as f32 - middle) * LESSON_APART;
+        let d = LESSON_FROM + k as f32 * LESSON_STEP;
         let near = [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d];
-        let at = clear(w, near, 1.2).unwrap_or(near);
+        let at = clear(w, near, RANGE_ROOM).unwrap_or(near);
         loot::drop_scroll(w, sp, 1, [at[0], 0.0, at[1]], 0.0);
     }
 }

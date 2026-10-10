@@ -24,7 +24,7 @@ pub struct Mark {
 }
 
 fn chest(p: &Player) -> [f32; 3] {
-    [p.body.p[0], p.body.p[1] + 1.1, p.body.p[2]]
+    [p.body.p[0], p.body.p[1] + CHEST, p.body.p[2]]
 }
 
 fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {

@@ -23,6 +23,12 @@ pub fn max_hp(level: u8) -> i32 {
     HEALTH + HEALTH_PER_LEVEL * (level.max(1) as i32 - 1)
 }
 
+/// The health a level gained heals: its share of the rise (to the
+/// nearest whole).
+pub fn level_heal() -> i32 {
+    (HEALTH_PER_LEVEL * LEVEL_HEAL + 50) / 100
+}
+
 /// Damage as a level deals it (to the nearest whole).
 pub fn level_scale(level: u8, v: i32) -> i32 {
     (v * (100 + POWER_PER_LEVEL * (level.max(1) as i32 - 1)) + 50) / 100
@@ -66,7 +72,7 @@ pub fn gain(w: &mut World, who: u16, xp: u32, ev: &mut Vec<Event>) {
     while p.xp >= XP_PER_LEVEL && p.level < MAX_LEVEL {
         p.xp -= XP_PER_LEVEL;
         p.level += 1;
-        p.hp += HEALTH_PER_LEVEL * LEVEL_HEAL / 100;
+        p.hp += level_heal();
         ev.push(Event::Level {
             who,
             level: p.level,
@@ -359,5 +365,20 @@ mod tests {
         // Small numbers grow too: rounded, not cut off.
         let shard = power(spell::FROST, 1);
         assert!(level_scale(4, shard) > level_scale(1, shard));
+        // A level gained heals its share of the rise, rounded.
+        assert!(
+            (level_heal() * 100 - HEALTH_PER_LEVEL * LEVEL_HEAL).abs() <= 50,
+            "{} of {HEALTH_PER_LEVEL} at {LEVEL_HEAL}%",
+            level_heal()
+        );
+        let mut w = World::new(3);
+        let id = w.join("t", 0);
+        w.phase = Phase::Fight;
+        let k = w.players.iter().position(|p| p.id == id).unwrap();
+        w.players[k].hp = HEALTH / 2;
+        gain(&mut w, id, XP_PER_LEVEL, &mut Vec::new());
+        let p = &w.players[k];
+        assert_eq!((p.level, p.max_hp()), (2, max_hp(2)));
+        assert_eq!(p.hp, HEALTH / 2 + level_heal(), "healed by the level");
     }
 }

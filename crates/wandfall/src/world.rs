@@ -71,8 +71,9 @@ pub struct Player {
     pub behind: u32,
     /// Ticks since an input came (a stalled page still falls).
     pub idle: u32,
-    /// Steps it may take now: one more each tick, banked up to
-    /// `INPUT_BANK` (never more steps than ticks, give or take the bank).
+    /// Inputs it may apply now: one more each tick, banked up to
+    /// `INPUT_BANK` (never more inputs than ticks, give or take the bank;
+    /// a stalled page's stand-in steps are free).
     pub credit: u32,
     /// When it was last hurt (by anything); by whom it last was, and
     /// when (the storm or a quit then knocks it out to their credit).

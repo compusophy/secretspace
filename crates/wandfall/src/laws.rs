@@ -171,12 +171,15 @@ pub const OUT_LINGER_SECS: u32 = 5;
 /// A page's inputs, one a tick: at most this many wait their turn (a
 /// flood is cut short); this many are kept back against the network's
 /// jitter (more, and it catches up); steps are banked a tick at a time
-/// up to this many (a page that stalled catches up at once, one that
-/// floods runs no faster than the clock); and after this many ticks with
-/// none, a stalled page's wizard stands and falls on its own.
+/// up to this many, a second's worth (a page that stalled for up to a
+/// second catches up at once, one that floods runs no faster than the
+/// clock, and one that holds its inputs back to let them go in a burst
+/// gets no further, though it covers the bank's worth in one tick); and
+/// after this many ticks with none, a stalled page's wizard stands and
+/// falls on its own (those steps cost nothing from the bank).
 pub const INPUT_QUEUE: usize = 30;
 pub const INPUT_JITTER: usize = 3;
-pub const INPUT_BANK: u32 = TICK_HZ / 3;
+pub const INPUT_BANK: u32 = TICK_HZ;
 pub const INPUT_IDLE: u32 = TICK_HZ / 3;
 
 // The storm: a circle closing in phases. Each phase: seconds it waits,
@@ -242,9 +245,15 @@ pub const BOT_AIM_ERROR: f32 = 0.05;
 pub const BOT_LEAD_ERROR: f32 = 0.04;
 pub const BOT_AIR_ERROR: f32 = 0.03;
 pub const BOT_SKILL: f32 = 0.3;
-/// A Fireball aimed this far below the chest (m: a near miss still bursts
-/// by them).
+/// Where they aim: at the chest, this high over a wizard's feet (m); a
+/// Fireball this far below it (a near miss still bursts by them). They
+/// lead a wizard by the time a spell takes to get there, its climb or
+/// fall by this share of it (it curves), and Lightning by this share of
+/// its delay (it may turn).
+pub const CHEST: f32 = 1.1;
 pub const BOT_FIREBALL_LOW: f32 = 0.8;
+pub const BOT_LEAD_UP: f32 = 0.5;
+pub const BOT_LIGHTNING_LEAD: f32 = 0.5;
 /// For the first seconds of a fight they loot, fighting only whoever is
 /// this near (m) or hurts them.
 pub const BOT_CALM_SECS: u32 = 30;
@@ -258,12 +267,14 @@ pub const BOT_RANGE_FAR: f32 = 1.15;
 pub const BOT_BAND: (f32, f32) = (0.6, 1.4);
 /// Strafing: legs this long (ticks) and up to this many more, this share
 /// of them hopped; a jump now and then (odds a tick); and out from under
-/// a Lightning mark about to strike (within so many ticks).
+/// a Lightning mark about to strike (within so many ticks), from as far
+/// as this beyond its reach (m).
 pub const BOT_STRAFE: u32 = 15;
 pub const BOT_STRAFE_MORE: f32 = 40.0;
 pub const BOT_DUEL_HOP: f32 = 0.5;
 pub const BOT_JUMP_ODDS: f32 = 0.02;
 pub const BOT_DODGE: u32 = 12;
+pub const BOT_DODGE_MARGIN: f32 = 1.0;
 /// Spells: the odds a tick of casting one that is ready; how far off each
 /// attack spell is cast (m; Lightning not nearer than the first, and not
 /// at one in the air unless it is warded, mending or slower than this,
@@ -276,25 +287,30 @@ pub const BOT_CAST_LIGHTNING: (f32, f32) = (6.0, 40.0);
 pub const BOT_STILL: f32 = 3.0;
 /// Hurt (health, percent): struck (within so many ticks) they Ward, they
 /// Mend, struck they Blink away; with neither Mend nor Ward ready they
-/// run off to heal for a few seconds, a Tether thrown this high (of
-/// 65536 a turn) to get away.
+/// run off to heal for a few seconds, from a foe no nearer than this (m:
+/// one that near would only shoot them in the back), a Tether thrown
+/// this high (of 65536 a turn) to get away.
 pub const BOT_STRUCK: u32 = 20;
 pub const BOT_WARD_HP: i32 = 85;
 pub const BOT_MEND_HP: i32 = 55;
 pub const BOT_BLINK_HP: i32 = 30;
 pub const BOT_RETREAT_HP: i32 = 35;
 pub const BOT_RETREAT_SECS: u32 = 3;
+pub const BOT_RETREAT_NEAR: f32 = 8.0;
 pub const BOT_TETHER_UP: i16 = 4000;
-/// The drop: each lands within this far (m) of the island's middle, as
-/// far as it can from where the others are bound, and lets the broom
-/// drop this near its spot (m).
+/// The drop: each lands within this far (m) of the island's middle, and
+/// within this share of how far the broom carries it, as far as it can
+/// from where the others are bound; it lets the broom drop this near its
+/// spot (m).
 pub const BOT_DROP_SPREAD: f32 = 105.0;
+pub const BOT_DROP_REACH: f32 = 0.8;
 pub const BOT_DROP_NEAR: f32 = 6.0;
 /// Where they wander with no one about: within this share of the storm's
 /// next circle (of the whole island, before it first closes), for at
-/// most this long (s).
+/// most this long (s), or till they are this near (m).
 pub const BOT_GOAL_SHARE: f32 = 0.7;
 pub const BOT_GOAL_SECS: u32 = 20;
+pub const BOT_GOAL_NEAR: f32 = 3.0;
 /// The storm: they head in once they would not otherwise make it with
 /// this many seconds to spare; within this far (m) of the last circle's
 /// middle they hold their ground.
@@ -307,15 +323,18 @@ pub const BOT_HOP_FAR: f32 = 25.0;
 pub const BOT_HOP_ODDS: f32 = 0.05;
 pub const BOT_PAD: f32 = 30.0;
 /// They step round what stands this near ahead (m), turning this much
-/// (radians).
+/// (radians), and give it this much room past their own width (m).
 pub const BOT_AVOID: f32 = 4.0;
 pub const BOT_AVOID_TURN: f32 = 1.1;
+pub const BOT_AVOID_ROOM: f32 = 0.4;
 /// Stuck (moved less than this in a second, m), a bot backs off this far
-/// (m) for this long (s) before going elsewhere, and gives up for a while
-/// (s) on a cube this near (m) it could not reach.
+/// (m) for this long (s) before going elsewhere (kicking off a wall it
+/// slides down for the first of them, s), and gives up for a while (s)
+/// on a cube this near (m) it could not reach.
 pub const BOT_STUCK_MOVE: f32 = 0.7;
 pub const BOT_BACK_OFF: f32 = 8.0;
 pub const BOT_BACK_SECS: u32 = 3;
+pub const BOT_KICK_SECS: u32 = 2;
 pub const BOT_SKIP_NEAR: f32 = 4.0;
 pub const BOT_SKIP_SECS: u32 = 30;
 /// How far a bot goes out of its way for a cube, and how high over the
@@ -564,12 +583,33 @@ pub const DUMMY_RESPAWN: u32 = 60;
 pub const DUMMY_WHOLE: u32 = 60;
 pub const PRACTICE_LOOT_EVERY: u32 = 120 * TICK_HZ;
 /// A strafing dummy: legs this long (ticks) and up to this many more, a
-/// jump's odds a tick, and how far from its post it strays (m).
+/// jump's odds a tick, and how far from its post it strays (m); a
+/// sparring one, between fights, waits once back this near its post (m).
 pub const DUMMY_STRAFE: u32 = 35;
 pub const DUMMY_STRAFE_MORE: f32 = 40.0;
 pub const DUMMY_JUMP_ODDS: f32 = 0.01;
 pub const DUMMY_LEASH: f32 = 4.0;
+pub const DUMMY_HOME_NEAR: f32 = 2.0;
+/// A dummy's post is turned this many degrees at a time, up to this far
+/// either way, till you can see it from where you start; it and each
+/// lesson cube have nothing standing within this far (m).
+pub const DUMMY_TURN_STEP: f32 = 10.0;
+pub const DUMMY_TURN_MAX: f32 = 40.0;
+pub const RANGE_ROOM: f32 = 1.2;
+/// The lesson cubes lie in a fan ahead of where you start: this far apart
+/// (radians), the first this far off (m), each one this much further.
+pub const LESSON_APART: f32 = 0.35;
+pub const LESSON_FROM: f32 = 4.5;
+pub const LESSON_STEP: f32 = 1.2;
 /// Where you start on the range: nothing standing within this far (m),
-/// and the way east clear this far (m).
+/// no tree's or mushroom's cap within this far (m), and the way east
+/// clear this far (m); looked for ring after ring about the ruin (this
+/// many rings, the first this far out, each this much further, a spot
+/// every this many degrees round).
 pub const RANGE_CLEAR: f32 = 4.0;
+pub const RANGE_CAPS: f32 = 8.0;
 pub const RANGE_VIEW: f32 = 15.0;
+pub const RANGE_RINGS: u32 = 12;
+pub const RANGE_RING_FROM: f32 = 5.0;
+pub const RANGE_RING_STEP: f32 = 1.5;
+pub const RANGE_RING_DEG: f32 = 30.0;

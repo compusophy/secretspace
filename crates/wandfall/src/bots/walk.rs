@@ -40,7 +40,7 @@ fn around(w: &World, at: [f32; 3], a: f32) -> f32 {
         // Which side of the path its centre is (right positive), and how
         // near.
         let side = oz * dx - ox * dz;
-        if ahead > 0.0 && ahead < q.r + BOT_AVOID && side.abs() < q.r + RADIUS + 0.4 {
+        if ahead > 0.0 && ahead < q.r + BOT_AVOID && side.abs() < q.r + RADIUS + BOT_AVOID_ROOM {
             return a + if side > 0.0 {
                 -BOT_AVOID_TURN
             } else {
@@ -79,8 +79,8 @@ fn drop_spot(w: &World, me: &Player, m: &Mind, tick: u32) -> [f32; 2] {
             }
         })
         .collect();
-    // As far as the broom carries it on the way down.
-    let reach = GLIDE_SPEED * me.body.p[1].max(0.0) / GLIDE_FALL * 0.8;
+    // Well within how far the broom carries it on the way down.
+    let reach = GLIDE_SPEED * me.body.p[1].max(0.0) / GLIDE_FALL * BOT_DROP_REACH;
     let mut best = ([me.body.p[0], me.body.p[2]], -1.0);
     for n in 0..12 {
         let g = somewhere(w, m, tick, ([0.0, 0.0], BOT_DROP_SPREAD), 100 + n * 16);
@@ -129,7 +129,7 @@ pub fn plan(
     let stale = storm.phase as u8 != m.goal_phase
         || (!first && (m.goal[0] - next.0[0]).hypot(m.goal[1] - next.0[1]) > next.1);
     let backing = m.stuck > 0 && tick < m.stuck + BOT_BACK_SECS * TICK_HZ;
-    let due = tick >= m.goal_at || goal_far < 3.0 || (stale && !backing);
+    let due = tick >= m.goal_at || goal_far < BOT_GOAL_NEAR || (stale && !backing);
     if !me.body.glide && due {
         // A wander: before the storm first closes, anywhere on the
         // island; then inside its next circle.
@@ -147,7 +147,7 @@ pub fn plan(
     let cover = me.slots.iter().zip(me.cds).any(|(s, cd)| {
         cd == 0 && s.is_some_and(|s| s.spell == spell::MEND || s.spell == spell::WARD)
     });
-    if low && !cover && !flee && m.dummy == 0 && mark.is_some_and(|mk| mk.d > BOT_RANGE * 0.5) {
+    if low && !cover && !flee && m.dummy == 0 && mark.is_some_and(|mk| mk.d > BOT_RETREAT_NEAR) {
         m.retreat_until = m.retreat_until.max(tick + BOT_RETREAT_SECS * TICK_HZ);
     }
     let retreat = tick < m.retreat_until && !flee;
@@ -201,7 +201,8 @@ pub fn plan(
         flee,
         far,
         retreat,
-        stay: (me.body.glide && goal_far < BOT_DROP_NEAR) || (m.dummy == 3 && goal_far < 2.0),
+        stay: (me.body.glide && goal_far < BOT_DROP_NEAR)
+            || (m.dummy == 3 && goal_far < DUMMY_HOME_NEAR),
         cube,
     }
 }
@@ -212,7 +213,11 @@ pub fn plan(
 /// a pit), kick off it.
 pub fn unstick(me: &Player, m: &mut Mind, plan: &Plan, i: &mut Input, tick: u32) {
     let b = &me.body;
-    if m.stuck > 0 && tick < m.stuck + 2 * TICK_HZ && crate::wall::can(b) && b.v[1] < 0.0 && !b.held
+    if m.stuck > 0
+        && tick < m.stuck + BOT_KICK_SECS * TICK_HZ
+        && crate::wall::can(b)
+        && b.v[1] < 0.0
+        && !b.held
     {
         i.keys |= keys::JUMP;
     }
