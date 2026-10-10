@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use render::{Camera, V3};
-use wandfall::proto::{flag, Seen};
+use wandfall::laws::{spell, GUST_RADIUS};
+use wandfall::proto::{self, flag, Ev, Seen};
 use wandfall::trig;
 
 use crate::fx::{self, Draw};
@@ -33,6 +34,20 @@ pub struct Eyes {
 pub struct Show {
     pub hold: Option<f64>,
     pub storm: bool,
+}
+
+/// Whether a Gust has just gone off near `s` (cast by another a moment
+/// ago, within its reach and as far again as a throw carries it): it
+/// throws whoever stands there, hurt or not.
+fn gusted(shows: &[(f64, Ev)], s: &Seen, now: f64) -> bool {
+    shows
+        .iter()
+        .rev()
+        .take_while(|e| now - e.0 < 600.0)
+        .any(|&(_, e)| {
+            matches!(e, Ev::Cast { by, spell: spell::GUST, at, .. }
+            if by != s.id && (at[0] - s.p[0]).hypot(at[2] - s.p[2]) < GUST_RADIUS + 6.0)
+        })
 }
 
 /// Everything in the match into `d`, at `now` (`dt` since the last
@@ -89,6 +104,10 @@ pub fn draw(
                 s.flags & flag::CROUCH != 0,
                 slide,
             );
+            // Hauled by a Tether or thrown by a Gust: not its own leap.
+            if s.fx & proto::fx::TETHER != 0 || gusted(&st.shows, s, now) {
+                a.shove();
+            }
             if let Some(hard) = a.step(s.p, aimed, stance, dt as f32 / 1000.0) {
                 st.dust.push((now, s.p, hard));
             }
@@ -104,7 +123,6 @@ pub fn draw(
                     .min(1.0),
                 aim,
                 tip,
-                glide,
                 t,
             };
             // A slide kicks up dust behind it.

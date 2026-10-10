@@ -15,8 +15,9 @@ use wandfall::map::Map;
 use wandfall::places::Deck;
 
 use super::relics::{GRIME, LICHEN};
-use super::{one, smooth, GOLDEN, VIOLET};
+use super::{GOLDEN, VIOLET};
 use crate::flora::FAR;
+use crate::make::{one, smooth};
 
 /// The tower's foot is this far under the plaza.
 const SUNK: f32 = 0.3;

@@ -16,15 +16,17 @@ use std::f32::consts::TAU;
 
 use render::geo::{hash, mix, rgb, unit, Geo, V3};
 use render::sculpt::{bend, both, cone, ellipsoid, mesh, noise, sheet, smin};
-use wandfall::laws::ROCK_TOP;
+use wandfall::laws::{ROCK_GIRTH, ROCK_TALL, ROCK_TOP};
+
+use crate::make::steps;
 
 /// How much coarser the far ones are.
 pub const FAR: f32 = 2.6;
 /// A boulder's proportions as set down (times its prop's scale).
 pub const ROCK: V3 = [1.2, 1.4, 1.1];
-/// Where feet stand on a boulder, in its own measure: its prop is 1.3
-/// times its scale tall (`map`), and stood on `ROCK_TOP` of that up.
-const ROCK_STAND: f32 = ROCK_TOP * 1.3 / ROCK[1];
+/// Where feet stand on a boulder, in its own measure: its prop is
+/// `ROCK_TALL` times its scale tall, and stood on `ROCK_TOP` of that up.
+const ROCK_STAND: f32 = ROCK_TOP * ROCK_TALL / ROCK[1];
 
 /// A broadleaf crown's colours: dark, light.
 pub type Leaves = (V3, V3);
@@ -124,22 +126,24 @@ pub fn crown(seed: u32, (dark, light): Leaves, q: f32) -> Geo {
         },
         (0.75, 1.1),
     );
-    // Leaves breaking its outline: near, a small one at every third of
-    // its points; far, a bigger one at each (so it keeps its ragged edge).
+    // Leaves breaking its outline, at every third of its points: near,
+    // small ones; far (fewer points), bigger ones, pointed (their shape
+    // lost that far off), so it keeps its ragged edge for few triangles.
     if q < 1.5 {
-        leaves(&mut g, 3, (0.36, 0.2), seed);
+        leaves(&mut g, 3, (0.36, 0.2), seed, false);
     } else {
-        leaves(&mut g, 1, (0.7, 0.4), seed);
+        leaves(&mut g, 3, (0.75, 0.45), seed, true);
     }
     bend(&mut g, [0.0, 4.0, 0.0], 0.55);
     g
 }
 
 /// Leaves on a crown's surface: at every `every`th of its points (not
-/// those facing down), a leaf `size` long and wide standing out from it
-/// at a slant, turned every way, its colour a little lighter or darker,
-/// lit as the surface is; both its faces drawn.
-fn leaves(g: &mut Geo, every: usize, (long, wide): (f32, f32), seed: u32) {
+/// those facing down), a leaf `long` and `wide` standing out from it at
+/// a slant, turned every way, its colour a little lighter or darker, lit
+/// as the surface is; both its faces drawn. A leaf is a diamond, or
+/// `pointed`, a triangle from its foot to its tip (half the triangles).
+fn leaves(g: &mut Geo, every: usize, (long, wide): (f32, f32), seed: u32, pointed: bool) {
     use render::geo::{add, cross, norm, scale, STRIDE};
     let points = g.len();
     for k in (0..points).step_by(every) {
@@ -164,10 +168,17 @@ fn leaves(g: &mut Geo, every: usize, (long, wide): (f32, f32), seed: u32) {
         let along = norm(add(along, scale(n, 0.3 + 0.7 * u(2))));
         let across = scale(norm(cross(along, n)), wide / 2.0);
         let tip = add(at, scale(along, long));
-        let mid = add(at, scale(along, long / 2.0));
-        let corners = [at, add(mid, across), tip, add(mid, scale(across, -1.0))];
         let base = g.len() as u32;
-        for c in corners {
+        if pointed {
+            for c in [add(at, across), tip, add(at, scale(across, -1.0))] {
+                g.vertex(c, n, col, 0.0);
+            }
+            g.index(base, base + 1, base + 2);
+            g.index(base, base + 2, base + 1);
+            continue;
+        }
+        let mid = add(at, scale(along, long / 2.0));
+        for c in [at, add(mid, across), tip, add(mid, scale(across, -1.0))] {
             g.vertex(c, n, col, 0.0);
         }
         for (a, b, c) in [(0, 1, 2), (0, 2, 3), (0, 2, 1), (0, 3, 2)] {
@@ -226,10 +237,13 @@ pub fn pine(seed: u32, q: f32) -> Geo {
                 a.sin() * r,
             ]
         };
-        let n = (steps(42, q), steps(5, q));
+        // Round, steps enough for every bough; down from its top, fewer
+        // beneath (seen only from under it), and fewer far off.
+        let round = steps(42, q);
+        let down = |n: f32, least: usize| ((n / q).round() as usize).max(least);
         sheet(
             &mut g,
-            n,
+            (round, down(5.0, 3)),
             |u, v| at(u * TAU, v, 0.0),
             |u, v| {
                 let tip = v * v * (0.8 + 0.2 * rag(u * TAU));
@@ -238,18 +252,13 @@ pub fn pine(seed: u32, q: f32) -> Geo {
         );
         sheet(
             &mut g,
-            n,
+            (round, down(3.0, 2)),
             |u, v| at(-u * TAU, v, 1.0),
             |_, v| render::geo::scale(dark, 0.55 + 0.25 * v),
         );
     }
     bend(&mut g, [0.0, 3.0, 0.0], 0.3);
     g
-}
-
-/// Steps for a sheet at this detail.
-pub(crate) fn steps(n: usize, q: f32) -> usize {
-    ((n as f32 / q).round() as usize).max(4)
 }
 
 /// A boulder (about 2 across and 1 tall before its instance's scale,
@@ -267,7 +276,7 @@ pub fn boulder(seed: u32, q: f32) -> Geo {
             // Its sides cut close to its girth; its shoulders past the
             // flat of its top, so feet find it where they stand.
             let off = if up.abs() < 0.3 {
-                0.86 + 0.08 * h(seed, 100 + k)
+                ROCK_GIRTH / ROCK[0] * (0.94 + 0.09 * h(seed, 100 + k))
             } else if up > 0.0 {
                 0.75 * n[0].hypot(n[2]) + (ROCK_STAND - mid[1] - 0.05) * n[1]
             } else {
@@ -325,10 +334,14 @@ mod tests {
         };
         let (near, far) = (count(1.0), count(FAR));
         println!("near {near:?}, far {far:?}");
-        // A tree near, all of it; far, a fifth as much.
+        // A tree near, all of it; far, a fifth as much. Far, the crowns,
+        // pines and boulders are what the sun's shadow draws for all the
+        // island's hundreds: about as light as before they had leaves,
+        // boughs and their full girth.
         assert!(near[0] + near[1] < 12_000, "{near:?}");
         assert!(far[0] + far[1] < (near[0] + near[1]) / 4, "{far:?}");
         assert!(near[4] < 4_000, "{near:?}");
+        assert!(far[1] < 700 && far[3] < 1_000 && far[4] < 450, "{far:?}");
         // Far, a crown keeps its size and ragged edge (no shrinking as it
         // swaps).
         let reach = |g: &Geo| {
@@ -336,15 +349,20 @@ mod tests {
                 .map(|v| v[0].hypot(v[2]))
                 .fold(0.0f32, f32::max)
         };
-        let (n, f) = (reach(&crown(1, leaves, 1.0)), reach(&crown(1, leaves, FAR)));
-        assert!(f > n * 0.95 && f < n * 1.1, "near {n}, far {f}");
+        for seed in [1, 11, 29, 47] {
+            let (n, f) = (
+                reach(&crown(seed, leaves, 1.0)),
+                reach(&crown(seed, leaves, FAR)),
+            );
+            assert!(f > n * 0.95 && f < n * 1.1, "near {n}, far {f}");
+        }
     }
 
     #[test]
     fn a_boulder_stands_where_its_prop_does() {
         // As set down (scale 1): its top, across the middle of it, where
         // feet stand on its prop; its sides out about as far as its prop
-        // blocks (1.1 across), low down where wizards meet them.
+        // blocks (`ROCK_GIRTH`), low down where wizards meet them.
         for seed in [5, 17, 23] {
             let g = boulder(seed, 1.0);
             let world = |v: &[f32]| [v[0] * ROCK[0], v[1] * ROCK[1], v[2] * ROCK[2]];
@@ -366,7 +384,10 @@ mod tests {
                 }
             }
             for r in out {
-                assert!(r > 0.85 && r < 1.3, "{seed}: its sides {out:?}");
+                assert!(
+                    r > ROCK_GIRTH * 0.77 && r < ROCK_GIRTH * 1.18,
+                    "{seed}: its sides {out:?}"
+                );
             }
         }
     }

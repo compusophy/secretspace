@@ -131,7 +131,10 @@ pub const PADS_WILD: usize = 8;
 pub const PAD_R: f32 = 1.3;
 pub const PAD_APART: f32 = 45.0;
 pub const PAD_UP: f32 = 33.0;
-/// A boulder's top over its trunk's (its look is rounder and taller).
+/// A boulder blocks this wide and this tall, times its size; its top
+/// stands this much over its trunk's (its look is rounder and taller).
+pub const ROCK_GIRTH: f32 = 1.1;
+pub const ROCK_TALL: f32 = 1.3;
 pub const ROCK_TOP: f32 = 1.15;
 pub const AIR_JUMP_STAMINA: u16 = STAMINA / 6;
 /// Crouching: this much of the speed, eyes this high, a body this tall.

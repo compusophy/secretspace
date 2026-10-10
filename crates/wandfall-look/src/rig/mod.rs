@@ -107,7 +107,6 @@ impl Rig {
             arm: 0.0,
             aim: 0.0,
             tip: (rgb(255, 214, 128), 0.0),
-            glide: false,
             t,
         };
         let twist = (unit(hash(at[0] as i32, at[2] as i32, id as u32)) - 0.5) * 1.6;

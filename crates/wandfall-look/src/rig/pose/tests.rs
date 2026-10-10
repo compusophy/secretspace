@@ -10,7 +10,6 @@ fn pose() -> Pose {
         arm: 0.0,
         aim: 0.0,
         tip: ([1.0; 3], 0.0),
-        glide: false,
         t: 0.0,
     }
 }

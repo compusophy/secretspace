@@ -317,7 +317,7 @@ impl Map {
                 }
                 let s = 0.8 + unit() * 0.6;
                 let (r, h) = match kind {
-                    Kind::Rock => (1.1 * s, 1.3 * s),
+                    Kind::Rock => (ROCK_GIRTH * s, ROCK_TALL * s),
                     Kind::Shroom => (0.4 * s, 3.5 * s),
                     _ => (0.35 * s, 6.0 * s),
                 };

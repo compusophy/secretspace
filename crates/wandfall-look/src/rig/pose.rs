@@ -50,8 +50,6 @@ pub struct Pose {
     /// The spell it has just cast and how fresh (1 just now): its arms
     /// make that spell's gesture, easing back.
     pub spell: Option<(u8, f32)>,
-    /// On its broomstick, dropping onto the island.
-    pub glide: bool,
     /// Seconds (for breath and the broom's sway).
     pub t: f32,
 }

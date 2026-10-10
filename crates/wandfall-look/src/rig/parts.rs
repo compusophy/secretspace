@@ -15,8 +15,7 @@ use render::sculpt::{
 };
 
 use super::pose::{ANKLE, FORE, SHIN, THIGH, TIP, UPPER};
-use crate::flora::steps;
-use crate::land::join;
+use crate::make::{join, steps};
 
 pub const SKIN: V3 = rgb(226, 170, 130);
 pub const GOLD: V3 = rgb(224, 178, 92);

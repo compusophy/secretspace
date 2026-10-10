@@ -13,7 +13,7 @@ use render::geo::{rgb, Geo};
 use render::{Mesh, Renderer};
 
 use super::parts::{self, GOLD};
-use crate::land::smooth;
+use crate::make::smooth;
 
 /// The robe's quarters about the waist (front left, front right, back
 /// right, back left), a little overlapped.

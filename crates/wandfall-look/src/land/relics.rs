@@ -3,9 +3,10 @@
 //! and their capstones; the grove's giant mushrooms and crystals; the
 //! circle's standing stones (runes cut in the face toward the altar) and
 //! its altar (a ring of runes glowing in its top); the rift's obsidian,
-//! faceted, embers glowing in its cracks, and its gate between two
-//! horns; and the islets floating over it all (rock in strata under a
-//! grassy lip, roots hanging, a crystal under some).
+//! faceted, embers glowing in its cracks, slivers of it broken off about
+//! its lip, and its gate between two horns; and the islets floating over
+//! it all (rock in strata under a grassy lip, roots hanging, a crystal
+//! under some).
 
 use std::f32::consts::TAU;
 
@@ -14,8 +15,9 @@ use render::sculpt::{both, capsule, carve, cone, ellipsoid, mesh, noise, rbox, s
 use render::{Mesh, Renderer};
 use std::cell::OnceCell;
 
-use super::{crystal, join, lean, one, smooth, CYAN, EMBER};
+use super::{crystal, lean, CYAN, EMBER};
 use crate::flora::FAR;
+use crate::make::{join, one, smooth};
 
 /// The ruins' stone: a warm grey, grimed toward the ground, lichen where
 /// it faces the sky.
@@ -34,6 +36,18 @@ pub(super) const CAP: f32 = 0.32;
 pub(super) const MENHIR: f32 = 4.9;
 /// The obsidian is made this wide at its foot and this tall.
 pub(super) const SPIKE: (f32, f32) = (0.88, 5.0);
+/// Slivers of obsidian about the rift's lip are at most this tall (m;
+/// underfoot, they do not block).
+const SLIVER: f32 = 0.4;
+
+/// How much coarser the relics are far off: plainer shapes than the
+/// flora, they keep their outline coarser still (`FAR`); the gate less
+/// so (its horns thin to points). The islets, always seen from afar,
+/// are drawn coarser only beyond `ISLETS_FAR` metres.
+const COARSE: f32 = 3.4;
+const GATE_FAR: f32 = 1.6;
+const ISLET_FAR: f32 = 2.0;
+pub(super) const ISLETS_FAR: f32 = 60.0;
 
 /// A mesh near and far.
 pub(super) type NearFar = (Mesh, Mesh);
@@ -43,20 +57,25 @@ thread_local! {
     static SCULPTED: OnceCell<Vec<Geo>> = const { OnceCell::new() };
 }
 
-/// Every sculpted relic, as `Relics::new` takes them: each pillar near
-/// and far, the capstone and the standing stone near and far, each
-/// obsidian near and far, the altar and the gate, the islets.
+/// Every sculpted relic near and far, as `Relics::new` takes them: each
+/// pillar, the capstone, the standing stone, each obsidian, the altar,
+/// the gate, each islet.
 fn sculpted() -> Vec<Geo> {
     let mut v = Vec::new();
     for (k, &h) in PILLARS.iter().enumerate() {
-        v.extend([pillar(h, k as u32 + 1, 1.0), pillar(h, k as u32 + 1, FAR)]);
+        v.extend([
+            pillar(h, k as u32 + 1, 1.0),
+            pillar(h, k as u32 + 1, COARSE),
+        ]);
     }
-    v.extend([capstone(1.0), capstone(FAR), menhir(1.0), menhir(FAR)]);
+    v.extend([capstone(1.0), capstone(COARSE), menhir(1.0), menhir(COARSE)]);
     for s in [3u32, 11, 19] {
-        v.extend([obsidian(s, 1.0), obsidian(s, FAR)]);
+        v.extend([obsidian(s, 1.0), obsidian(s, COARSE)]);
     }
-    v.extend([altar(), gate()]);
-    v.extend([2u32, 7, 13].map(islet));
+    v.extend([altar(1.0), altar(FAR), gate(1.0), gate(GATE_FAR)]);
+    for s in [2u32, 7, 13] {
+        v.extend([islet(s, 1.0), islet(s, ISLET_FAR)]);
+    }
     v
 }
 
@@ -65,11 +84,12 @@ pub(super) struct Relics {
     pub cap: NearFar,
     pub shrooms: [Mesh; 3],
     pub menhir: NearFar,
-    pub altar: Mesh,
+    pub altar: NearFar,
     pub spikes: [NearFar; 3],
-    pub gate: Mesh,
+    pub slivers: Mesh,
+    pub gate: NearFar,
     pub crystals: [Mesh; 2],
-    pub islets: [Mesh; 3],
+    pub islets: [NearFar; 3],
 }
 
 impl Relics {
@@ -89,10 +109,11 @@ impl Relics {
         let pillars = [pair(), pair(), pair(), pair()];
         let (cap, menhir) = (pair(), pair());
         let spikes = [pair(), pair(), pair()];
-        let (altar, gate) = pair();
-        let islets = [next(), next(), next()];
+        let (altar, gate) = (pair(), pair());
+        let islets = [pair(), pair(), pair()];
         let shrooms = [rgb(150, 80, 220), rgb(50, 170, 160), rgb(210, 70, 70)]
             .map(|c| smooth(r, |g| shroom(g, c)));
+        let slivers = one(r, |g| slivers(g, 9));
         let crystals = [0u32, 1].map(|s| {
             one(r, |g| {
                 crystal(g, 0.42, 1.0, [1.0; 3], 0.3);
@@ -118,6 +139,7 @@ impl Relics {
             menhir,
             altar,
             spikes,
+            slivers,
             gate,
             crystals,
             islets,
@@ -129,13 +151,13 @@ impl Relics {
             .pillars
             .iter()
             .chain(&self.spikes)
-            .chain([&self.cap, &self.menhir])
+            .chain(&self.islets)
+            .chain([&self.cap, &self.menhir, &self.altar, &self.gate])
             .flat_map(|&(a, b)| [a, b]);
         pairs
-            .chain([self.altar, self.gate])
             .chain(self.shrooms)
+            .chain([self.slivers])
             .chain(self.crystals)
-            .chain(self.islets)
     }
 }
 
@@ -325,7 +347,7 @@ fn menhir(q: f32) -> Geo {
 
 /// The circle's altar: a plinth, a slab over it with a ring of runes
 /// cut glowing in its top.
-fn altar() -> Geo {
+fn altar(q: f32) -> Geo {
     let ring = |p: V3| torus(p, [0.0, 1.12, 0.0], 0.42, 0.045);
     let f = move |p: V3| {
         let plinth = rbox(p, [0.0, 0.45, 0.0], [0.85, 0.45, 0.55], 0.06);
@@ -336,7 +358,7 @@ fn altar() -> Geo {
     mesh(
         &f,
         ([-1.2, -0.1, -0.9], [1.2, 1.25, 0.9]),
-        0.05,
+        0.05 * q,
         &|p, n| {
             if ring(p) < 0.03 {
                 return (CYAN, 1.8);
@@ -356,9 +378,11 @@ fn altar() -> Geo {
     )
 }
 
-/// Obsidian thrust up, `SPIKE` wide and tall: a leaning blade cut in
-/// glassy facets, two shards at its foot, embers glowing in the cracks
-/// near the ground.
+/// Obsidian thrust up, `SPIKE` wide and tall (its facets meet in a point
+/// short of that, so it is stretched up to it): a leaning blade cut in
+/// glassy facets, two lesser blades rising beside it (within its foot's
+/// reach, so all of it blocks), embers glowing in the cracks near the
+/// ground.
 fn obsidian(seed: u32, q: f32) -> Geo {
     let u = |k: i32| unit(hash(seed as i32, k, 0x0b5));
     let (r0, h) = SPIKE;
@@ -375,9 +399,9 @@ fn obsidian(seed: u32, q: f32) -> Geo {
             let a = (k as f32 * 0.45 + u(40 + k)) * TAU;
             let (s, c) = a.sin_cos();
             (
-                [c * 0.55, -0.2, s * 0.55],
-                [c * 1.15, 0.7 + 0.5 * u(50 + k), s * 1.15],
-                0.22 + 0.1 * u(60 + k),
+                [c * 0.38, -0.2, s * 0.38],
+                [c * 0.78, 1.0 + 0.8 * u(50 + k), s * 0.78],
+                0.2 + 0.08 * u(60 + k),
             )
         })
         .collect();
@@ -391,9 +415,9 @@ fn obsidian(seed: u32, q: f32) -> Geo {
         }
         d + 0.006 * noise(scale(p, 9.0))
     };
-    mesh(
+    let mut g = mesh(
         &f,
-        ([-1.5, -0.35, -1.5], [1.5, h + 0.2, 1.5]),
+        ([-1.0, -0.35, -1.0], [1.0, h + 0.2, 1.0]),
         0.075 * q,
         &|p, _| {
             let w = noise([
@@ -405,12 +429,51 @@ fn obsidian(seed: u32, q: f32) -> Geo {
             (mix(OBSIDIAN, EMBER, crack), 1.8 * crack)
         },
         (0.4, 0.1),
-    )
+    );
+    let top = g.v.chunks(geo::STRIDE).map(|v| v[1]).fold(1.0, f32::max);
+    stretch(&mut g, h / top);
+    g
+}
+
+/// `g` stretched upright `k` times (its normals turned as the stretch
+/// turns its faces).
+fn stretch(g: &mut Geo, k: f32) {
+    for v in g.v.chunks_mut(geo::STRIDE) {
+        v[1] *= k;
+        let n = geo::norm([v[3], v[4] / k, v[5]]);
+        v[3..6].copy_from_slice(&n);
+    }
+}
+
+/// Slivers of obsidian broken off about the rift's lip, at their real
+/// size: three faceted blades leaning out of the ground every way, at
+/// most `SLIVER` tall, an ember glinting in the cracks of one.
+fn slivers(g: &mut Geo, seed: u32) {
+    let u = |k: i32| unit(hash(seed as i32, k, 0x511e));
+    for k in 0..3 {
+        let a = (k as f32 + 0.6 * u(k)) / 3.0 * TAU;
+        let (s, c) = a.sin_cos();
+        let (d, lean) = (0.06 + 0.12 * u(10 + k), 0.06 + 0.12 * u(20 + k));
+        let tall = SLIVER * (0.45 + 0.55 * u(30 + k));
+        let (col, glow) = if k == 0 {
+            (mix(OBSIDIAN, EMBER, 0.3), 0.3)
+        } else {
+            (OBSIDIAN, 0.0)
+        };
+        g.spike(
+            [c * d, -0.08, s * d],
+            [c * (d + lean), tall, s * (d + lean)],
+            0.05 + 0.04 * u(40 + k),
+            5,
+            col,
+            glow,
+        );
+    }
 }
 
 /// The rift's gate: a slab of obsidian, a horn curving up either side,
 /// and the ring between them that the gate opens in (its middle aglow).
-fn gate() -> Geo {
+fn gate(q: f32) -> Geo {
     let horn = |p: V3, s: f32| {
         let at = |y: f32, z: f32| [0.0, y, z * s];
         let a = cone(p, at(0.3, 3.1), at(3.4, 3.75), 0.7, 0.45);
@@ -426,7 +489,7 @@ fn gate() -> Geo {
     let mut g = mesh(
         &f,
         ([-1.3, -0.1, -4.8], [1.3, 8.2, 4.8]),
-        0.14,
+        0.14 * q,
         &|p, n| {
             let sheen = 0.5 + 0.5 * n[1].max(0.0);
             (
@@ -483,7 +546,7 @@ pub(super) fn hanging(at: V3, s: f32) -> (render::M4, V3) {
 /// a lip that overhangs, under it earth, then rock in strata narrowing to
 /// a point (`ISLET_TIP`), lumps hanging off it, roots hanging from under
 /// the lip.
-fn islet(seed: u32) -> Geo {
+fn islet(seed: u32, q: f32) -> Geo {
     let u = |k: i32| unit(hash(seed as i32, k, 0x151e7));
     let lumps: Vec<(V3, V3)> = (0..4)
         .map(|k| {
@@ -529,7 +592,7 @@ fn islet(seed: u32) -> Geo {
     mesh(
         &f,
         ([-5.6, -7.2, -5.6], [5.6, 1.0, 5.6]),
-        0.28,
+        0.28 * q,
         &move |p, n| {
             let c = if p[1] > 0.1 && n[1] > 0.25 {
                 mix(
@@ -616,13 +679,44 @@ mod tests {
         let g = obsidian(3, 1.0);
         let lit = g.v.chunks(st).filter(|v| v[9] > 0.3).count();
         assert!(lit * 50 > g.len() / 10, "{lit} of {} glow", g.len());
+        // Drawn where it blocks: its point at its height; above the
+        // ground, nothing of it (its lesser blades neither) further out
+        // than its foot, which is set down a tenth wider than its prop
+        // (`SPIKE`).
+        for seed in [3, 11, 19] {
+            for q in [1.0, COARSE] {
+                let g = obsidian(seed, q);
+                let top = g.v.chunks(st).map(|v| v[1]).fold(f32::MIN, f32::max);
+                assert!((top - SPIKE.1).abs() < 1e-3, "{seed}: its point at {top}");
+                let reach =
+                    g.v.chunks(st)
+                        .filter(|v| v[1] > 0.0)
+                        .map(|v| v[0].hypot(v[2]))
+                        .fold(0.0f32, f32::max);
+                assert!(reach < SPIKE.0 + 0.01, "{seed}: out to {reach}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_relics_are_light_far_off() {
+        // Near and far in turn: each far one well under half as heavy,
+        // one of each far well under the island's forest of crowns.
+        let made = sculpted();
+        let (mut near, mut far) = (0, 0);
+        for pair in made.chunks(2) {
+            let (n, f) = (pair[0].triangles(), pair[1].triangles());
+            assert!(f * 5 < n * 2, "{n} near, {f} far");
+            (near, far) = (near + n, far + f);
+        }
+        assert!(far < 16_000, "{near} near, {far} far");
     }
 
     #[test]
     fn a_crystal_hangs_from_an_islet_not_inside_it() {
         // The islet comes to its tip; the crystal hangs below it, wound
         // the right way out (its turn not a mirror).
-        let g = islet(7);
+        let g = islet(7, 1.0);
         let low =
             g.v.chunks(geo::STRIDE)
                 .map(|v| v[1])

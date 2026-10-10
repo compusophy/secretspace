@@ -17,6 +17,7 @@ use wandfall::map::{Kind, Map};
 use wandfall::places::{Place, Poi};
 
 use crate::flora;
+use crate::make::{one, smooth};
 
 mod ground;
 mod relics;
@@ -56,28 +57,6 @@ pub struct Land {
     pub(crate) pads: Vec<(V3, V3)>,
     /// The top of the causeway's crown.
     pub(crate) crown: V3,
-}
-
-/// A mesh, flat-shaded.
-fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
-    let mut g = Geo::default();
-    f(&mut g);
-    r.mesh(&g)
-}
-
-/// A mesh whose shared vertices are shaded smooth.
-pub(crate) fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
-    let mut g = Geo::default();
-    f(&mut g);
-    g.smooth();
-    r.mesh(&g)
-}
-
-/// One geometry onto another.
-pub(crate) fn join(g: &mut Geo, h: Geo) {
-    let base = g.len() as u32;
-    g.v.extend(h.v);
-    g.i.extend(h.i.into_iter().map(|k| k + base));
 }
 
 /// Lean the vertices from `from` on `lean` radians from upright, toward
@@ -318,11 +297,9 @@ impl Land {
                     statics.push(far(Item::new(stone.0, m), stone).rough(0.9).detail(0.25));
                 }
                 Kind::Altar => {
-                    statics.push(
-                        Item::new(relics.altar, m4::place(at, 0.4, [1.0; 3]))
-                            .rough(0.85)
-                            .detail(0.3),
-                    );
+                    let m = m4::place(at, 0.4, [1.0; 3]);
+                    let altar = relics.altar;
+                    statics.push(far(Item::new(altar.0, m), altar).rough(0.85).detail(0.3));
                 }
                 Kind::Spike => {
                     let (wide, tall) = relics::SPIKE;
@@ -332,8 +309,8 @@ impl Land {
                     statics.push(far(Item::new(spike.0, m), spike).rough(0.12));
                 }
                 Kind::Portal => {
-                    statics
-                        .push(Item::new(relics.gate, m4::place(at, p.yaw, [1.0; 3])).rough(0.15));
+                    let m = m4::place(at, p.yaw, [1.0; 3]);
+                    statics.push(far(Item::new(relics.gate.0, m), relics.gate).rough(0.15));
                     gate_at = (at, p.yaw);
                 }
                 Kind::Crystal => {
@@ -354,20 +331,17 @@ impl Land {
                 }
             }
         }
-        // Shards of obsidian about the rift's lip (small: underfoot).
+        // Slivers of obsidian about the rift's lip (small: underfoot),
+        // each turned its own way, on the ground as it is drawn.
         for p in map.pois.iter().filter(|p| p.place == Place::Rift) {
             for k in 0..12 {
                 let u = |i| unit(hash(k, i, 0x5a4d));
                 let a = u(0) * TAU;
                 let d = p.r * (0.82 + 0.25 * u(1));
                 let (x, z) = (p.x + a.cos() * d, p.z + a.sin() * d);
-                let w = 0.25 + 0.15 * u(2);
-                let m = m4::place(
-                    [x, map.height(x, z) - 0.08, z],
-                    a,
-                    [w, 0.05 + 0.04 * u(3), w],
-                );
-                statics.push(Item::new(relics.spikes[k as usize % 3].1, m).rough(0.12));
+                let s = 0.7 + 0.6 * u(2);
+                let m = m4::place([x, ground::drawn(&t, x, z), z], a, [s; 3]);
+                statics.push(Item::new(relics.slivers, m).rough(0.12));
             }
         }
         for k in 0..7 {
@@ -376,13 +350,12 @@ impl Land {
             let (x, z) = (a.cos() * d, a.sin() * d);
             let y = map.height(x, z).max(SEA) + 26.0 + 16.0 * unit(hash(k, 3, map.seed as u32));
             let s = 0.6 + 0.6 * unit(hash(k, 4, map.seed as u32));
+            let islet = relics.islets[k as usize % 3];
             statics.push(
-                Item::new(
-                    relics.islets[k as usize % 3],
-                    m4::place([x, y, z], a, [s; 3]),
-                )
-                .rough(0.9)
-                .detail(0.4),
+                Item::new(islet.0, m4::place([x, y, z], a, [s; 3]))
+                    .far(islet.1, relics::ISLETS_FAR)
+                    .rough(0.9)
+                    .detail(0.4),
             );
             if k % 2 == 0 {
                 let m = m4::place([x, y + 0.4 * s, z], a, [s * 0.8; 3]);

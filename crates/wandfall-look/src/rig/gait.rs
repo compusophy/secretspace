@@ -16,7 +16,8 @@
 //!   steady turn leans it in), its bank into a turn, the drag of its robe
 //!   and the lag of its hat's tip;
 //! - in the air (rising or falling, and a jump made there, off a wall or
-//!   not), crouched, or landing (how hard);
+//!   not, unless something else threw it: a Tether's haul, a Gust's
+//!   blast), crouched, or landing (how hard);
 //! - where it faces and looks, eased: an aim follows what the crosshair
 //!   is on, which can jump from the ground near by to the sky beyond.
 
@@ -54,6 +55,10 @@ const SHUFFLE: f32 = 0.4;
 const AIR_JUMP: f32 = 4.0;
 const FLIP: f32 = 0.4;
 const KICK_TURN: f32 = 1.05;
+/// After it is shoved (`Anim::shove`), how long a rise or a turn in the
+/// air is the shove's and not a jump of its own (s): a Tether lets go
+/// with a hop up.
+const SHOVE: f32 = 0.4;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Anim {
@@ -107,6 +112,8 @@ pub struct Anim {
     /// turns to aim; stepping round after it (1 as the steps begin, to 0).
     pub held: [f32; 2],
     pub shuffle: f32,
+    /// Seconds yet that what it does in the air is not its own (`shove`).
+    shoved: f32,
     aloft: f32,
     last: V3,
     was: (f32, f32),
@@ -114,6 +121,16 @@ pub struct Anim {
 }
 
 impl Anim {
+    /// Something other than its legs moves it now (a Tether hauls it, a
+    /// Gust has thrown it): until a while after, a rise or a sharp turn
+    /// in the air is not a jump of its own (no tuck, no kick off a wall
+    /// that is not there).
+    pub fn shove(&mut self) {
+        self.shoved = SHOVE;
+        // Thrown from where it kicked off, the wall is not by it now.
+        self.wall = None;
+    }
+
     /// Watch it at `p`, facing `yaw` and looking `pitch` up (radians), on
     /// the ground or not, crouched, sliding, `dt` seconds on. A landing
     /// says how hard it was (0 to 1).
@@ -143,9 +160,11 @@ impl Anim {
             (mx, mz, my) = (0.0, 0.0, 0.0);
         }
         // A jump made in the air: a while off the ground, it rises far
-        // quicker than it was; off a wall if its way turned sharply too
-        // (the wall lies the way it was going).
-        if !ground && self.aloft > 0.12 && my - self.vy.x > AIR_JUMP {
+        // quicker than it was (and nothing else threw it); off a wall if
+        // its way turned sharply too (the wall lies the way it was going).
+        let own = self.shoved <= 0.0;
+        self.shoved = (self.shoved - dt).max(0.0);
+        if own && !ground && self.aloft > 0.12 && my - self.vy.x > AIR_JUMP {
             self.flip = 1.0;
             let (ox, oz) = (self.vx.x, self.vz.x);
             let fast = ox * ox + oz * oz > 4.0 && mx * mx + mz * mz > 4.0;
@@ -344,6 +363,57 @@ mod tests {
         walk(&mut a, (7.0, 0.0), 0.0, 1.0);
         walk(&mut a, (7.0, 0.0), 0.8, 0.3);
         assert!(a.bank.x.abs() < 0.02, "{a:?}");
+    }
+
+    #[test]
+    fn a_shove_in_the_air_is_not_a_jump() {
+        // Running (+z), off a ledge and falling a while; then thrown back
+        // (-x) and up as a Gust throws (`laws::GUST_LIFT`), or hauled
+        // away by a Tether and let go with its hop. Watched alone, that
+        // is a kick off a wall; shoved, it is neither a tuck nor a kick.
+        let throw = |a: &mut Anim, shoved: bool| {
+            walk(a, (0.0, 6.0), 0.0, 1.0);
+            let mut p = a.last;
+            for _ in 0..12 {
+                p = [p[0], p[1] - 2.0 / 60.0, p[2] + 6.0 / 60.0];
+                a.step(p, (0.0, 0.0), (false, false, false), 1.0 / 60.0);
+            }
+            let mut flipped = false;
+            for k in 0..20 {
+                if shoved && k < 6 {
+                    a.shove();
+                }
+                p = [p[0] - 9.0 / 60.0, p[1] + laws::GUST_LIFT / 60.0, p[2]];
+                a.step(p, (0.0, 0.0), (false, false, false), 1.0 / 60.0);
+                flipped |= a.flip > 0.0 || a.wall.is_some();
+            }
+            flipped
+        };
+        assert!(throw(&mut Anim::default(), false), "unshoved, a kick");
+        assert!(!throw(&mut Anim::default(), true), "shoved, none");
+        // Hauled level by a Tether (its own way), then let go with its
+        // hop up a frame after the last shove: still not its own.
+        let mut a = Anim::default();
+        walk(&mut a, (6.0, 0.0), 0.0, 1.0);
+        let mut p = a.last;
+        for _ in 0..12 {
+            p = [p[0] + 6.0 / 60.0, p[1] - 1.0 / 60.0, p[2]];
+            a.step(p, (0.0, 0.0), (false, false, false), 1.0 / 60.0);
+        }
+        for k in 0..30 {
+            let hauled = k < 20;
+            if hauled {
+                a.shove();
+            }
+            let v = if hauled {
+                [0.0, 0.0, -laws::TETHER_SPEED]
+            } else {
+                [0.0, laws::TETHER_POP, -12.0]
+            };
+            p = [p[0] + v[0] / 60.0, p[1] + v[1] / 60.0, p[2] + v[2] / 60.0];
+            a.step(p, (0.0, 0.0), (false, false, false), 1.0 / 60.0);
+            assert!(a.flip == 0.0 && a.wall.is_none(), "{k}: {a:?}");
+        }
     }
 
     #[test]

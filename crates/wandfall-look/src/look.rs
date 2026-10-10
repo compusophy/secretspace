@@ -7,6 +7,7 @@ use render::{m4, Item, Light, Material, Mesh, Pass, Renderer, Shape, Spark};
 
 use crate::fx::{self, Draw};
 use crate::land::Land;
+use crate::make::{one, smooth};
 use crate::rig::Rig;
 use wandfall::laws::{SEA, SPELLS};
 use wandfall::map::Map;
@@ -36,12 +37,6 @@ pub struct Look {
 }
 
 pub use crate::rig::hue;
-
-fn one(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
-    let mut g = Geo::default();
-    f(&mut g);
-    r.mesh(&g)
-}
 
 /// A spell cube a unit across, centred: its icon (as the bar draws it) on
 /// every face, a quad for each run of one colour in a row, its bright
@@ -96,14 +91,6 @@ fn cube(r: &mut Renderer, sp: u8) -> Mesh {
             }
         }
     }
-    r.mesh(&g)
-}
-
-/// A mesh whose shared vertices are shaded smooth.
-fn smooth(r: &mut Renderer, f: impl Fn(&mut Geo)) -> Mesh {
-    let mut g = Geo::default();
-    f(&mut g);
-    g.smooth();
     r.mesh(&g)
 }
 

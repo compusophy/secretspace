@@ -156,29 +156,43 @@ fn clear_of(c: Cond) -> Look {
 }
 
 /// A turn of the sky: as it was when the turn began (clear of the storm
-/// and its lightning; how wet; how bright the storm's violet), the hour
-/// and weather it was turning to before (for `weigh`), what it turns to,
-/// and since when (s).
+/// and its lightning; how wet; how bright the storm's violet), the hours
+/// and weathers it was then between, each its share (for `weigh`), what
+/// it turns to, and since when (s).
 #[derive(Clone, Debug)]
 struct Turn {
     from: (Look, f32, f32),
-    was: Cond,
+    was: Vec<(Cond, f32)>,
     to: Cond,
     since: f64,
 }
 
 impl Turn {
+    /// How far through it is by `s` seconds (0 to 1, eased).
+    fn through(&self, s: f64) -> f32 {
+        smooth(((s - self.since) as f32 / TURN).clamp(0.0, 1.0))
+    }
+
+    /// The hours and weathers the sky is between by `s` seconds, each its
+    /// share (all of them, together, 1).
+    fn shares(&self, s: f64) -> Vec<(Cond, f32)> {
+        let t = self.through(s);
+        let mut v: Vec<(Cond, f32)> = self.was.iter().map(|&(c, w)| (c, w * (1.0 - t))).collect();
+        match v.iter_mut().find(|e| e.0 == self.to) {
+            Some(e) => e.1 += t,
+            None => v.push((self.to, t)),
+        }
+        v.retain(|e| e.1 > 1e-4);
+        v
+    }
+
     /// Where it has turned to by `s` seconds: the clear sky, how wet, how
     /// bright the storm's violet.
     fn at(&self, s: f64) -> (Look, f32, f32) {
         let (from, wet, k) = self.from;
         let to = clear_of(self.to);
         // Already there, it stays exactly there.
-        let t = if from == to {
-            1.0
-        } else {
-            smooth(((s - self.since) as f32 / TURN).clamp(0.0, 1.0))
-        };
+        let t = if from == to { 1.0 } else { self.through(s) };
         let rain = (self.to.1 == Weather::Rain) as i32 as f32;
         (
             blend(&from, &to, t),
@@ -208,7 +222,7 @@ impl Sky {
             Some(t) if t.to == to => t,
             Some(t) => Turn {
                 from: t.at(s),
-                was: t.to,
+                was: t.shares(s),
                 to,
                 since: s,
             },
@@ -218,7 +232,7 @@ impl Sky {
                     (weather == Weather::Rain) as i32 as f32,
                     hour.storm(),
                 ),
-                was: to,
+                was: vec![(to, 1.0)],
                 to,
                 since: s,
             },
@@ -246,14 +260,14 @@ impl Sky {
 
     /// A number for each hour and weather (how loud the crickets are,
     /// how hard it rains), as the sky is now, turning from one to the
-    /// next.
+    /// next (from where it was, even part way through a turn).
     pub fn weigh(&self, now: f64, f: impl Fn(Hour, Weather) -> f32) -> f32 {
         let Some(turn) = &self.turn else {
             return f(Hour::Dusk, Weather::Clear);
         };
-        let t = smooth(((now / 1000.0 - turn.since) as f32 / TURN).clamp(0.0, 1.0));
-        let (a, b) = (f(turn.was.0, turn.was.1), f(turn.to.0, turn.to.1));
-        a + (b - a) * t
+        let t = turn.through(now / 1000.0);
+        let was: f32 = turn.was.iter().map(|&((h, w), k)| k * f(h, w)).sum();
+        was * (1.0 - t) + f(turn.to.0, turn.to.1) * t
     }
 }
 
@@ -573,6 +587,11 @@ mod tests {
         s.look((Hour::Dawn, Weather::Clear), false, 1000.0);
         let mid = 1000.0 + TURN as f64 * 400.0;
         let half = s.look((Hour::Dawn, Weather::Clear), false, mid);
+        // What hangs on the hour (the crickets, the rain) as it turns.
+        let night = |s: &Sky, now| s.weigh(now, |h, _| (h == Hour::Night) as i32 as f32);
+        let rain = |s: &Sky, now| s.weigh(now, |_, w| (w == Weather::Rain) as i32 as f32);
+        let crickets = night(&s, mid);
+        assert!(crickets > 0.3 && crickets < 0.9, "{crickets}");
         // Another hour (and rain) arrives: no jump, then it turns there.
         let next = s.look((Hour::Day, Weather::Rain), false, mid + 16.0);
         for (a, b) in [
@@ -580,8 +599,15 @@ mod tests {
             (half.sky[2], next.sky[2]),
             (half.fog, next.fog),
             (half.stars, next.stars),
+            (crickets, night(&s, mid + 16.0)),
         ] {
             assert!((a - b).abs() < 0.02 * a.abs().max(0.05), "{a} to {b}");
+        }
+        // Weighed as the sky itself turns: the rain as wet as it is.
+        for k in 0..=10 {
+            let now = mid + 16.0 + TURN as f64 * 100.0 * k as f64;
+            let wet = s.turn.as_ref().expect("turning").at(now / 1000.0).1;
+            assert!((rain(&s, now) - wet).abs() < 1e-4, "{k}: {wet}");
         }
         let day = s.look(
             (Hour::Day, Weather::Rain),
