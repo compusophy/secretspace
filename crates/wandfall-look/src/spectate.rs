@@ -319,3 +319,31 @@ impl Spectator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_card_does_not_look_through_a_hill() {
+        let map = Map::new(3);
+        // Two spots low either side of a rise: the way between is not
+        // clear, and the camera is kept over the ground.
+        let up = |x: f32, z: f32| [x, map.height(x, z).max(wandfall::laws::SEA) + 1.5, z];
+        let hidden = |a: V3, b: V3| {
+            (1..20).any(|k| {
+                let t = k as f32 / 20.0;
+                let x = a[0] + (b[0] - a[0]) * t;
+                map.height(x, a[2]) > a[1] + (b[1] - a[1]) * t + 1.0
+            })
+        };
+        let (a, b) = (0..2500)
+            .map(|k| ((k % 50) as f32 * 5.0 - 125.0, (k / 50) as f32 * 5.0 - 125.0))
+            .map(|(x, z)| (up(x, z), up(x + 40.0, z)))
+            .find(|&(a, b)| map.land(a[0], a[2]) && hidden(a, b))
+            .expect("a rise between two spots");
+        assert!(clear(&map, a, b) < 1.0);
+        let under = [a[0], a[1] - 5.0, a[2]];
+        assert!(above(&map, under)[1] > map.height(a[0], a[2]));
+    }
+}

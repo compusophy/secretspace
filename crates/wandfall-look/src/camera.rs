@@ -434,6 +434,23 @@ mod tests {
     }
 
     #[test]
+    fn on_a_broom_it_stands_back_and_looks_down_on_the_island() {
+        let map = Map::new(3);
+        let feet = [0.0, 70.0, 0.0];
+        let glide = Stance {
+            glide: true,
+            ..Stance::default()
+        };
+        let mut c = Chase::default();
+        let mut cam = c.view(&map, feet, (0.0, 0.0), glide, 1.6, 1.0 / 60.0);
+        for _ in 0..120 {
+            cam = c.view(&map, feet, (0.0, 0.0), glide, 1.6, 1.0 / 60.0);
+        }
+        assert!((cam.pitch + GLIDE_TILT).abs() < 0.01, "{}", cam.pitch);
+        assert!(cam.eye[0] < -ARM_GLIDE * 0.9 && cam.eye[1] > feet[1] + HEAD_GLIDE + 2.0);
+    }
+
+    #[test]
     fn beside_a_mushroom_s_stem_is_not_in_its_cap() {
         let map = Map::new(3);
         let alone = |q: &&Prop| map.near(q.x, q.z, 8.0).count() == 1;
