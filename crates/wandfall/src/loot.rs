@@ -48,9 +48,15 @@ pub fn slots_of(spell: u8) -> [usize; 2] {
     }
 }
 
-/// XP for `who`: levels gained raise health with them.
+/// XP for `who`: levels gained raise health with them (a practice
+/// dummy never levels).
 pub fn gain(w: &mut World, who: u16, xp: u32, ev: &mut Vec<Event>) {
-    let Some(p) = w.players.iter_mut().find(|p| p.id == who && p.alive) else {
+    let range = w.practice.is_some();
+    let Some(p) = w
+        .players
+        .iter_mut()
+        .find(|p| p.id == who && p.alive && !(range && p.bot))
+    else {
         return;
     };
     if p.level >= MAX_LEVEL || w.phase != Phase::Fight {
@@ -241,9 +247,11 @@ pub fn touch(w: &mut World, ev: &mut Vec<Event>) {
     if w.phase != Phase::Fight {
         return;
     }
+    let range = w.practice.is_some();
     for k in 0..w.players.len() {
         let p = &w.players[k];
-        if !p.alive || !p.entrant || p.body.glide {
+        // Practice dummies leave the cubes to you.
+        if !p.alive || !p.entrant || p.body.glide || (range && p.bot) {
             continue;
         }
         let (at, id) = (p.body.p, p.id);

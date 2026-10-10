@@ -556,11 +556,15 @@ pub const DUMMIES: [(f32, f32, u8); 9] = [
     (34.0, 340.0, 3),
 ];
 pub const DUMMY_RESPAWN: u32 = 60;
+pub const DUMMY_WHOLE: u32 = 60;
+pub const PRACTICE_LOOT_EVERY: u32 = 120 * TICK_HZ;
 /// A strafing dummy: legs this long (ticks) and up to this many more, a
 /// jump's odds a tick, and how far from its post it strays (m).
 pub const DUMMY_STRAFE: u32 = 35;
 pub const DUMMY_STRAFE_MORE: f32 = 40.0;
 pub const DUMMY_JUMP_ODDS: f32 = 0.01;
 pub const DUMMY_LEASH: f32 = 4.0;
-pub const DUMMY_WHOLE: u32 = 60;
-pub const PRACTICE_LOOT_EVERY: u32 = 120 * TICK_HZ;
+/// Where you start on the range: nothing standing within this far (m),
+/// and the way east clear this far (m).
+pub const RANGE_CLEAR: f32 = 3.0;
+pub const RANGE_VIEW: f32 = 15.0;

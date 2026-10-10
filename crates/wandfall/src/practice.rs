@@ -1,15 +1,18 @@
 //! The practice range: a world a page runs for itself. No storm and no
-//! match: you start by a ruin with training dummies about you (some
-//! stand, some strafe, two spar when you want them to), you are hurt
-//! only when sparring, the knocked out stand again, cubes are set out
-//! again now and then, and the spellbook's tools change your spells, your
-//! level and the rules.
+//! match: you start in the open by a ruin, cubes to learn by ahead of
+//! you and training dummies about you, each in plain sight (some stand,
+//! some strafe about their posts, two spar when you want them to); you
+//! are hurt only when sparring, dummies neither loot nor level, the
+//! knocked out stand again, cubes are set out again now and then, and
+//! the spellbook's tools change your spells, your level and the rules.
 
 use crate::bots::Mind;
 use crate::laws::*;
 use crate::loot;
 use crate::map::Kind as PropKind;
-use crate::world::{Event, Phase, World};
+use crate::motion::{Body, Input};
+use crate::trig;
+use crate::world::{warmup, Event, Phase, World};
 
 #[derive(Clone, Debug, Default)]
 pub struct Practice {
@@ -26,16 +29,7 @@ pub struct Practice {
 
 /// Make `w` a practice range.
 pub fn setup(w: &mut World) {
-    // By the ruin nearest the middle of the island.
-    let spawn = w
-        .map
-        .props
-        .iter()
-        .filter(|p| p.kind == PropKind::Pillar)
-        .map(|p| [p.x, p.z])
-        .min_by(|a, b| (a[0].hypot(a[1])).total_cmp(&b[0].hypot(b[1])))
-        .unwrap_or([0.0, 0.0]);
-    let spawn = clear(w, spawn);
+    let spawn = start(w);
     w.hour = RANGE_HOUR;
     w.practice = Some(Practice {
         spawn,
@@ -45,21 +39,90 @@ pub fn setup(w: &mut World) {
     w.phase = Phase::Fight;
     w.began = w.tick;
     for (k, &(d, deg, mode)) in DUMMIES.iter().enumerate() {
-        let a = deg.to_radians();
-        let at = clear(w, [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d]);
+        let at = post(w, spawn, d, deg);
         let mut b = w.player(&format!("dummy {}", k + 1), 0, true);
         b.body.p = [at[0], w.map.height(at[0], at[1]), at[1]];
         // Facing where you start.
-        b.yaw = crate::trig::heading((spawn[1] - at[1]).atan2(spawn[0] - at[0]));
+        b.yaw = trig::heading((spawn[1] - at[1]).atan2(spawn[0] - at[0]));
         b.mind = Mind::new(w.rng.next_u64());
         b.mind.dummy = mode;
         b.mind.home = at;
         b.alive = true;
         b.entrant = true;
+        // A sparring dummy fights with spells, as you do.
+        if mode == 3 {
+            warmup(&mut b, &mut w.rng);
+        }
         w.players.push(b);
     }
     loot::scatter(w);
-    // A few cubes just ahead of where you start, to learn by.
+    lesson_cubes(w, spawn);
+    w.roster_dirty = true;
+}
+
+/// A free spot near `at`, on land, nothing standing within `r`.
+fn clear(w: &World, at: [f32; 2], r: f32) -> Option<[f32; 2]> {
+    (0..40).find_map(|k| {
+        let (a, d) = (k as f32 * 2.4, k as f32 * 0.6);
+        let p = [at[0] + a.cos() * d, at[1] + a.sin() * d];
+        (w.map.land(p[0], p[1]) && w.map.near(p[0], p[1], r).next().is_none()).then_some(p)
+    })
+}
+
+/// Whether one standing at `a` sees the chest of one at `b`.
+fn sees(w: &World, a: [f32; 2], b: [f32; 2]) -> bool {
+    let eye = [a[0], w.map.height(a[0], a[1]) + EYE, a[1]];
+    let to = [b[0], w.map.height(b[0], b[1]) + 1.1, b[1]];
+    w.map.strikes(eye, to).is_none()
+}
+
+/// Where you start: in the open by the ruin nearest the middle of the
+/// island, the way east (where you first look, and the lesson cubes lie)
+/// clear.
+fn start(w: &World) -> [f32; 2] {
+    let ruin = w
+        .map
+        .props
+        .iter()
+        .filter(|p| p.kind == PropKind::Pillar)
+        .map(|p| [p.x, p.z])
+        .min_by(|a, b| (a[0].hypot(a[1])).total_cmp(&b[0].hypot(b[1])))
+        .unwrap_or([0.0, 0.0]);
+    let open = |p: [f32; 2]| {
+        w.map.land(p[0], p[1])
+            && w.map.near(p[0], p[1], RANGE_CLEAR).next().is_none()
+            && sees(w, p, [p[0] + RANGE_VIEW, p[1]])
+    };
+    // Ring after ring about the ruin, its own pillars and all.
+    (0..12)
+        .flat_map(|ring| (0..12).map(move |k| (ring, k)))
+        .map(|(ring, k)| {
+            let (a, d) = ((k as f32 * 30.0).to_radians(), 5.0 + ring as f32 * 1.5);
+            [ruin[0] + a.cos() * d, ruin[1] + a.sin() * d]
+        })
+        .find(|&p| open(p))
+        .or_else(|| clear(w, ruin, 1.2))
+        .unwrap_or(ruin)
+}
+
+/// A dummy's post: `d` metres from where you start, about `deg` round,
+/// turned a little either way till you can see it.
+fn post(w: &World, spawn: [f32; 2], d: f32, deg: f32) -> [f32; 2] {
+    let at = |turn: f32| {
+        let a = (deg + turn).to_radians();
+        clear(w, [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d], 1.2)
+    };
+    [0.0, 10.0, -10.0, 20.0, -20.0, 30.0, -30.0, 40.0, -40.0]
+        .into_iter()
+        .filter_map(at)
+        .find(|&p| sees(w, spawn, p))
+        .or_else(|| at(0.0))
+        .unwrap_or(spawn)
+}
+
+/// A few cubes just ahead of where you start, to learn by (laid again
+/// whenever the range's cubes are).
+fn lesson_cubes(w: &mut World, spawn: [f32; 2]) {
     let first = [
         spell::FROST,
         spell::WARD,
@@ -70,23 +133,10 @@ pub fn setup(w: &mut World) {
     for (k, &sp) in first.iter().enumerate() {
         let a = (k as f32 - 2.0) * 0.35;
         let d = 4.5 + k as f32 * 1.2;
-        let at = clear(w, [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d]);
+        let near = [spawn[0] + a.cos() * d, spawn[1] + a.sin() * d];
+        let at = clear(w, near, 1.2).unwrap_or(near);
         loot::drop_scroll(w, sp, 1, [at[0], 0.0, at[1]], 0.0);
     }
-    w.roster_dirty = true;
-}
-
-/// A free spot near `at`, on land.
-fn clear(w: &World, at: [f32; 2]) -> [f32; 2] {
-    for r in 0..40 {
-        let a = r as f32 * 2.4;
-        let d = r as f32 * 0.6;
-        let p = [at[0] + a.cos() * d, at[1] + a.sin() * d];
-        if w.map.land(p[0], p[1]) && w.map.near(p[0], p[1], 1.2).next().is_none() {
-            return p;
-        }
-    }
-    at
 }
 
 /// You arrive: at the start, alive, with a set of spells to try.
@@ -96,7 +146,7 @@ pub fn arrive(w: &mut World, name: &str) -> u16 {
     p.body.p = [spawn[0], w.map.height(spawn[0], spawn[1]), spawn[1]];
     p.alive = true;
     p.entrant = true;
-    crate::world::warmup(&mut p, &mut w.rng);
+    warmup(&mut p, &mut w.rng);
     // On the range every spell is known, and the Tether is always to
     // hand (F), for its lesson.
     p.book = [1; SPELLS.len()];
@@ -131,19 +181,31 @@ pub fn step(w: &mut World, ev: &mut Vec<Event>) {
         r.loot_at = tick + PRACTICE_LOOT_EVERY;
         if tick > 0 {
             loot::scatter(w);
+            lesson_cubes(w, spawn);
         }
     }
     for p in w.players.iter_mut() {
         if due.contains(&p.id) {
+            // Up again, afresh: a person where they started, a dummy at
+            // its post (nothing of how they fell held over).
+            let at = if p.bot { p.mind.home } else { spawn };
+            p.body = Body {
+                p: [at[0], w.map.height(at[0], at[1]), at[1]],
+                ground: true,
+                ..Body::default()
+            };
             p.alive = true;
             p.hp = p.max_hp();
-            p.shield = 0;
-            p.body.chill = 0;
+            (p.shield, p.shield_until, p.mend, p.mend_until) = (0, 0, 0, 0);
+            p.queue.clear();
+            p.last = Input {
+                seq: p.last.seq,
+                ..Input::default()
+            };
+            // Your knocked-out card goes (not at a dummy's standing up).
             if !p.bot {
-                p.body.p = [spawn[0], w.map.height(spawn[0], spawn[1]), spawn[1]];
-                p.body.v = [0.0; 3];
+                ev.push(Event::Lobby);
             }
-            ev.push(Event::Lobby);
         }
         if p.bot && p.alive && tick.saturating_sub(p.hurt_at) >= DUMMY_WHOLE {
             p.hp = p.max_hp();
@@ -168,7 +230,8 @@ pub fn fallen(w: &mut World, who: u16, by: u16, ev: &mut Vec<Event>) {
     if let Some(r) = w.practice.as_mut() {
         r.respawns.push((who, tick + DUMMY_RESPAWN));
     }
-    if let Some(k) = w.find_mut(by) {
+    // Your knockouts count; a sparring dummy's do not (nor does it level).
+    if let Some(k) = w.find_mut(by).filter(|k| !k.bot) {
         k.kills += 1;
     }
     loot::gain(w, by, XP_KNOCKOUT + level as u32 * XP_KNOCKOUT_LEVEL, ev);
@@ -298,6 +361,84 @@ mod tests {
             w.find_mut(me).unwrap().cds = [0; 4];
         }
         assert_eq!(hits, 3, "every lance strikes");
+    }
+
+    #[test]
+    fn you_start_in_the_open_with_every_dummy_in_sight() {
+        let mut w = World::new(0x5eed_0007);
+        setup(&mut w);
+        let spawn = w.practice.as_ref().unwrap().spawn;
+        assert!(w.map.near(spawn[0], spawn[1], RANGE_CLEAR).next().is_none());
+        for p in w.players.iter().filter(|p| p.bot) {
+            let at = [p.body.p[0], p.body.p[2]];
+            assert!(sees(&w, spawn, at), "{} hidden at {at:?}", p.name);
+        }
+    }
+
+    #[test]
+    fn the_lesson_cubes_come_back_and_dummies_leave_the_cubes() {
+        let mut w = World::new(5);
+        setup(&mut w);
+        w.practice.as_mut().unwrap().sparring = true;
+        let me = w.join("me", 0);
+        let spawn = w.practice.as_ref().unwrap().spawn;
+        let lessons = |w: &World| {
+            w.scrolls
+                .iter()
+                .filter(|s| (s.p[0] - spawn[0]).hypot(s.p[2] - spawn[1]) < 11.0)
+                .count()
+        };
+        let laid = lessons(&w);
+        assert!(laid >= 5);
+        // Out of the way, unhurt, as the range sets its cubes out again.
+        let k = w.players.iter().position(|p| p.id == me).unwrap();
+        w.players[k].body.p[0] += 100.0;
+        let cubes = w.scrolls.len();
+        for _ in 0..PRACTICE_LOOT_EVERY + 1 {
+            w.players[k].hp = w.players[k].max_hp();
+            w.step();
+        }
+        assert!(lessons(&w) >= 5, "laid again");
+        assert!(w.scrolls.len() >= cubes, "none taken by a dummy");
+        assert!(
+            w.players.iter().filter(|p| p.bot).all(|p| p.level == 1),
+            "nor did one level"
+        );
+    }
+
+    #[test]
+    fn standing_again_starts_afresh() {
+        let mut w = World::new(5);
+        setup(&mut w);
+        w.practice.as_mut().unwrap().sparring = true;
+        let me = w.join("me", 0);
+        let d = w.players.iter().find(|p| p.bot).unwrap().id;
+        let k = w.players.iter().position(|p| p.id == me).unwrap();
+        // Knocked out mid-Tether.
+        w.players[k].body.tether = 40;
+        w.players[k].body.anchor = [0.0, 50.0, 0.0];
+        let mut ev = Vec::new();
+        w.hurt(d, me, 10_000, WAND, &mut ev);
+        assert_eq!(
+            w.find(d).unwrap().kills,
+            0,
+            "a dummy's knockout is not counted"
+        );
+        let mut lobbies = 0;
+        for _ in 0..DUMMY_RESPAWN + 2 {
+            lobbies += w.step().iter().filter(|e| **e == Event::Lobby).count();
+        }
+        let p = w.find(me).unwrap();
+        assert!(p.alive && p.body.tether == 0, "{:?}", p.body);
+        assert_eq!(lobbies, 1, "your card goes, once");
+        // A dummy standing up says nothing.
+        w.hurt(me, d, 10_000, WAND, &mut ev);
+        let mut lobbies = 0;
+        for _ in 0..DUMMY_RESPAWN + 2 {
+            lobbies += w.step().iter().filter(|e| **e == Event::Lobby).count();
+        }
+        assert!(w.find(d).unwrap().alive);
+        assert_eq!(lobbies, 0);
     }
 
     #[test]
