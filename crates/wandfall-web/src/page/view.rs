@@ -19,13 +19,14 @@ pub(super) fn frame(p: &mut Page, now: f64) {
     let aimed = aim(p, &others, aspect);
     inputs(p, dt);
     p.version.poll(now, false);
-    if p.version.newer() && calm(p) {
+    if p.version.newer() && !p.stale && calm(p) {
         // Back online after it, if it was.
         if matches!(p.mode, Mode::Online(_)) {
             kit::save(RESUME, "online");
         }
         if !reload() {
             kit::save(RESUME, "");
+            p.stale = true;
         }
     }
     let feet = feet(p);

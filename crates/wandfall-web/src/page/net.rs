@@ -131,8 +131,13 @@ fn receive(p: &mut Page, b: &[u8], now: f64) {
 /// again soon). Older: the room is behind the page (its deploy on the
 /// way), so back to the title to say so; reloading would not help.
 fn mismatch(p: &mut Page, v: u8, now: f64) {
-    if v > PROTO && reload() {
-        return;
+    if v > PROTO {
+        // The new page goes straight back online.
+        kit::save(RESUME, "online");
+        if reload() {
+            return;
+        }
+        kit::save(RESUME, "");
     }
     leave(p);
     p.notice = Some(if v > PROTO {

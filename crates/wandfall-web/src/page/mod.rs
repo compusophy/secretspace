@@ -164,6 +164,9 @@ struct Page {
     lost: Option<f64>,
     /// A word for the title in place of how to play (why you are back).
     notice: Option<&'static str>,
+    /// A newer page is out, but this one came of reloading for it already
+    /// (it is not here yet): no more tries.
+    stale: bool,
 }
 
 thread_local! {
@@ -544,6 +547,7 @@ pub fn start() {
                 taken: false,
                 lost: None,
                 notice: None,
+                stale: false,
             })
         });
         PAGE.with(|p| {
