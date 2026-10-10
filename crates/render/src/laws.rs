@@ -5,6 +5,9 @@
 /// cells a side.
 pub const GRID_CELL: f32 = 4.0;
 pub const GRID_CELLS: u32 = 64;
+/// The most pixels the scene is drawn at (a 4K screen's scene is drawn
+/// smaller and scaled up in the finish; the HUD stays sharp).
+pub const SCENE_PIXELS: f32 = 2.5e6;
 /// The nearest the camera sees (metres); there is no far plane.
 pub const NEAR: f32 = 0.05;
 /// The shaders' clock wraps at this many seconds (about four and a half

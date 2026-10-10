@@ -368,12 +368,15 @@ impl Default for Look {
     }
 }
 
-/// How much the renderer does: anti-aliasing samples, the sun's shadow
-/// (cascades and their size), grass (spacing and reach), bloom's depth,
-/// how many ways ambient occlusion looks out from a pixel (0 none),
-/// shafts of sunlight.
+/// How much the renderer does: the scene's size (a share of the
+/// screen's), anti-aliasing samples, the sun's shadow (cascades and
+/// their size), grass (spacing and reach), bloom's depth, how many ways
+/// ambient occlusion looks out from a pixel (0 none), shafts of sunlight.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quality {
+    /// The scene is drawn at this share of the screen's size (each way),
+    /// and at most `laws::SCENE_PIXELS` in all; the finish scales it up.
+    pub scale: f32,
     pub msaa: u32,
     pub cascades: u32,
     pub shadow_size: u32,
@@ -394,7 +397,8 @@ pub struct Quality {
 impl Quality {
     /// The tier a page asked for (`?q=low|medium|high`), else one for
     /// this device: software adapters Low, touch screens Medium, else High;
-    /// `ao=0` turns occlusion off, `shafts=0` the sun's shafts.
+    /// `ao=0` turns occlusion off, `shafts=0` the sun's shafts, `ssr=0`
+    /// the sea's reflections, `scale=0.5` sets the scene's size.
     pub fn pick(query: &str, software: bool, touch: bool) -> Quality {
         let q = match query {
             q if q.contains("q=low") => Quality::LOW,
@@ -404,15 +408,23 @@ impl Quality {
             _ if touch => Quality::MEDIUM,
             _ => Quality::HIGH,
         };
+        let scale = query
+            .split(['?', '&'])
+            .find_map(|kv| kv.strip_prefix("scale="))
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|s| s.is_finite());
         Quality {
             ao: if query.contains("ao=0") { 0 } else { q.ao },
             shafts: q.shafts && !query.contains("shafts=0"),
             ssr: if query.contains("ssr=0") { 0 } else { q.ssr },
+            scale: scale.map_or(q.scale, |s| s.clamp(0.25, 1.0)),
             ..q
         }
     }
 
-    /// One tier down (None at the bottom); what was turned off stays off.
+    /// A step down (None at the bottom): first the scene's size, down to
+    /// the next tier's (cheap: the targets only), then the next tier;
+    /// what was turned off stays off.
     pub fn lower(self) -> Option<Quality> {
         let tiers = [Quality::HIGH, Quality::MEDIUM, Quality::LOW];
         let at = tiers.iter().position(|t| {
@@ -420,19 +432,37 @@ impl Quality {
                 ao: self.ao,
                 shafts: self.shafts,
                 ssr: self.ssr,
+                scale: self.scale,
                 ..*t
             } == self
         })?;
         let next = *tiers.get(at + 1)?;
+        if self.scale > next.scale {
+            return Some(Quality {
+                scale: next.scale,
+                ..self
+            });
+        }
         Some(Quality {
             ao: if self.ao == 0 { 0 } else { next.ao },
             shafts: self.shafts && next.shafts,
             ssr: if self.ssr == 0 { 0 } else { next.ssr },
+            scale: self.scale,
             ..next
         })
     }
 
+    /// The scene's size on a screen of `size` pixels: the tier's share
+    /// each way, and no more than `laws::SCENE_PIXELS` in all.
+    pub fn scene(&self, size: (u32, u32)) -> (u32, u32) {
+        let all = (size.0 as f32 * size.1 as f32).max(1.0);
+        let k = self.scale.min((laws::SCENE_PIXELS / all).sqrt());
+        let at = |v: u32| ((v as f32 * k).round() as u32).clamp(1, v.max(1));
+        (at(size.0), at(size.1))
+    }
+
     pub const HIGH: Quality = Quality {
+        scale: 1.0,
         msaa: 4,
         cascades: 3,
         shadow_size: 2048,
@@ -446,6 +476,7 @@ impl Quality {
         lights: 48,
     };
     pub const MEDIUM: Quality = Quality {
+        scale: 0.8,
         msaa: 4,
         cascades: 2,
         shadow_size: 1536,
@@ -459,6 +490,7 @@ impl Quality {
         lights: 16,
     };
     pub const LOW: Quality = Quality {
+        scale: 0.65,
         msaa: 1,
         cascades: 1,
         shadow_size: 1024,
@@ -531,6 +563,37 @@ mod tests {
         assert!(w[1] < 0.25, "steep: {w:?}");
         let naive = geo::norm(turn(&stretched, n));
         assert!(naive[1] > 0.9, "the model's matrix tips it up: {naive:?}");
+    }
+
+    #[test]
+    fn a_tier_steps_down_its_size_first_and_keeps_what_was_turned_off() {
+        let mut q = Quality::pick("q=high&shafts=0", false, false);
+        let mut steps = vec![q];
+        while let Some(next) = q.lower() {
+            q = next;
+            steps.push(q);
+        }
+        let seen: Vec<(u32, f32)> = steps.iter().map(|q| (q.msaa, q.scale)).collect();
+        // High, smaller; Medium, smaller; Low.
+        assert_eq!(steps.len(), 5, "{seen:?}");
+        assert_eq!(steps[1].cascades, Quality::HIGH.cascades);
+        assert_eq!(steps[1].scale, Quality::MEDIUM.scale);
+        assert_eq!(steps[2].cascades, Quality::MEDIUM.cascades);
+        assert_eq!(steps[4].cascades, Quality::LOW.cascades);
+        assert!(steps.iter().all(|q| !q.shafts), "shafts stay off");
+        assert!(steps.windows(2).all(|w| w[1].scale <= w[0].scale));
+    }
+
+    #[test]
+    fn the_scene_is_the_tier_s_share_of_the_screen_and_never_huge() {
+        assert_eq!(Quality::HIGH.scene((1280, 720)), (1280, 720));
+        assert_eq!(Quality::MEDIUM.scene((1000, 500)), (800, 400));
+        let (w, h) = Quality::HIGH.scene((3840, 2160));
+        assert!(w * h <= laws::SCENE_PIXELS as u32 + 4000, "{w}x{h}");
+        assert!((w as f32 / h as f32 - 16.0 / 9.0).abs() < 0.01);
+        assert_eq!(Quality::LOW.scene((1, 1)), (1, 1));
+        let q = Quality::pick("?q=high&scale=0.5", false, false);
+        assert_eq!(q.scene((800, 600)), (400, 300));
     }
 
     #[test]

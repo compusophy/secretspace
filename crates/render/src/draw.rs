@@ -34,6 +34,8 @@ pub struct Stats {
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    /// The format it finishes into.
+    format: wgpu::TextureFormat,
     quality: Quality,
     layout: wgpu::BindGroupLayout,
     pipes: Pipes,
@@ -89,6 +91,7 @@ impl Renderer {
         let mut r = Renderer {
             device: device.clone(),
             queue: queue.clone(),
+            format,
             quality,
             pipes: Pipes::new(device, quality, &layout),
             layout,
@@ -133,6 +136,28 @@ impl Renderer {
 
     pub fn quality(&self) -> Quality {
         self.quality
+    }
+
+    /// Do as much as `quality` says from now on: what depends on the tier
+    /// (the pipelines, the shadow map, the targets) made again, and what
+    /// does not (meshes, statics, the terrain) kept, so nothing need be
+    /// built again. Only the scale changed: only the targets' size.
+    pub fn set_quality(&mut self, quality: Quality) {
+        let same = Quality {
+            scale: self.quality.scale,
+            ..quality
+        } == self.quality;
+        self.quality = quality;
+        if same {
+            return;
+        }
+        let device = &self.device;
+        self.pipes = Pipes::new(device, quality, &self.layout);
+        self.shadows = Shadows::new(device, quality);
+        self.post = Post::new(device, self.format, quality);
+        self.groups = None;
+        self.soft_group = None;
+        self.statics_dirty = true;
     }
 
     /// Keep this geometry on the GPU.
@@ -248,7 +273,8 @@ impl Renderer {
         crate::globals::bytes(f, fov, size, cascades, shared)
     }
 
-    /// Draw a frame into `target` (`size` pixels).
+    /// Draw a frame into `target` (`size` pixels): the scene at the
+    /// tier's size of it (`Quality::scene`), scaled up as it is finished.
     pub fn draw(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -257,6 +283,7 @@ impl Renderer {
         f: &Frame,
     ) {
         let (device, queue) = (self.device.clone(), self.queue.clone());
+        let size = self.quality.scene(size);
         self.post.fit(&device, &queue, size);
         let mut stats = Stats::default();
 
