@@ -11,6 +11,7 @@ use wandfall::map::{Kind, Map};
 use wandfall::proto::{self, flag, Seen};
 use wandfall::trig;
 
+use crate::camera::in_crown;
 use crate::fx::Draw;
 use crate::look::Look;
 use crate::rig::Anim;
@@ -30,9 +31,11 @@ const EASE: f32 = 350.0;
 const FOV: f32 = 1.05;
 
 /// How much of the way from `a` to `b` (0 to 1) is clear to see along:
-/// no trunk, stone or tower across it, no tree's crown about it.
+/// no hill, deck, trunk, stone or tower across it, no tree's crown about
+/// it.
 fn clear(map: &Map, a: V3, b: V3) -> f32 {
     const STEPS: usize = 12;
+    let ground = map.strikes_if(a, b, |_| false).unwrap_or(1.0);
     for k in 1..=STEPS {
         let t = k as f32 / STEPS as f32;
         let p = [
@@ -40,21 +43,22 @@ fn clear(map: &Map, a: V3, b: V3) -> f32 {
             a[1] + (b[1] - a[1]) * t,
             a[2] + (b[2] - a[2]) * t,
         ];
-        let crown = map.near(p[0], p[2], 2.0).any(|q| {
-            matches!(q.kind, Kind::Tree | Kind::Shroom)
-                && p[1] > q.y + q.h * 0.3
-                && p[1] < q.y + q.h * 1.05
-        });
         // Rocks look bigger than what blocks wizards; give them room.
         let solid = map.near(p[0], p[2], 0.8).any(|q| {
             let tall = if q.kind == Kind::Rock { q.h * 1.7 } else { q.h };
             p[1] > q.y - 0.2 && p[1] < q.y + tall + 0.2
         });
-        if crown || solid {
+        if t > ground || solid || in_crown(map, p) {
             return (k - 1) as f32 / STEPS as f32;
         }
     }
     1.0
+}
+
+/// Where the camera may be: over the ground (or the sea).
+fn above(map: &Map, p: V3) -> V3 {
+    let floor = map.height(p[0], p[2]).max(wandfall::laws::SEA) + 0.8;
+    [p[0], p[1].max(floor), p[2]]
 }
 
 #[derive(Default)]
@@ -271,13 +275,8 @@ impl Spectator {
             }
         };
         // Never under the ground.
-        let want = match &self.island {
-            Some((_, map, _)) => {
-                let floor = map.height(want[0], want[2]).max(wandfall::laws::SEA) + 0.8;
-                [want[0], want[1].max(floor), want[2]]
-            }
-            None => want,
-        };
+        let map = self.island.as_ref().map(|i| &i.1);
+        let want = map.map_or(want, |m| above(m, want));
         let k = 1.0 - (-dt / EASE).exp();
         let (eye, y, p) = match self.eye {
             Some((e, y0, p0)) => {
@@ -288,20 +287,23 @@ impl Spectator {
                 while dy < -std::f32::consts::PI {
                     dy += std::f32::consts::TAU;
                 }
+                let e = [
+                    e[0] + (want[0] - e[0]) * k,
+                    e[1] + (want[1] - e[1]) * k,
+                    e[2] + (want[2] - e[2]) * k,
+                ];
                 (
-                    [
-                        e[0] + (want[0] - e[0]) * k,
-                        e[1] + (want[1] - e[1]) * k,
-                        e[2] + (want[2] - e[2]) * k,
-                    ],
+                    map.map_or(e, |m| above(m, e)),
                     y0 + dy * k,
                     p0 + (pitch - p0) * k,
                 )
             }
             None => (want, yaw, pitch),
         };
-        // A long way to go (a new match, far off): there at once.
-        let jump = (eye[0] - want[0]).powi(2) + (eye[2] - want[2]).powi(2) > 80.0 * 80.0;
+        // A long way to go (a new match, far off), or a hill or the
+        // tower's floor between: there at once, not through them.
+        let blocked = map.is_some_and(|m| m.strikes_if(eye, want, |_| false).is_some());
+        let jump = blocked || (eye[0] - want[0]).powi(2) + (eye[2] - want[2]).powi(2) > 80.0 * 80.0;
         let (eye, y, p) = if jump {
             (want, yaw, pitch)
         } else {

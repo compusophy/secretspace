@@ -1,12 +1,13 @@
 //! The camera over a wizard's shoulder (third person): a spring arm from a
 //! pivot above its right shoulder, back along where you look; pulled in
 //! at once when a wall stands between (the ground, the tower, a stone)
-//! and let out again gently; eased in out of a tree's crown; slid round a
-//! trunk or a post rather than pulled in by it (a trunk passing behind a
-//! running wizard would jerk the view in and out); nearer and tighter
-//! when aiming, lower crouched, further out on a broom. And what the
-//! crosshair at the middle of the screen is on, so a wizard aims there
-//! from its own eyes (the shoulder's offset taken out).
+//! and let out again gently; eased in out of a tree's crown or from under
+//! a mushroom's cap; slid round a trunk or a post rather than pulled in by
+//! it (a trunk passing behind a running wizard would jerk the view in and
+//! out); nearer and tighter when aiming, lower crouched, further out and
+//! looking down on a broom (the island you are choosing to land on before
+//! you). And what the crosshair at the middle of the screen is on, so a
+//! wizard aims there from its own eyes (the shoulder's offset taken out).
 
 use render::geo::{self, V3};
 use render::Camera;
@@ -15,18 +16,25 @@ use wandfall::map::{Kind, Map, Prop};
 use wandfall::proto::{Ev, Seen};
 
 use crate::fx;
+use crate::land::pine;
 use crate::rig::Spring;
 
 /// The arm's length (metres): walking, aiming, on a broom.
 const ARM: f32 = 3.4;
 const ARM_AIM: f32 = 1.7;
-const ARM_GLIDE: f32 = 5.6;
+const ARM_GLIDE: f32 = 9.0;
 /// The pivot: how far right of the head, and how high above the feet
 /// (standing, crouched, on a broom).
 const SHOULDER: f32 = 0.6;
 const HEAD: f32 = 1.65;
 const HEAD_CROUCH: f32 = 1.2;
-const HEAD_GLIDE: f32 = 1.9;
+const HEAD_GLIDE: f32 = 3.0;
+/// How far down the view tips on a broom (radians), so the wizard sits
+/// low and the island ahead and below fills it.
+const GLIDE_TILT: f32 = 0.35;
+/// How far the view's height may trail the feet's (m): it eases steps
+/// and landings, but keeps up with a fall, a leap, a haul.
+const RISE_LAG: f32 = 0.35;
 /// How near the camera may come to what it would be inside; how far it
 /// sits above the line of the arm (so the wizard stands low in the view).
 const SKIN: f32 = 0.3;
@@ -112,6 +120,7 @@ pub struct Chase {
     head: Spring,
     fov: Spring,
     rise: Spring,
+    tilt: Spring,
     started: bool,
 }
 
@@ -148,12 +157,14 @@ impl Chase {
             ),
             Stance { crouch, .. } => (ARM, SHOULDER, if crouch { HEAD_CROUCH } else { HEAD }, FOV),
         };
+        let tilt = if stance.glide { -GLIDE_TILT } else { 0.0 };
         if !self.started {
             self.arm.x = arm;
             self.shoulder.x = shoulder;
             self.head.x = head;
             self.fov.x = fov;
             self.rise.x = feet[1];
+            self.tilt.x = tilt;
             self.started = true;
         }
         let shoulder = self.shoulder.step(shoulder, 0.12, dt);
@@ -161,9 +172,18 @@ impl Chase {
         let fov = self
             .fov
             .step(fov + if stance.fast { 0.1 } else { 0.0 }, 0.12, dt);
+        let pitch = (pitch + self.tilt.step(tilt, 0.25, dt)).clamp(-1.5, 1.5);
         // The feet's height eased a touch, so steps and landings do not
-        // jolt the view.
+        // jolt the view; never far behind, so a fall or a leap does not
+        // leave the wizard at the bottom of it.
         let y = self.rise.step(feet[1], 0.05, dt);
+        if (y - feet[1]).abs() > RISE_LAG {
+            self.rise = Spring {
+                x: feet[1] + (y - feet[1]).clamp(-RISE_LAG, RISE_LAG),
+                v: 0.0,
+            };
+        }
+        let y = self.rise.x;
         let (fwd, right) = axes(yaw, pitch);
         let top = [feet[0], y + head, feet[2]];
         let wall = |q: &Prop| q.r >= THIN;
@@ -179,8 +199,9 @@ impl Chase {
             .strikes_if(pivot, back, wall)
             .map_or(arm, |t| ((arm + SKIN) * t - SKIN).max(0.35))
             .min(arm);
-        // Nor inside a tree's crown: eased in till clear (leaves, not
-        // walls, so a moment among them does no harm).
+        // Nor among a tree's leaves or under a cap: eased in till clear,
+        // as gently as let out (leaves, not walls, so a moment among them
+        // does no harm, and a yank into the head would).
         let mut want = room;
         while want > 0.7 && in_crown(map, geo::sub(pivot, geo::scale(fwd, want))) {
             want -= 0.25;
@@ -188,8 +209,7 @@ impl Chase {
         if room < self.arm.x {
             self.arm = Spring { x: room, v: 0.0 };
         }
-        let half = if want < self.arm.x { 0.08 } else { 0.25 };
-        self.arm.step(want, half, dt);
+        self.arm.step(want, 0.25, dt);
         let lift = LIFT * (self.arm.x / arm).min(1.0);
         let eye = clear(
             map,
@@ -235,13 +255,31 @@ fn clear(map: &Map, mut p: V3) -> V3 {
     p
 }
 
-/// Whether `p` is among a tree's or a mushroom's leaves or cap.
-fn in_crown(map: &Map, p: V3) -> bool {
-    map.near(p[0], p[2], 2.0).any(|q| {
-        matches!(q.kind, Kind::Tree | Kind::Shroom)
-            && p[1] > q.y + q.h * 0.3
-            && p[1] < q.y + q.h * 1.05
+/// Whether `p` is among a tree's leaves or in a mushroom's cap, as each
+/// is drawn: a broadleaf's crown, a pine's cone of boughs, a cap (not
+/// merely near a trunk or a stem under them).
+pub(crate) fn in_crown(map: &Map, p: V3) -> bool {
+    map.near(p[0], p[2], 4.2).any(|q| {
+        let (dx, dy, dz) = (p[0] - q.x, p[1] - q.y, p[2] - q.z);
+        let s = q.scale;
+        let within = |up: f32, wide: f32, tall: f32| {
+            (dx * dx + dz * dz) / (wide * wide) + (dy - up).powi(2) / (tall * tall) < 1.0
+        };
+        match q.kind {
+            Kind::Shroom => within(1.05 * q.h, 0.5 * q.h, 0.2 * q.h),
+            Kind::Tree if pine(index(map, q)) => {
+                let u = (dy / s - 0.6) / 6.7;
+                (0.0..1.0).contains(&u) && dx * dx + dz * dz < (2.6 * s * (1.0 - u)).powi(2)
+            }
+            Kind::Tree => within(4.6 * s, 2.9 * s, 2.0 * s),
+            _ => false,
+        }
     })
+}
+
+/// Which of the island's props `q` (one of `map.props`) is.
+fn index(map: &Map, q: &Prop) -> usize {
+    (q as *const Prop as usize - map.props.as_ptr() as usize) / std::mem::size_of::<Prop>()
 }
 
 /// What the crosshair is on, looking from `cam` (the wizard `me` with its
@@ -324,9 +362,14 @@ mod tests {
         let mut c = Chase::default();
         let mut last: Option<V3> = None;
         let mut worst: f32 = 0.0;
+        // The feet go up and down the ground (and over a root or a stone)
+        // no faster than a step a tick, as the page draws them.
+        let climb = wandfall::laws::STEP * wandfall::laws::TICK_HZ as f32 / fps;
+        let mut y = map.floor(x0, z, map.height(x0, z) + 1.0);
         for k in 0..(fps as usize * 6) {
             let x = x0 + v * k as f32 / fps;
-            let feet = [x, map.floor(x, z, map.height(x, z) + 1.0), z];
+            y += (map.floor(x, z, map.height(x, z) + 1.0) - y).clamp(-climb, climb);
+            let feet = [x, y, z];
             let cam = c.view(&map, feet, (0.0, 0.0), Stance::default(), 1.6, 1.0 / fps);
             if let Some(l) = last {
                 let d = geo::sub(cam.eye, l);
@@ -335,6 +378,88 @@ mod tests {
             last = Some(cam.eye);
         }
         assert!(worst < 3.0 * v / fps, "the view leapt {worst} m in a frame");
+    }
+
+    #[test]
+    fn a_fall_or_a_leap_does_not_leave_the_wizard_at_the_bottom_of_the_view() {
+        let map = Map::new(3);
+        let (fps, g) = (60.0, wandfall::laws::GRAVITY);
+        // Off a cliff, then thrown up at 20 m/s: the eye stays within a
+        // little of where it sits over the feet at rest.
+        for v0 in [0.0, 20.0] {
+            let mut c = Chase::default();
+            let rest = c.view(
+                &map,
+                [0.0, 60.0, 0.0],
+                (0.0, 0.0),
+                Stance::default(),
+                1.6,
+                0.0,
+            );
+            let over = rest.eye[1] - 60.0;
+            let (mut y, mut v) = (60.0, v0);
+            for _ in 0..fps as usize {
+                v -= g / fps;
+                y += v / fps;
+                let cam = c.view(
+                    &map,
+                    [0.0, y, 0.0],
+                    (0.0, 0.0),
+                    Stance::default(),
+                    1.6,
+                    1.0 / fps,
+                );
+                let off = cam.eye[1] - y - over;
+                assert!(off.abs() < 0.4, "{off} m off at {y} m, {v} m/s");
+            }
+        }
+    }
+
+    #[test]
+    fn at_the_range_s_spawn_the_view_stands_back_whichever_way_you_look() {
+        // A mushroom stands a few metres off: beside its stem, not in its
+        // cap, the camera is not pulled into your head.
+        let mut room = wandfall::room::Wandfall::practice(0x5eed_0007);
+        let w = room.world();
+        let at = w.practice.as_ref().expect("a range").spawn;
+        let feet = [at[0], w.map.height(at[0], at[1]), at[1]];
+        for k in 0..8 {
+            let yaw = k as f32 * std::f32::consts::TAU / 8.0;
+            let mut c = Chase::default();
+            for _ in 0..60 {
+                c.view(&w.map, feet, (yaw, 0.0), Stance::default(), 1.6, 1.0 / 60.0);
+            }
+            assert!(c.arm.x > ARM - 0.05, "looking {k}/8 round: {}", c.arm.x);
+        }
+    }
+
+    #[test]
+    fn beside_a_mushroom_s_stem_is_not_in_its_cap() {
+        let map = Map::new(3);
+        let alone = |q: &&Prop| map.near(q.x, q.z, 8.0).count() == 1;
+        let q = map
+            .props
+            .iter()
+            .filter(alone)
+            .find(|q| q.kind == Kind::Shroom)
+            .expect("a mushroom on its own");
+        assert!(!in_crown(&map, [q.x + 1.5, q.y + 2.0, q.z]));
+        let cap = [q.x + 0.3 * q.h, q.y + 1.05 * q.h, q.z];
+        assert!(in_crown(&map, cap));
+        // And under a broadleaf's crown, beside its trunk, is clear; in it
+        // is not.
+        let tree = map
+            .props
+            .iter()
+            .enumerate()
+            .find(|(k, q)| q.kind == Kind::Tree && !pine(*k) && alone(q))
+            .map(|(_, q)| q)
+            .expect("a broadleaf on its own");
+        assert!(!in_crown(&map, [tree.x + 1.5, tree.y + 2.0, tree.z]));
+        assert!(in_crown(
+            &map,
+            [tree.x + 1.5, tree.y + 4.6 * tree.scale, tree.z]
+        ));
     }
 
     #[test]
