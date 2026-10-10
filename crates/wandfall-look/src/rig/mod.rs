@@ -45,7 +45,8 @@ const LOD: [f32; 2] = [6.0, 16.0];
 const HUES: [V3; 8] = [
     rgb(70, 110, 230),
     rgb(200, 60, 70),
-    rgb(60, 160, 110),
+    // Ivory, not green: a green robe hides in the grass and pines.
+    rgb(226, 218, 200),
     rgb(150, 80, 200),
     rgb(220, 140, 40),
     rgb(40, 170, 190),
