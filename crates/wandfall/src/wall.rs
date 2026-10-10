@@ -40,7 +40,7 @@ pub fn kick(b: &mut Body, w: &Wish) {
     if w.any {
         let o = [n[0] + w.x * WALL_AIM, n[1] + w.z * WALL_AIM];
         let d = (o[0] * o[0] + o[1] * o[1]).sqrt();
-        if d > 1e-4 && (o[0] * n[0] + o[1] * n[1]) / d >= 0.25 {
+        if d > 1e-4 && (o[0] * n[0] + o[1] * n[1]) / d >= WALL_OUT {
             out = [o[0] / d, o[1] / d];
         }
     }

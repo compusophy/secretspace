@@ -15,7 +15,16 @@ pub const SHORE: f32 = 140.0;
 pub const HILLS: f32 = 9.0;
 pub const HILL_SIZE: f32 = 48.0;
 /// Trees, rocks, giant mushrooms and ruined pillars on the island.
+/// Trees grow in woods about this wide (m), where the woods' noise (0..1)
+/// is over the edge, thick this much over it; out in the meadows, one in
+/// so many takes root alone. Mushrooms grow within this far (m) of a
+/// tree.
 pub const TREES: usize = 400;
+pub const WOODS: f32 = 40.0;
+pub const WOOD_EDGE: f32 = 0.4;
+pub const WOOD_SOFT: f32 = 0.2;
+pub const WOOD_LONE: f32 = 0.06;
+pub const SHROOM_WOOD: f32 = 3.5;
 pub const ROCKS: usize = 130;
 pub const SHROOMS: usize = 40;
 pub const RUINS: usize = 8;
@@ -131,13 +140,15 @@ pub const AIR_JUMP: f32 = 7.0;
 pub const AIR_JUMP_KEEP: f32 = 0.5;
 /// Wall jumps: off a wall touched in the last few ticks, out from it and
 /// up (m/s), turned toward where you steer (by this much: 1 would turn a
-/// kick steered along the wall half way to it), keeping a share of the
-/// speed along it; so many before you land. Pushing into a wall you can
-/// still kick off, you slide down it no faster than this (m/s).
+/// kick steered along the wall half way to it; never nearer the wall
+/// than this, a cosine), keeping a share of the speed along it; so many
+/// before you land. Pushing into a wall you can still kick off, you
+/// slide down it no faster than this (m/s).
 pub const WALL_GRACE: u8 = 6;
 pub const WALL_KICK: f32 = 7.5;
 pub const WALL_JUMP: f32 = 8.5;
 pub const WALL_AIM: f32 = 0.8;
+pub const WALL_OUT: f32 = 0.25;
 pub const WALL_KEEP: f32 = 0.95;
 pub const WALL_JUMPS: u8 = 3;
 pub const WALL_SLIDE_FALL: f32 = 2.5;

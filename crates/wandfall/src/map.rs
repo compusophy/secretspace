@@ -1,9 +1,10 @@
 //! The island, from its seed alone, the same on the server and the page:
 //! rolling hills falling to the sea at the shore, its places (`places`:
 //! the Spire at the centre, a stone circle, a demon rift, a crystal
-//! grove), and trees, rocks, giant mushrooms and ruined rings of pillars
-//! between them. Heights use arithmetic only (no library calls), so both
-//! ends agree to the bit.
+//! grove, a basalt causeway), and between them woods and open meadows
+//! (trees, giant mushrooms under them), rocks, and ruined rings of
+//! pillars. Heights use arithmetic only (no library calls), so both ends
+//! agree to the bit.
 
 use engine::rng::{splitmix, Rng};
 
@@ -303,6 +304,12 @@ impl Map {
         }
     }
 
+    /// How wooded (x, z) is, 0..1: woods where it is high, meadows low.
+    pub fn wood(&self, x: f32, z: f32) -> f32 {
+        let (x, z) = (x / WOODS, z / WOODS);
+        noise(self.seed ^ 0x3d, x, z) * 0.7 + noise(self.seed ^ 0x3e, x * 2.3, z * 2.3) * 0.3
+    }
+
     /// Whether a point is on land (not the sea, not past the edge).
     pub fn land(&self, x: f32, z: f32) -> bool {
         x.abs() < MAP_HALF && z.abs() < MAP_HALF && self.height(x, z) > SEA + 0.4
@@ -353,13 +360,26 @@ impl Map {
         let place = |m: &mut Map, kind: Kind, count: usize, rng: &mut Rng| {
             let mut n = 0;
             let mut tries = 0;
-            while n < count && tries < count * 20 {
+            while n < count && tries < count * 40 {
                 tries += 1;
                 let (x, z) = (
                     (unit(rng) * 2.0 - 1.0) * SHORE,
                     (unit(rng) * 2.0 - 1.0) * SHORE,
                 );
                 if !m.land(x, z) || m.height(x, z) < SEA + 1.0 || !m.wild(x, z, 3.0) {
+                    continue;
+                }
+                // Trees in the woods (thinning at their edges), now and
+                // then one alone in a meadow; mushrooms under the trees.
+                let fits = match kind {
+                    Kind::Tree => {
+                        let thick = smooth((m.wood(x, z) - WOOD_EDGE) / WOOD_SOFT);
+                        unit(rng) < thick.max(WOOD_LONE)
+                    }
+                    Kind::Shroom => m.near(x, z, SHROOM_WOOD).any(|q| q.kind == Kind::Tree),
+                    _ => true,
+                };
+                if !fits {
                     continue;
                 }
                 let s = 0.8 + unit(rng) * 0.6;
@@ -568,6 +588,26 @@ mod tests {
             assert!(m.land(q[0], q[2]) && m.near(q[0], q[2], PAD_R).next().is_none());
         }
         assert_eq!(Map::new(7).props, m.props, "the same seed, the same island");
+    }
+
+    #[test]
+    fn trees_grow_in_woods_with_meadows_between() {
+        for seed in 0..8 {
+            let m = Map::new(seed);
+            let trees = m.props.iter().filter(|q| q.kind == Kind::Tree).count();
+            assert_eq!(trees, TREES, "seed {seed}: every tree finds a place");
+            // Land in the wild near a tree (in the woods), and not.
+            let (mut wild, mut wooded) = (0, 0);
+            for k in 0..900 {
+                let (x, z) = ((k % 30) as f32 * 9.0 - 135.0, (k / 30) as f32 * 9.0 - 135.0);
+                if m.land(x, z) && m.wild(x, z, 0.0) {
+                    wild += 1;
+                    wooded += m.near(x, z, 8.0).any(|q| q.kind == Kind::Tree) as i32;
+                }
+            }
+            let share = wooded as f32 / wild as f32;
+            assert!((0.45..0.85).contains(&share), "seed {seed}: {share} wooded");
+        }
     }
 
     #[test]

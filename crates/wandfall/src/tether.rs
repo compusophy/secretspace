@@ -62,8 +62,10 @@ mod tests {
     use crate::map::Map;
     use crate::motion::{keys, step, Body, Input};
 
+    /// On the Spire's plaza (seed 3), west of the tower and clear of it:
+    /// the way east is open.
     fn stand(map: &Map) -> Body {
-        let [x, z] = map.spot(&mut engine::rng::Rng::new(5));
+        let (x, z) = (-17.0, -9.0);
         Body {
             p: [x, map.height(x, z), z],
             ground: true,
@@ -73,7 +75,7 @@ mod tests {
 
     #[test]
     fn it_hauls_you_up_to_where_it_caught_and_lets_go() {
-        let map = Map::new(11);
+        let map = Map::new(3);
         let mut b = stand(&map);
         let to = [b.p[0] + 20.0, b.p[1] + 12.0, b.p[2]];
         b.anchor = to;
@@ -95,7 +97,7 @@ mod tests {
 
     #[test]
     fn a_jump_lets_go_with_the_speed_kept() {
-        let map = Map::new(11);
+        let map = Map::new(3);
         let mut b = stand(&map);
         b.anchor = [b.p[0] + 40.0, b.p[1] + 5.0, b.p[2]];
         b.tether = TETHER_TICKS;
@@ -117,7 +119,7 @@ mod tests {
 
     #[test]
     fn steering_square_to_the_rope_swings_you_off_its_line() {
-        let map = Map::new(11);
+        let map = Map::new(3);
         let swing = |keys: u16| {
             let mut b = stand(&map);
             b.p[1] += 3.0;
@@ -135,7 +137,7 @@ mod tests {
                     },
                     &map,
                 );
-                most = most.max(b.p[2] - z);
+                most = most.max(z - b.p[2]);
                 if b.tether == 0 {
                     break;
                 }
@@ -143,10 +145,6 @@ mod tests {
             most
         };
         assert!(swing(0) < 0.1, "straight along it, let be");
-        assert!(
-            swing(keys::RIGHT) > 1.5,
-            "swung right: {}",
-            swing(keys::RIGHT)
-        );
+        assert!(swing(keys::LEFT) > 1.5, "swung left: {}", swing(keys::LEFT));
     }
 }

@@ -89,7 +89,7 @@ mod tests {
             // hop onto.
             let (top, at) = (q.top().unwrap(), [q.x - q.r - 6.0, q.z]);
             let rise = top - map.height(at[0], at[1]);
-            let open = map.near(at[0], at[1], 6.0).count() == 1;
+            let open = map.near(q.x, q.z, q.r + 6.5).count() == 1;
             if !(1.4..2.1).contains(&rise) || !open || !map.land(at[0], at[1]) {
                 continue;
             }
