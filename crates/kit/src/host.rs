@@ -12,6 +12,13 @@
 //! poll: the pointer locked (`wants_lock`), to be closed (`closed`), why
 //! it stopped (`error`). It draws only while shown and polled (`drawing`):
 //! a host that stops asking for frames pauses it for free.
+//!
+//! Once entered, a module instance stays hosted for good: `end` (its host
+//! let the cartridge go) only marks it ended, and a new `enter` may take
+//! it again. Work still under way when the host let go (a device still
+//! coming) so goes on as a cartridge's, never as the host page's: it
+//! keeps to `ns`, makes no `<input>`, never draws and dials no server.
+//! `era` moves on at every enter and every end, so such work can tell.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -143,6 +150,10 @@ fn sane(css: (f64, f64), dpr: f64) -> ((f64, f64), f64) {
 #[derive(Default)]
 struct State {
     page: Option<Hosted>,
+    /// Let go (`end`): still hosted, never drawn again.
+    ended: bool,
+    /// One more at every enter and every end.
+    era: u32,
     shown: bool,
     polled: Option<f64>,
     wish: bool,
@@ -153,8 +164,9 @@ struct State {
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
-    /// Every text field made while hosted (the focused one takes the text).
-    static FIELDS: RefCell<Vec<Weak<RefCell<Virtual>>>> = const { RefCell::new(Vec::new()) };
+    /// Every text field made while hosted, with the era it was made in
+    /// (the focused one of this era takes the text).
+    static FIELDS: RefCell<Vec<(u32, Weak<RefCell<Virtual>>)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Read the state, or `or` if it cannot be now (never a panic: these are
@@ -175,17 +187,19 @@ fn write(f: impl FnOnce(&mut State)) {
     });
 }
 
-/// Become hosted, or "busy: …" if this module instance already is.
+/// Become hosted (again, after an `end`), or "busy: …" if this module
+/// instance runs a cartridge now.
 pub fn enter(h: Hosted) -> Result<(), String> {
     let (css, dpr) = sane(h.css, h.dpr);
     STATE
         .try_with(|s| {
             let mut s = s.try_borrow_mut().map_err(|_| BUSY.to_string())?;
-            if s.page.is_some() {
+            if s.page.is_some() && !s.ended {
                 return Err(BUSY.to_string());
             }
             *s = State {
                 page: Some(Hosted { css, dpr, ..h }),
+                era: s.era.wrapping_add(1),
                 shown: true,
                 ..State::default()
             };
@@ -194,14 +208,38 @@ pub fn enter(h: Hosted) -> Result<(), String> {
         .unwrap_or_else(|_| Err(BUSY.to_string()))
 }
 
-/// Hosted no longer: the next constructor may enter.
+/// The host let the cartridge go: the next constructor may enter. Still
+/// hosted (under the same `ns`), so what is left running never turns to
+/// the host page; it never draws again, and dials no server.
 pub fn end() {
-    write(|s| *s = State::default());
+    write(|s| {
+        if s.page.is_some() && !s.ended {
+            *s = State {
+                page: s.page.take(),
+                ended: true,
+                era: s.era.wrapping_add(1),
+                ..State::default()
+            };
+        }
+    });
     let _ = FIELDS.try_with(|f| f.try_borrow_mut().map(|mut f| f.clear()));
 }
 
+/// Whether this module instance runs as a cartridge: from its first
+/// `enter` on, for good (ended too).
 pub fn hosted() -> bool {
     read(false, |s| s.page.is_some())
+}
+
+/// Whether the host let the cartridge go (and none has entered since).
+pub fn ended() -> bool {
+    read(false, |s| s.ended)
+}
+
+/// Which hosting this is: one more at every enter and every end. Work
+/// begun in one era and done in another is for a cartridge that is gone.
+pub fn era() -> u32 {
+    read(0, |s| s.era)
 }
 
 /// The surface, CSS pixels.
@@ -251,14 +289,14 @@ pub fn query() -> String {
 
 /// The game server a hosted page dials (`ws(s)://…/ws`): the host's,
 /// where that is allowed; else the one baked in at build time; else where
-/// its files come from; else none.
+/// its files come from; else none. Not hosted, or ended: none.
 pub fn server() -> Option<String> {
-    let (asked, base) = read((None, String::new()), |s| {
+    let (asked, base) = read(None, |s| {
         s.page
             .as_ref()
+            .filter(|_| !s.ended)
             .map(|h| (h.opts.server.clone(), h.base.clone()))
-            .unwrap_or_default()
-    });
+    })?;
     server_in(asked.as_deref(), local(), RELAY, &base)
 }
 
@@ -322,18 +360,23 @@ pub fn polled(now: f64) {
     }
 }
 
-/// Whether to draw (and sound): hosted, shown, and polled within `POLL_MS`.
+/// Whether to draw (and sound): hosted and not ended, shown, and polled
+/// within `POLL_MS`.
 pub fn drawing(now: f64) -> bool {
     read(false, |s| {
-        s.page.is_some() && s.shown && s.polled.is_some_and(|t| now - t < POLL_MS)
+        s.page.is_some() && !s.ended && s.shown && s.polled.is_some_and(|t| now - t < POLL_MS)
     })
 }
 
-/// The page would like the pointer locked (or no longer).
+/// The page would like the pointer locked (or no longer). Ended, it
+/// asks nothing.
 pub fn want_lock(on: bool) {
-    write(|s| s.wish = on);
+    write(|s| s.wish = on && !s.ended);
 }
 
+/// Whether it wants the pointer locked, locked already or not: what a
+/// cartridge's `capture()` answers (false asks the host to let it go, so
+/// it is not `wants_lock() && !locked()`).
 pub fn wants_lock() -> bool {
     read(false, |s| s.wish)
 }
@@ -355,17 +398,17 @@ pub fn locked() -> bool {
 
 /// The page asks to be closed (its Exit).
 pub fn close() {
-    write(|s| s.closed = true);
+    write(|s| s.closed |= !s.ended);
 }
 
 pub fn closed() -> bool {
     read(false, |s| s.closed)
 }
 
-/// Why the page stopped (the first reason stays).
+/// Why the page stopped (the first reason stays; ended, none is kept).
 pub fn fail(why: &str) {
     write(|s| {
-        if s.failed.is_empty() {
+        if s.failed.is_empty() && !s.ended {
             s.failed = why.to_string();
         }
     });
@@ -414,18 +457,20 @@ pub fn field(max: usize) -> Rc<RefCell<Virtual>> {
         max,
         ..Virtual::default()
     }));
+    let era = era();
     let _ = FIELDS.try_with(|all| {
         if let Ok(mut all) = all.try_borrow_mut() {
-            all.retain(|w| w.strong_count() > 0);
-            all.push(Rc::downgrade(&f));
+            all.retain(|(_, w)| w.strong_count() > 0);
+            all.push((era, Rc::downgrade(&f)));
         }
     });
     f
 }
 
-/// Give `f` the keys (and take them from any other), if it is shown.
+/// Give `f` the keys (and take them from any other), if it is shown and
+/// of this era, and the cartridge is not ended.
 pub fn focus(f: &Rc<RefCell<Virtual>>) {
-    if f.try_borrow().map_or(true, |v| v.at.is_none()) {
+    if f.try_borrow().map_or(true, |v| v.at.is_none()) || ended() || !current(f) {
         return;
     }
     each(|v| v.focused = false);
@@ -434,11 +479,27 @@ pub fn focus(f: &Rc<RefCell<Virtual>>) {
     }
 }
 
-/// `f` on every live field.
+/// Whether `f` was made in this era (not by work left over from a
+/// cartridge let go).
+fn current(f: &Rc<RefCell<Virtual>>) -> bool {
+    let era = era();
+    FIELDS
+        .try_with(|all| {
+            all.try_borrow().is_ok_and(|all| {
+                all.iter()
+                    .any(|(e, w)| *e == era && std::ptr::eq(w.as_ptr(), Rc::as_ptr(f)))
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// `f` on every live field of this era.
 fn each(mut f: impl FnMut(&mut Virtual)) {
+    let era = era();
     let _ = FIELDS.try_with(|all| {
         if let Ok(all) = all.try_borrow() {
-            for v in all.iter().filter_map(Weak::upgrade) {
+            let live = all.iter().filter(|(e, _)| *e == era);
+            for v in live.filter_map(|(_, w)| w.upgrade()) {
                 if let Ok(mut v) = v.try_borrow_mut() {
                     f(&mut v);
                 }
@@ -534,10 +595,11 @@ mod tests {
 
     #[test]
     fn hosting_is_one_at_a_time() {
+        // Each test runs on a thread of its own: a page, never entered.
         end();
-        assert!(!hosted());
+        assert!(!hosted() && !ended() && era() == 0);
         assert_eq!(enter(page("a.", None)), Ok(()));
-        assert!(hosted());
+        assert!(hosted() && era() == 1);
         assert!(enter(page("b.", None)).unwrap_err().starts_with("busy"));
         assert_eq!(ns(), "a.");
         assert_eq!(query(), "practice");
@@ -549,11 +611,41 @@ mod tests {
         assert!(closed());
         assert_eq!(error(), "stale");
         end();
-        assert!(!hosted() && !closed() && error().is_empty());
+        assert!(ended() && !closed() && error().is_empty() && era() == 2);
         assert_eq!(enter(page("b.", None)), Ok(()));
+        assert!(!ended() && era() == 3);
         assert_eq!(ns(), "b.");
         end();
-        assert_eq!(ns(), "");
+        end();
+        assert_eq!(era(), 4, "a second end is no new era");
+    }
+
+    #[test]
+    fn a_cartridge_let_go_stays_one() {
+        // Work still under way when the host let go (a device still
+        // coming) must not find a page: it keeps to its own keys and
+        // size, asks nothing, draws nothing and dials nowhere.
+        enter(page("a.", Some("ws://127.0.0.1:9/ws"))).unwrap();
+        polled(0.0);
+        assert!(drawing(1.0) && server().is_some());
+        end();
+        assert!(hosted() && ended());
+        assert_eq!(
+            (ns(), query(), css()),
+            ("a.".into(), "practice".into(), (960.0, 540.0))
+        );
+        assert!(!drawing(1.0));
+        shown(true);
+        polled(1.0);
+        assert!(!drawing(2.0), "never drawn again");
+        assert_eq!(server(), None);
+        want_lock(true);
+        close();
+        fail("no game server");
+        assert!(!wants_lock() && !closed() && error().is_empty());
+        // The next cartridge starts clean.
+        enter(page("b.", None)).unwrap();
+        assert!(!ended() && ns() == "b." && server().is_some());
     }
 
     #[test]
@@ -615,7 +707,6 @@ mod tests {
 
     #[test]
     fn drawing_stops_unpolled() {
-        end();
         assert!(!drawing(0.0));
         enter(page("t.", None)).unwrap();
         // Not polled yet: nothing drawn.
@@ -637,11 +728,12 @@ mod tests {
 
     #[test]
     fn the_lock_is_asked_for_and_given() {
-        end();
         enter(page("t.", None)).unwrap();
         want_lock(true);
         assert!(wants_lock() && !locked());
         set_locked(true);
+        // Held, it is still wanted: `capture()` stays true, or the host
+        // would let it go the frame after it locked.
         assert!(wants_lock() && locked());
         // Let go (Esc): the wish ends with it, so the host does not lock
         // again until the page asks.
@@ -652,7 +744,6 @@ mod tests {
 
     #[test]
     fn virtual_fields_take_the_keys_one_at_a_time() {
-        end();
         let a = field(8);
         let b = field(8);
         // Not shown: no focus.
@@ -674,6 +765,36 @@ mod tests {
         drop(b);
         assert!(!typing());
         assert!(!edit("Backspace"));
+    }
+
+    #[test]
+    fn a_field_left_over_never_takes_the_keys() {
+        enter(page("a.", None)).unwrap();
+        let old = field(8);
+        old.borrow_mut().at = Some((0.0, 0.0, 10.0, 10.0));
+        focus(&old);
+        assert!(typing());
         end();
+        assert!(!typing());
+        // Made after the host let go, or kept into the next cartridge:
+        // never focused, never typed into.
+        let late = field(8);
+        late.borrow_mut().at = Some((0.0, 0.0, 10.0, 10.0));
+        focus(&late);
+        assert!(!late.borrow().focused && !typing());
+        enter(page("b.", None)).unwrap();
+        focus(&old);
+        focus(&late);
+        text("x");
+        assert!(!typing());
+        assert_eq!(
+            (old.borrow().value.as_str(), late.borrow().value.as_str()),
+            ("", "")
+        );
+        let now = field(8);
+        now.borrow_mut().at = Some((0.0, 0.0, 10.0, 10.0));
+        focus(&now);
+        text("x");
+        assert_eq!(now.borrow().value, "x");
     }
 }

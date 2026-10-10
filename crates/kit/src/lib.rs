@@ -570,8 +570,13 @@ mod tests {
             kept("wandfall.muted"),
             "compusophy.cart.secretspace.wandfall.muted"
         );
+        // Let go, still under it: what is left running never reaches
+        // the host's own keys.
         host::end();
-        assert_eq!(kept("secretspace/key"), "secretspace/key");
+        assert_eq!(
+            kept("secretspace/key"),
+            "compusophy.cart.secretspace.secretspace/key"
+        );
     }
 
     #[test]

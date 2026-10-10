@@ -140,9 +140,16 @@ impl Gpu {
 
     /// The same device as `new`, drawn off any screen for a host (sized as
     /// `kit::host` says): no canvas, no surface; each picture read back
-    /// with `read`, plain RGBA.
+    /// with `read`, plain RGBA. If the host let the cartridge go while the
+    /// device was coming (`kit::host::era` moved on), the device is let go
+    /// too: Err.
     pub async fn hosted(min_short: f64, max_dpr: f64) -> Result<Gpu, String> {
+        let era = kit::host::era();
         let (_, _, device, queue, caps) = device().await?;
+        if kit::host::era() != era || kit::host::ended() {
+            device.destroy();
+            return Err("the cartridge was let go".into());
+        }
         let layer = layer::Layer::new(&device, OFF);
         let mut g = Gpu {
             target: Target::Off {
@@ -165,9 +172,14 @@ impl Gpu {
     }
 
     /// Match the window (as `kit::gl::Gl::fit` does); hosted, the host's
-    /// surface.
+    /// surface, no side past what the device can draw (fewer device pixels
+    /// per CSS pixel instead, so the layer still lies over the picture).
     pub fn fit(&mut self, min_short: f64, max_dpr: f64) {
         let f = kit::gl::measure(min_short, max_dpr);
+        let f = match &self.target {
+            Target::Page { .. } => f,
+            Target::Off { .. } => f.under(self.caps.limits.max_texture_dimension_2d),
+        };
         (self.scale, self.dpr, self.css, self.size) = (f.scale, f.dpr, f.css, f.size);
         match &mut self.target {
             Target::Page {
@@ -183,12 +195,7 @@ impl Gpu {
                 config.height = f.size.1;
                 surface.configure(&self.device, config);
             }
-            Target::Off { .. } => {
-                // No bigger than the device can draw.
-                let most = self.caps.limits.max_texture_dimension_2d.max(1);
-                self.size = (f.size.0.min(most), f.size.1.min(most));
-                self.hud.resize(f.hud.0, f.hud.1);
-            }
+            Target::Off { .. } => self.hud.resize(f.hud.0, f.hud.1),
         }
     }
 
@@ -311,8 +318,10 @@ impl Gpu {
         }
     }
 
-    /// Let the device go now (the web's `Drop` does not).
+    /// Let the device go now (the web's `Drop` does not); no frame is
+    /// given from then on.
     pub fn destroy(&self) {
+        self.health.end();
         self.device.destroy();
     }
 }

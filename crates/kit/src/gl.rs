@@ -323,6 +323,25 @@ pub struct Fit {
     pub hud: (i32, i32),
 }
 
+impl Fit {
+    /// No side past `most` device pixels (a texture's limit): fewer device
+    /// pixels per CSS pixel, so the picture, the layer and the scale from
+    /// one to the other still agree (pure).
+    pub fn under(self, most: u32) -> Fit {
+        let most = most.max(1);
+        if self.size.0.max(self.size.1) <= most {
+            return self;
+        }
+        let dpr = f64::from(most) / self.css.0.max(self.css.1).max(1.0);
+        let side = |v: f64| ((v * dpr).round().max(1.0) as u32).min(most);
+        Fit {
+            dpr,
+            size: (side(self.css.0), side(self.css.1)),
+            ..self
+        }
+    }
+}
+
 pub fn measure(min_short: f64, max_dpr: f64) -> Fit {
     measure_in(crate::window_css(), crate::dpr(), min_short, max_dpr)
 }
@@ -531,6 +550,24 @@ mod tests {
         let f = measure(300.0, 1.5);
         assert_eq!((f.size, f.hud), ((480, 270), (480, 270)));
         crate::host::end();
+    }
+
+    #[test]
+    fn a_fit_past_the_texture_limit_draws_finer_not_cut() {
+        // 6000 CSS px at 1.5 is 9000 device px: past a limit of 8192.
+        let f = measure_in((6000.0, 3000.0), 1.5, 300.0, 1.5);
+        assert_eq!(f.under(16384), f);
+        let u = f.under(8192);
+        assert_eq!((u.scale, u.css, u.hud), (f.scale, f.css, f.hud));
+        assert_eq!(u.size, (8192, 4096));
+        // The layer still covers the picture exactly: hud * scale * dpr.
+        let k = u.scale * u.dpr;
+        assert!((f64::from(u.hud.0) * k - 8192.0).abs() < 1.0);
+        assert!((f64::from(u.hud.1) * k - 4096.0).abs() < 1.0);
+        // A limit no device has: still within it, still in step.
+        let u = f.under(100);
+        assert_eq!(u.size, (100, 50));
+        assert!((6000.0 * u.dpr - 100.0).abs() < 1e-9);
     }
 
     #[test]

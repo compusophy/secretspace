@@ -81,9 +81,16 @@ impl Health {
         h
     }
 
-    /// Whether the device is gone (make a new one, or reload the page).
+    /// Whether the device is gone (make a new one, or reload the page):
+    /// lost, or let go (`Gpu::destroy`).
     pub fn lost(&self) -> bool {
         self.lost.load(Ordering::Relaxed)
+    }
+
+    /// The page let the device go: no frame from now on.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn end(&self) {
+        self.lost.store(true, Ordering::Relaxed);
     }
 
     /// How many errors no one caught.
