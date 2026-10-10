@@ -1,28 +1,23 @@
-//! The renderer: pipelines, buffers, and the passes of a frame. The sun's
-//! shadow (a pass a cascade), then the scene in HDR, multisampled: the
-//! sky, what is solid (statics, then what moves), grass, what is
-//! see-through (the sea among it), what glows, and sparks, once what is
-//! solid is occluded (`ao`); decals laid on what stands still before
-//! what moves is drawn; then, over a cleared depth, the viewmodel;
-//! then bloom and the finish (`post`).
+//! The renderer: what it holds (meshes, statics, the terrain, buffers)
+//! and the passes of a frame. The sun's shadow (a pass a cascade), then
+//! the scene in HDR, multisampled: the sky, what is solid (statics, then
+//! what moves), grass, what is see-through (the sea among it), what
+//! glows, and sparks, once what is solid is occluded (`ao`); decals laid
+//! on what stands still before what moves is drawn; then, over a cleared
+//! depth, the viewmodel; then bloom and the finish (`post`).
 
-use crate::buffers::{make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, Run};
-use crate::grid::Grid;
-use crate::pipes::{buffer, pipeline, Kind, Shared};
+use crate::buffers::{lay, make, put_f32s, runs_of, tiny_texture, Grow, MeshBuf, Run};
+use crate::grid::{Grid, Lists};
+use crate::pipes::Pipes;
 use crate::post::{Post, HDR};
+use crate::shadow::Shadows;
 use crate::terrain::Terrain;
 use crate::{geo, laws, m4, shaders, shadow, Frame, Item, Material, Mesh, Pass, Quality, M4};
 use gpu::wgpu;
 
-/// Floats an instance: a model matrix, a tint, (glow, rough, material,
-/// detail).
-const INST: usize = 24;
-/// Floats a spark: position and size, colour, its streak and shape.
-const SPARK: usize = 12;
 /// How far the eye goes before the statics are laid again (near and far
 /// meshes chosen anew).
 const STILL_RELAY: f32 = crate::cull::EYE_SLACK;
-const SHADOW: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// What the last frame cost.
 #[derive(Clone, Copy, Debug, Default)]
@@ -41,27 +36,16 @@ pub struct Renderer {
     queue: wgpu::Queue,
     quality: Quality,
     layout: wgpu::BindGroupLayout,
-    opaque: wgpu::RenderPipeline,
-    faint: wgpu::RenderPipeline,
-    glow: wgpu::RenderPipeline,
-    sky: wgpu::RenderPipeline,
-    sparks: wgpu::RenderPipeline,
-    /// Sparks fading into what stands behind them, and the depth they
-    /// read (made again with the screen's targets: their size).
-    soft_sparks: wgpu::RenderPipeline,
-    soft_layout: wgpu::BindGroupLayout,
-    /// The see-through, the sea mirroring the picture so far; a sampler
-    /// for that picture, and a stand-in when there is none.
-    faint_ssr: wgpu::RenderPipeline,
-    decals: crate::decals::Decals,
+    pipes: Pipes,
+    /// A sampler for the picture so far (the sea mirrors it), and a stand
+    /// in when there is none.
     scene_samp: wgpu::Sampler,
     nothing: wgpu::TextureView,
+    /// What the pass after the solid one reads (made again with the
+    /// screen's targets: their size).
     soft_group: Option<(wgpu::BindGroup, (u32, u32))>,
-    grass: wgpu::RenderPipeline,
     globals: [wgpu::Buffer; 2],
-    lights: Grow,
-    cells: Grow,
-    index: Grow,
+    lists: Lists,
     groups: Option<[wgpu::BindGroup; 2]>,
     moving: Grow,
     still: Grow,
@@ -78,11 +62,7 @@ pub struct Renderer {
     cull: crate::cull::Cull,
     grid: Grid,
     bytes: Vec<u8>,
-    shadow_layers: Vec<wgpu::TextureView>,
-    shadow_array: wgpu::TextureView,
-    shadow_cmp: wgpu::Sampler,
-    shadow_pipe: wgpu::RenderPipeline,
-    casters: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
+    shadows: Shadows,
     heights: wgpu::TextureView,
     terrain: [f32; 4],
     water: Mesh,
@@ -100,247 +80,14 @@ impl Renderer {
         quality: Quality,
     ) -> Renderer {
         let layout = crate::pipes::scene_layout(device);
-        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("engine"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("scene"),
-            source: wgpu::ShaderSource::Wgsl(shaders::scene(quality.msaa > 1, quality.ssr).into()),
-        });
-        let vertex = wgpu::VertexBufferLayout {
-            array_stride: (geo::STRIDE * 4) as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4],
-        };
-        let instance = wgpu::VertexBufferLayout {
-            array_stride: (INST * 4) as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![
-                3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
-                7 => Float32x4, 8 => Float32x4
-            ],
-        };
-        let spark = wgpu::VertexBufferLayout {
-            array_stride: (SPARK * 4) as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
-        };
-        use wgpu::CompareFunction::{Always, GreaterEqual};
-        let world = [Some(vertex.clone()), Some(instance)];
-        let add = wgpu::BlendState {
-            color: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::SrcAlpha,
-                dst_factor: wgpu::BlendFactor::One,
-                operation: wgpu::BlendOperation::Add,
-            },
-            alpha: wgpu::BlendComponent::OVER,
-        };
-        let shared = Shared {
-            device,
-            layout: &pl,
-            module: &module,
-            samples: quality.msaa,
-        };
-        let world_kind = |blend, write, cull| Kind {
-            entry: ("world_vs", "world_fs"),
-            buffers: &world,
-            blend,
-            depth: (write, GreaterEqual),
-            cull,
-        };
-        let opaque = pipeline(&shared, world_kind(None, true, Some(wgpu::Face::Back)));
-        let faint = pipeline(
-            &shared,
-            world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None),
-        );
-        let glow = pipeline(&shared, world_kind(Some(add), false, None));
-        let sky = pipeline(
-            &shared,
-            Kind {
-                entry: ("sky_vs", "sky_fs"),
-                buffers: &[],
-                blend: None,
-                depth: (false, Always),
-                cull: None,
-            },
-        );
-        let sparks = pipeline(
-            &shared,
-            Kind {
-                entry: ("spark_vs", "spark_fs"),
-                buffers: &[Some(spark.clone())],
-                // Premultiplied: light (alpha 0) adds, smoke lays over.
-                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                depth: (false, GreaterEqual),
-                cull: None,
-            },
-        );
-        // Sparks that fade into what stands behind them read the depth (a
-        // second group), in the pass that only reads it.
-        let soft_layout = crate::pipes::soft_layout(device, quality.msaa > 1);
-        let soft_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("soft"),
-            bind_group_layouts: &[Some(&layout), Some(&soft_layout)],
-            immediate_size: 0,
-        });
-        let soft_sparks = pipeline(
-            &Shared {
-                layout: &soft_pl,
-                ..shared
-            },
-            Kind {
-                entry: ("spark_vs", "spark_soft_fs"),
-                buffers: &[Some(spark.clone())],
-                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                depth: (false, GreaterEqual),
-                cull: None,
-            },
-        );
-        let faint_ssr = pipeline(
-            &Shared {
-                layout: &soft_pl,
-                ..shared
-            },
-            Kind {
-                entry: ("world_vs", "faint_fs"),
-                ..world_kind(Some(wgpu::BlendState::ALPHA_BLENDING), false, None)
-            },
-        );
-        let decals = crate::decals::Decals::new(&Shared {
-            layout: &soft_pl,
-            ..shared
-        });
-        let grass = pipeline(
-            &shared,
-            Kind {
-                entry: ("grass_vs", "grass_fs"),
-                buffers: &[],
-                blend: None,
-                depth: (true, GreaterEqual),
-                cull: None,
-            },
-        );
-        // The sun's shadow: a depth-only pipeline, a cascade a layer.
-        let cascades = quality.cascades.max(1);
-        let shadow_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("shadow"),
-            size: wgpu::Extent3d {
-                width: quality.shadow_size,
-                height: quality.shadow_size,
-                depth_or_array_layers: cascades,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: SHADOW,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let shadow_layers = (0..cascades)
-            .map(|c| {
-                shadow_tex.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2),
-                    base_array_layer: c,
-                    array_layer_count: Some(1),
-                    ..Default::default()
-                })
-            })
-            .collect();
-        let shadow_array = shadow_tex.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        });
-        let caster_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("caster"),
-            entries: &[buffer(
-                0,
-                wgpu::BufferBindingType::Uniform,
-                wgpu::ShaderStages::VERTEX,
-            )],
-        });
-        let casters = (0..cascades)
-            .map(|_| {
-                let buf = make(
-                    device,
-                    "caster",
-                    64,
-                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                );
-                let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("caster"),
-                    layout: &caster_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: buf.as_entire_binding(),
-                    }],
-                });
-                (buf, group)
-            })
-            .collect();
-        let shadow_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("shadow"),
-            source: wgpu::ShaderSource::Wgsl(shaders::shadow().into()),
-        });
-        let shadow_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("shadow"),
-            bind_group_layouts: &[Some(&caster_layout)],
-            immediate_size: 0,
-        });
-        let shadow_pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("shadow"),
-            layout: Some(&shadow_pl),
-            vertex: wgpu::VertexState {
-                module: &shadow_module,
-                entry_point: Some("shadow_vs"),
-                compilation_options: Default::default(),
-                buffers: &[
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: (geo::STRIDE * 4) as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x3],
-                    }),
-                    Some(wgpu::VertexBufferLayout {
-                        array_stride: (INST * 4) as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4],
-                    }),
-                ],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: SHADOW,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                stencil: Default::default(),
-                bias: wgpu::DepthBiasState {
-                    constant: 2,
-                    slope_scale: 2.5,
-                    clamp: 0.0,
-                },
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: None,
-            multiview_mask: None,
-            cache: None,
-        });
         let uniform = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST;
         let vbuf = wgpu::BufferUsages::VERTEX;
         let mut r = Renderer {
             device: device.clone(),
             queue: queue.clone(),
             quality,
+            pipes: Pipes::new(device, quality, &layout),
             layout,
-            opaque,
-            faint,
-            glow,
-            sky,
-            sparks,
-            soft_sparks,
-            soft_layout,
-            faint_ssr,
-            decals,
             scene_samp: device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("scene"),
                 mag_filter: wgpu::FilterMode::Linear,
@@ -349,14 +96,11 @@ impl Renderer {
             }),
             nothing: crate::post::texture(device, "nothing", (1, 1), HDR, 1, true),
             soft_group: None,
-            grass,
             globals: [
                 make(device, "globals", shaders::GLOBALS, uniform),
                 make(device, "globals (view)", shaders::GLOBALS, uniform),
             ],
-            lights: Grow::new(device, "lights", wgpu::BufferUsages::STORAGE),
-            cells: Grow::new(device, "cells", wgpu::BufferUsages::STORAGE),
-            index: Grow::new(device, "index", wgpu::BufferUsages::STORAGE),
+            lists: Lists::new(device),
             groups: None,
             moving: Grow::new(device, "moving", vbuf),
             still: Grow::new(device, "still", vbuf),
@@ -370,17 +114,7 @@ impl Renderer {
             cull: crate::cull::Cull::new(device, laws::CASCADES.len()),
             grid: Grid::default(),
             bytes: Vec::new(),
-            shadow_layers,
-            shadow_array,
-            shadow_cmp: device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("shadow"),
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                compare: Some(wgpu::CompareFunction::LessEqual),
-                ..Default::default()
-            }),
-            shadow_pipe,
-            casters,
+            shadows: Shadows::new(device, quality),
             heights: tiny_texture(device, queue),
             terrain: [0.0; 4],
             water: Mesh(0),
@@ -512,28 +246,6 @@ impl Renderer {
         self.groups = None;
     }
 
-    /// Lay items out as instances; the runs of one mesh each.
-    pub(crate) fn lay(items: &mut [&Item], bytes: &mut Vec<u8>, base: u32) -> Vec<Run> {
-        let mut runs: Vec<Run> = Vec::new();
-        for (k, it) in items.iter().enumerate() {
-            put_f32s(bytes, &it.model);
-            put_f32s(bytes, &it.tint);
-            put_f32s(
-                bytes,
-                &[it.glow, it.rough, it.material as i32 as f32, it.detail],
-            );
-            let i = base + k as u32;
-            match runs.last_mut() {
-                Some(r) if r.mesh == it.mesh => r.at.end = i + 1,
-                _ => runs.push(Run {
-                    mesh: it.mesh,
-                    at: i..i + 1,
-                }),
-            }
-        }
-        runs
-    }
-
     fn grass_side(&self) -> u32 {
         let q = self.quality;
         if q.grass_spacing <= 0.0 || self.terrain[3] < 2.0 {
@@ -563,26 +275,9 @@ impl Renderer {
         self.grid.build(f.lights, [f.cam.eye[0], f.cam.eye[2]]);
         stats.lights = self.grid.lights.len() as u32;
         let mut b = std::mem::take(&mut self.bytes);
-        b.clear();
-        for l in &self.grid.lights {
-            let c = geo::scale(l.c, f.look.glow);
-            put_f32s(
-                &mut b,
-                &[l.p[0], l.p[1], l.p[2], l.r, c[0], c[1], c[2], 0.0],
-            );
-        }
-        let mut grew = self.lights.put(&device, &queue, &b);
-        b.clear();
-        for c in &self.grid.cells {
-            b.extend_from_slice(&c[0].to_le_bytes());
-            b.extend_from_slice(&c[1].to_le_bytes());
-        }
-        grew |= self.cells.put(&device, &queue, &b);
-        b.clear();
-        for i in &self.grid.index {
-            b.extend_from_slice(&i.to_le_bytes());
-        }
-        grew |= self.index.put(&device, &queue, &b);
+        let grew = self
+            .lists
+            .put((&device, &queue), &self.grid, f.look.glow, &mut b);
 
         // The sun's cascades (none when it is down).
         let sun_up = geo::norm(f.look.sun_dir)[1] > 0.02;
@@ -597,11 +292,7 @@ impl Renderer {
             &laws::CASCADES[..count],
             self.quality.shadow_size,
         );
-        for (c, m) in cascades.iter().enumerate() {
-            let mut cb = Vec::with_capacity(64);
-            put_f32s(&mut cb, m);
-            queue.write_buffer(&self.casters[c].0, 0, &cb);
-        }
+        self.shadows.aim(&queue, &cascades);
         queue.write_buffer(
             &self.globals[0],
             0,
@@ -614,40 +305,15 @@ impl Renderer {
         );
         if grew || self.groups.is_none() {
             let group = |globals: &wgpu::Buffer| {
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("engine"),
-                    layout: &self.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: globals.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: self.lights.buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: self.cells.buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: self.index.buf.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: wgpu::BindingResource::TextureView(&self.shadow_array),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: wgpu::BindingResource::Sampler(&self.shadow_cmp),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: wgpu::BindingResource::TextureView(&self.heights),
-                        },
-                    ],
-                })
+                let (lists, shadows) = (&self.lists, &self.shadows);
+                crate::pipes::scene_group(
+                    &device,
+                    &self.layout,
+                    globals,
+                    lists,
+                    shadows,
+                    &self.heights,
+                )
             };
             self.groups = Some([group(&self.globals[0]), group(&self.globals[1])]);
         }
@@ -666,7 +332,7 @@ impl Renderer {
         // Of them, what the view could see (when it has turned).
         if let Some(mut items) = self.cull.view(&f.cam, &self.meshes) {
             b.clear();
-            self.still_runs = Self::lay(&mut items, &mut b, 0);
+            self.still_runs = lay(&mut items, &mut b, 0);
             self.still.put(&device, &queue, &b);
         }
         self.cull
@@ -706,7 +372,7 @@ impl Renderer {
         let mut runs: [Vec<Run>; 4] = Default::default();
         let mut base = 0;
         for p in 0..4 {
-            runs[p] = Self::lay(&mut by[p], &mut b, base);
+            runs[p] = lay(&mut by[p], &mut b, base);
             base += by[p].len() as u32;
         }
         self.moving.put(&device, &queue, &b);
@@ -725,7 +391,7 @@ impl Renderer {
             put_f32s(&mut b, &[s.v[0], s.v[1], s.v[2], shape]);
         }
         self.spark_buf.put(&device, &queue, &b);
-        self.decals.put((&device, &queue), f.decals, &mut b);
+        self.pipes.decals.put((&device, &queue), f.decals, &mut b);
         self.bytes = b;
 
         let Some(groups) = &self.groups else {
@@ -737,80 +403,35 @@ impl Renderer {
         let meshes = &self.meshes;
 
         // The sun's shadow, a cascade at a time.
-        for (c, layer) in self.shadow_layers.iter().enumerate().take(cascades.len()) {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("shadow"),
-                color_attachments: &[],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: layer,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.shadow_pipe);
-            pass.set_bind_group(0, &self.casters[c].1, &[]);
-            let mut s = Stats::default();
-            runs_of(
-                &mut pass,
-                meshes,
-                &self.cull.bufs[c].buf,
-                &self.cull.runs[c],
-                &mut s,
-            );
-            runs_of(
-                &mut pass,
-                meshes,
-                &self.cull.moving_bufs[c].buf,
-                &self.cull.moving_runs[c],
-                &mut s,
-            );
-            stats.draws += s.draws;
-            stats.shadow[c.min(2)] = s.triangles;
-        }
+        self.shadows
+            .record(encoder, &self.cull, meshes, cascades.len(), &mut stats);
 
         // The scene: what is solid, then (once it is occluded, if it is)
         // what is see-through or glows.
         let split = self.post.occludes();
         if split && self.soft_group.as_ref().is_none_or(|g| g.1 != size) {
-            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("soft"),
-                layout: &self.soft_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&t.depth),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(
-                            t.resolve.as_ref().unwrap_or(&self.nothing),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.scene_samp),
-                    },
-                ],
-            });
+            let scene = t.resolve.as_ref().unwrap_or(&self.nothing);
+            let group = crate::pipes::soft_group(
+                &device,
+                &self.pipes.soft_layout,
+                &t.depth,
+                scene,
+                &self.scene_samp,
+            );
             self.soft_group = Some((group, size));
         }
         let soft = self.soft_group.as_ref().filter(|_| split).map(|g| &g.0);
         let marks = soft.filter(|_| !f.decals.is_empty());
         // The sea mirrors the picture so far (resolved into a copy first).
         let ssr = split && self.quality.ssr > 0 && t.resolve.is_some();
+        let pipes = &self.pipes;
         let lit = |pass: &mut wgpu::RenderPass, stats: &mut Stats| {
             match soft.filter(|_| ssr) {
                 Some(group) => {
-                    pass.set_pipeline(&self.faint_ssr);
+                    pass.set_pipeline(&pipes.faint_ssr);
                     pass.set_bind_group(1, group, &[]);
                 }
-                None => pass.set_pipeline(&self.faint),
+                None => pass.set_pipeline(&pipes.faint),
             }
             runs_of(
                 pass,
@@ -819,7 +440,7 @@ impl Renderer {
                 &runs[Pass::Faint as usize],
                 stats,
             );
-            pass.set_pipeline(&self.glow);
+            pass.set_pipeline(&pipes.glow);
             runs_of(
                 pass,
                 meshes,
@@ -830,10 +451,10 @@ impl Renderer {
             if !f.sparks.is_empty() {
                 match soft {
                     Some(group) => {
-                        pass.set_pipeline(&self.soft_sparks);
+                        pass.set_pipeline(&pipes.soft_sparks);
                         pass.set_bind_group(1, group, &[]);
                     }
-                    None => pass.set_pipeline(&self.sparks),
+                    None => pass.set_pipeline(&pipes.sparks),
                 }
                 pass.set_vertex_buffer(0, self.spark_buf.buf.slice(..));
                 pass.draw(0..6, 0..f.sparks.len() as u32);
@@ -843,10 +464,10 @@ impl Renderer {
         {
             let mut pass = t.pass(encoder, "world", Some(f.look.horizon), (true, true), false);
             pass.set_bind_group(0, &groups[0], &[]);
-            pass.set_pipeline(&self.sky);
+            pass.set_pipeline(&pipes.sky);
             pass.draw(0..3, 0..1);
             stats.draws += 1;
-            pass.set_pipeline(&self.opaque);
+            pass.set_pipeline(&pipes.opaque);
             runs_of(
                 &mut pass,
                 meshes,
@@ -856,13 +477,13 @@ impl Renderer {
             );
             let side = self.grass_side();
             if side > 0 {
-                pass.set_pipeline(&self.grass);
+                pass.set_pipeline(&pipes.grass);
                 pass.draw(0..9, 0..side * side);
                 stats.draws += 1;
                 stats.grass = side * side;
             }
             if marks.is_none() {
-                pass.set_pipeline(&self.opaque);
+                pass.set_pipeline(&pipes.opaque);
                 runs_of(
                     &mut pass,
                     meshes,
@@ -881,11 +502,11 @@ impl Renderer {
             {
                 let mut pass = t.pass(encoder, "marks", None, (false, false), false);
                 pass.set_bind_group(0, &groups[0], &[]);
-                self.decals.draw(&mut pass, group, &mut stats);
+                pipes.decals.draw(&mut pass, group, &mut stats);
             }
             let mut pass = t.pass(encoder, "moving", None, (false, true), false);
             pass.set_bind_group(0, &groups[0], &[]);
-            pass.set_pipeline(&self.opaque);
+            pass.set_pipeline(&pipes.opaque);
             runs_of(
                 &mut pass,
                 meshes,
@@ -908,7 +529,7 @@ impl Renderer {
         {
             let mut pass = t.pass(encoder, "view", None, (true, false), true);
             pass.set_bind_group(0, &groups[1], &[]);
-            pass.set_pipeline(&self.opaque);
+            pass.set_pipeline(&pipes.opaque);
             runs_of(
                 &mut pass,
                 meshes,

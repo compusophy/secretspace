@@ -4,6 +4,8 @@
 
 use gpu::wgpu;
 
+use crate::buffers::bytes;
+use crate::fullscreen;
 use crate::post::texture;
 use crate::{geo, laws, shaders, Camera, Look};
 
@@ -51,36 +53,14 @@ impl Shafts {
             label: Some("shafts"),
             source: wgpu::ShaderSource::Wgsl(shaders::shafts::shafts(msaa > 1).into()),
         });
-        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("shafts"),
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("shafts"),
-            layout: Some(&pl),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("shafts_vs"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("shafts_fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: SHAFT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pipe = fullscreen::pipeline(
+            device,
+            &[&layout],
+            &module,
+            ("shafts_vs", "shafts_fs"),
+            SHAFT,
+            None,
+        );
         Shafts {
             layout,
             pipe,
@@ -165,24 +145,9 @@ impl Shafts {
             q.0 as f32,
             q.1 as f32,
         ];
-        let bytes: Vec<u8> = u.iter().flat_map(|f| f.to_le_bytes()).collect();
-        queue.write_buffer(&self.buf, 0, &bytes);
-        let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("shafts"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
+        queue.write_buffer(&self.buf, 0, &bytes(&u));
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        let mut rp = fullscreen::pass(encoder, "shafts", view, clear);
         rp.set_pipeline(&self.pipe);
         rp.set_bind_group(0, group, &[]);
         rp.draw(0..3, 0..1);

@@ -20,6 +20,7 @@ mod buffers;
 mod cull;
 mod decals;
 mod draw;
+mod fullscreen;
 mod globals;
 mod pipes;
 mod post;

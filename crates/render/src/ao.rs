@@ -5,6 +5,8 @@
 
 use gpu::wgpu;
 
+use crate::buffers::bytes;
+use crate::fullscreen;
 use crate::post::{texture, HDR};
 use crate::{laws, shaders, Camera};
 
@@ -71,36 +73,8 @@ impl Ao {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipe = |entry: &str, format, count, blend| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(entry),
-                layout: Some(&pl),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("ao_vs"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count,
-                    ..Default::default()
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(entry),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
+        let half =
+            |entry| fullscreen::pipeline(device, &[&layout], &module, ("ao_vs", entry), AO, None);
         // The picture times the occlusion; its alpha kept.
         let times = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -114,11 +88,39 @@ impl Ao {
                 operation: wgpu::BlendOperation::Add,
             },
         };
+        let apply = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("apply_fs"),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("ao_vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: msaa,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("apply_fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: HDR,
+                    blend: Some(times),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Ao {
             ways,
-            ao: pipe("ao_fs", AO, 1, None),
-            blur: pipe("blur_fs", AO, 1, None),
-            apply: pipe("apply_fs", HDR, msaa, Some(times)),
+            ao: half("ao_fs"),
+            blur: half("blur_fs"),
+            apply,
             layout,
             buf: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("ao"),
@@ -204,8 +206,7 @@ impl Ao {
             0.0,
             0.0,
         ];
-        let bytes: Vec<u8> = k.iter().flat_map(|f| f.to_le_bytes()).collect();
-        queue.write_buffer(&self.buf, 0, &bytes);
+        queue.write_buffer(&self.buf, 0, &bytes(&k));
         let steps = [
             (
                 &views[0],
@@ -222,22 +223,7 @@ impl Ao {
             (color, &self.apply, &groups[0], wgpu::LoadOp::Load),
         ];
         for (view, pipe, group, load) in steps {
-            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("ao"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let mut rp = fullscreen::pass(encoder, "ao", view, load);
             rp.set_pipeline(pipe);
             rp.set_bind_group(0, group, &[]);
             rp.draw(0..3, 0..1);

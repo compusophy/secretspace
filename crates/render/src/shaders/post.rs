@@ -137,8 +137,6 @@ fn finish_fs(i: Out) -> @location(0) vec4<f32> {
     c = graded(srgb(c));
     // Under a step of the screen's, from pixel to pixel, so gradients
     // become a fine grain instead of bands.
-    let px = i.clip.xy;
-    let n = fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
-    return vec4<f32>(c + (n - 0.5) / 255.0, 1.0);
+    return vec4<f32>(c + (ign(i.clip.xy) - 0.5) / 255.0, 1.0);
 }
 "#;

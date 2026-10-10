@@ -56,13 +56,6 @@ fn alike(z: f32, z0: f32) -> f32 {
     return 1.0 / (1.0 + rel * 60.0);
 }
 
-/// A number in 0..1 that shifts from pixel to pixel with little pattern
-/// (interleaved gradient noise), so the blur evens it out.
-fn noise(px: vec2<i32>) -> f32 {
-    let v = vec2<f32>(px);
-    return fract(52.9829189 * fract(0.06711056 * v.x + 0.00583715 * v.y));
-}
-
 @fragment
 fn ao_fs(i: Out) -> @location(0) vec4<f32> {
     let half = vec2<i32>(i.clip.xy);
@@ -92,8 +85,9 @@ fn ao_fs(i: Out) -> @location(0) vec4<f32> {
     // Out across the screen each way, a few steps each: whatever rises
     // over the surface within reach shades it, the more the steeper and
     // the nearer.
-    let turn = noise(half);
-    let jitter = noise(half + vec2<i32>(7, 3));
+    // Turned and stepped from pixel to pixel, so the blur evens it out.
+    let turn = ign(vec2<f32>(half));
+    let jitter = ign(vec2<f32>(half + vec2<i32>(7, 3)));
     let ways = max(i32(ao.k.z), 1);
     let reach2 = ao.proj.w * ao.proj.w;
     var shut = 0.0;
@@ -163,12 +157,5 @@ fn apply_fs(i: Out) -> @location(0) vec4<f32> {
 
 /// The AO module, for a depth that is many-sampled (`msaa`) or not.
 pub fn ao(msaa: bool) -> String {
-    AO.replace(
-        "DEPTH_TYPE",
-        if msaa {
-            "texture_depth_multisampled_2d"
-        } else {
-            "texture_depth_2d"
-        },
-    )
+    format!("{AO}{}", super::IGN).replace("DEPTH_TYPE", super::depth_type(msaa))
 }

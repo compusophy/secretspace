@@ -1,11 +1,18 @@
 //! The renderer's buffers: ones that grow to fit, meshes on the GPU, runs
-//! of instances drawn a mesh at a time, and the texture that stands in
-//! for heights when there is no terrain.
+//! of instances drawn a mesh at a time (and how an item is laid out as
+//! one), and the texture that stands in for heights when there is no
+//! terrain.
 
 use crate::draw::Stats;
-use crate::Mesh;
+use crate::{Item, Mesh};
 use gpu::wgpu;
 use std::ops::Range;
+
+/// Floats an instance: a model matrix, a tint, (glow, rough, material,
+/// detail).
+pub const INST: usize = 24;
+/// Floats a spark: position and size, colour, its streak and shape.
+pub const SPARK: usize = 12;
 
 /// A buffer that grows to fit what is put in it.
 pub struct Grow {
@@ -61,6 +68,13 @@ pub fn put_f32s(out: &mut Vec<u8>, v: &[f32]) {
     }
 }
 
+/// Floats as the bytes a buffer wants (little-endian, as WebGPU is).
+pub fn bytes(v: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(v.len() * 4);
+    put_f32s(&mut out, v);
+    out
+}
+
 pub struct MeshBuf {
     pub v: wgpu::Buffer,
     pub i: wgpu::Buffer,
@@ -73,6 +87,29 @@ pub struct MeshBuf {
 pub struct Run {
     pub mesh: Mesh,
     pub at: Range<u32>,
+}
+
+/// Lay items out as instances (after `base` already laid); the runs of
+/// one mesh each.
+pub fn lay(items: &mut [&Item], bytes: &mut Vec<u8>, base: u32) -> Vec<Run> {
+    let mut runs: Vec<Run> = Vec::new();
+    for (k, it) in items.iter().enumerate() {
+        put_f32s(bytes, &it.model);
+        put_f32s(bytes, &it.tint);
+        put_f32s(
+            bytes,
+            &[it.glow, it.rough, it.material as i32 as f32, it.detail],
+        );
+        let i = base + k as u32;
+        match runs.last_mut() {
+            Some(r) if r.mesh == it.mesh => r.at.end = i + 1,
+            _ => runs.push(Run {
+                mesh: it.mesh,
+                at: i..i + 1,
+            }),
+        }
+    }
+    runs
 }
 
 /// Draw runs of instances, each of one mesh.

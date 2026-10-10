@@ -3,8 +3,10 @@
 //! lights near it (hundreds in a scene, a few a pixel). Built on the CPU
 //! each frame; Phase 3 moves it to froxels in compute.
 
+use crate::buffers::{put_f32s, Grow};
 use crate::laws::{GRID_CELL, GRID_CELLS, MAX_PER_CELL};
-use crate::Light;
+use crate::{geo, Light};
+use gpu::wgpu;
 
 #[derive(Clone, Debug, Default)]
 pub struct Grid {
@@ -94,6 +96,53 @@ impl Grid {
         }
         let [s, k] = self.cells[(cz as u32 * self.n + cx as u32) as usize];
         &self.index[s as usize..(s + k) as usize]
+    }
+}
+
+/// The grid on the GPU (the scene's group reads it): the lights, each
+/// cell's span of the index, the index.
+pub(crate) struct Lists {
+    pub lights: Grow,
+    pub cells: Grow,
+    pub index: Grow,
+}
+
+impl Lists {
+    pub fn new(device: &wgpu::Device) -> Lists {
+        let storage = wgpu::BufferUsages::STORAGE;
+        Lists {
+            lights: Grow::new(device, "lights", storage),
+            cells: Grow::new(device, "cells", storage),
+            index: Grow::new(device, "index", storage),
+        }
+    }
+
+    /// Put `grid` in, each light `glow` as bright (`b` the bytes to lay
+    /// them in); whether a buffer was replaced (the group made again).
+    pub fn put(
+        &mut self,
+        (device, queue): (&wgpu::Device, &wgpu::Queue),
+        grid: &Grid,
+        glow: f32,
+        b: &mut Vec<u8>,
+    ) -> bool {
+        b.clear();
+        for l in &grid.lights {
+            let c = geo::scale(l.c, glow);
+            put_f32s(b, &[l.p[0], l.p[1], l.p[2], l.r, c[0], c[1], c[2], 0.0]);
+        }
+        let mut grew = self.lights.put(device, queue, b);
+        b.clear();
+        for c in &grid.cells {
+            b.extend_from_slice(&c[0].to_le_bytes());
+            b.extend_from_slice(&c[1].to_le_bytes());
+        }
+        grew |= self.cells.put(device, queue, b);
+        b.clear();
+        for i in &grid.index {
+            b.extend_from_slice(&i.to_le_bytes());
+        }
+        grew | self.index.put(device, queue, b)
     }
 }
 

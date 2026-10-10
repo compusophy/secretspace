@@ -8,8 +8,7 @@
 //! meshes. Laid out again only when a box has
 //! moved more than the slack, the sun has turned, or the statics changed.
 
-use crate::buffers::{MeshBuf, Run};
-use crate::draw::Renderer;
+use crate::buffers::{lay, MeshBuf, Run};
 use crate::geo::{self, V3};
 use crate::{Camera, Item, M4};
 use gpu::wgpu;
@@ -126,7 +125,7 @@ impl Cull {
             let from = if c == 0 { &self.near } else { &self.coarse };
             let mut items: Vec<&Item> = from.iter().filter(|i| reaches(i, m, meshes)).collect();
             bytes.clear();
-            self.runs[c] = Renderer::lay(&mut items, bytes, 0);
+            self.runs[c] = lay(&mut items, bytes, 0);
             self.bufs[c].put(device, queue, bytes);
         }
     }
@@ -155,7 +154,7 @@ impl Cull {
             list.sort_by_key(|i| i.mesh);
             let mut refs: Vec<&Item> = list.iter().collect();
             bytes.clear();
-            self.moving_runs[c] = Renderer::lay(&mut refs, bytes, 0);
+            self.moving_runs[c] = lay(&mut refs, bytes, 0);
             self.moving_bufs[c].put(device, queue, bytes);
         }
     }

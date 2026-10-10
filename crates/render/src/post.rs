@@ -7,6 +7,8 @@
 use gpu::wgpu;
 
 use crate::ao::Ao;
+use crate::buffers::bytes;
+use crate::fullscreen;
 use crate::shafts::{Shafts, SHAFT};
 use crate::{shaders, Camera, Look};
 
@@ -143,8 +145,7 @@ fn uniform(device: &wgpu::Device, queue: &wgpu::Queue, v: [f32; 8]) -> wgpu::Buf
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let bytes: Vec<u8> = v.iter().flat_map(|f| f.to_le_bytes()).collect();
-    queue.write_buffer(&buf, 0, &bytes);
+    queue.write_buffer(&buf, 0, &bytes(&v));
     buf
 }
 
@@ -207,36 +208,14 @@ impl Post {
             source: wgpu::ShaderSource::Wgsl(shaders::post().into()),
         });
         let pipe = |layout: &wgpu::BindGroupLayout, entry: &str, format, blend| {
-            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(entry),
-                bind_group_layouts: &[Some(layout)],
-                immediate_size: 0,
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(entry),
-                layout: Some(&pl),
-                vertex: wgpu::VertexState {
-                    module: &module,
-                    entry_point: Some("post_vs"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &module,
-                    entry_point: Some(entry),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
+            fullscreen::pipeline(
+                device,
+                &[layout],
+                &module,
+                ("post_vs", entry),
+                format,
+                blend,
+            )
         };
         let add = wgpu::BlendState {
             color: wgpu::BlendComponent {
@@ -474,8 +453,7 @@ impl Post {
             look.vignette,
             1.0,
         ];
-        let bytes: Vec<u8> = k.iter().flat_map(|f| f.to_le_bytes()).collect();
-        queue.write_buffer(&self.finish_buf, 0, &bytes);
+        queue.write_buffer(&self.finish_buf, 0, &bytes(&k));
         let g = &look.grade;
         let grade = [
             g.lift[0],
@@ -491,48 +469,28 @@ impl Post {
             g.gain[2],
             0.0,
         ];
-        let bytes: Vec<u8> = grade.iter().flat_map(|f| f.to_le_bytes()).collect();
-        queue.write_buffer(&self.grade_buf, 0, &bytes);
+        queue.write_buffer(&self.grade_buf, 0, &bytes(&grade));
         for p in &self.passes {
             let load = if p.up {
                 wgpu::LoadOp::Load
             } else {
                 wgpu::LoadOp::Clear(wgpu::Color::BLACK)
             };
-            let mut rp = begin(encoder, &self.chain[p.target], load);
+            let mut rp = fullscreen::pass(encoder, "bloom", &self.chain[p.target], load);
             rp.set_pipeline(if p.up { &self.up } else { &self.down });
             rp.set_bind_group(0, &p.group, &[]);
             rp.draw(0..3, 0..1);
         }
         if let Some(group) = &self.finish_group {
-            let mut rp = begin(encoder, out, wgpu::LoadOp::Clear(wgpu::Color::BLACK));
+            let mut rp = fullscreen::pass(
+                encoder,
+                "finish",
+                out,
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            );
             rp.set_pipeline(&self.finish);
             rp.set_bind_group(0, group, &[]);
             rp.draw(0..3, 0..1);
         }
     }
-}
-
-/// A pass drawing into one view.
-fn begin<'a>(
-    encoder: &'a mut wgpu::CommandEncoder,
-    view: &wgpu::TextureView,
-    load: wgpu::LoadOp<wgpu::Color>,
-) -> wgpu::RenderPass<'a> {
-    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("post"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load,
-                store: wgpu::StoreOp::Store,
-            },
-        })],
-        depth_stencil_attachment: None,
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        multiview_mask: None,
-    })
 }
