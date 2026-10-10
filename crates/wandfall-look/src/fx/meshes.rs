@@ -2,7 +2,7 @@
 //! a soft ring (bright a little inside its edge, fading both ways), an
 //! arcane circle (rings, ticks, runes and a six-pointed star), a cut ice
 //! crystal, a smooth beam (in lengths, joined), a ray drawn to a point at
-//! each end, and a shaft of light fading up.
+//! each end, a shaft of light fading up, and a pillar fading at its top.
 
 use std::f32::consts::{PI, TAU};
 
@@ -160,6 +160,13 @@ pub fn shaft() -> Geo {
     ])
 }
 
+/// A pillar of light a metre up y, a unit across: bright most of its
+/// height, fading to nothing over its top third (so a cube's pillar
+/// has no flat end).
+pub fn pillar() -> Geo {
+    rings(&[(1.0, 0.0, 1.0), (1.0, 0.7, 1.0), (1.0, 1.0, 0.0)])
+}
+
 /// Rings up y, each (radius, height, brightness), joined round, open at
 /// the ends.
 fn rings(list: &[(f32, f32, f32)]) -> Geo {
@@ -199,6 +206,7 @@ mod tests {
             ("beam", beam()),
             ("ray", ray()),
             ("shaft", shaft()),
+            ("pillar", pillar()),
         ] {
             assert!(!g.is_empty(), "{name}");
             assert!(g.triangles() < 4_000, "{name}: {}", g.triangles());
@@ -209,11 +217,20 @@ mod tests {
     fn a_shaft_fades_to_nothing_at_its_top_and_a_ray_comes_to_points() {
         // Each vertex: place (3), facing (3), colour (3), glow.
         let verts = |g: &Geo| g.v.chunks(10).map(|v| v.to_vec()).collect::<Vec<_>>();
-        for v in verts(&shaft()) {
+        for v in verts(&shaft()).into_iter().chain(verts(&pillar())) {
             if v[1] > 0.99 {
                 assert_eq!((v[6], v[9]), (0.0, 0.0));
             }
         }
+        // A cube's pillar is bright most of its height.
+        let lit = |g: &Geo, y: f32| {
+            verts(g)
+                .iter()
+                .filter(|v| (v[1] - y).abs() < 1e-3)
+                .map(|v| v[9])
+                .fold(0.0, f32::max)
+        };
+        assert!(lit(&pillar(), 0.7) > 0.95 && lit(&shaft(), 0.35) < 0.5);
         for v in verts(&ray()) {
             if v[1] < 0.01 || v[1] > 0.99 {
                 assert!(v[0].hypot(v[2]) < 0.35);

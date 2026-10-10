@@ -8,8 +8,8 @@ use wandfall::laws::{
 };
 
 use super::{
-    beam, colour, dir, energy, glint, glow, light, puffs, ring, rnd, runes, shaft, spray, wave,
-    Draw, Ray, Spray, WHITE,
+    beam, colour, dir, energy, glint, glow, light, puffs, rim, ring, rnd, runes, shaft, spray,
+    wave, Draw, Ray, Spray, WHITE,
 };
 use crate::look::Look;
 
@@ -150,7 +150,7 @@ pub fn mark(look: &Look, d: &mut Draw, at: V3, age: f32, seed: i32) {
     let r = LIGHTNING_RADIUS;
     let pulse = 0.6 + 0.4 * (age / 50.0).sin();
     runes(look, d, at, r, (c, 0.9 * pulse), age / 400.0);
-    wave(
+    rim(
         look,
         d,
         at,
@@ -279,7 +279,7 @@ pub fn strike(look: &Look, d: &mut Draw, at: V3, t: f32, seed: i32) {
     let r = LIGHTNING_RADIUS;
     runes(look, d, at, r, (mix(c, WHITE, 0.3), f * f), t);
     let reach = r * (0.4 + 0.6 * (t / 0.25).min(1.0).sqrt());
-    wave(look, d, at, reach, mix(c, WHITE, 0.3), f);
+    rim(look, d, at, reach, mix(c, WHITE, 0.3), f);
     let floor = [at[0], at[1] + 0.08, at[2]];
     spray(
         d,

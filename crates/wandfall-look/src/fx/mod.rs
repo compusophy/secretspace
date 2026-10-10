@@ -313,6 +313,12 @@ fn shaft(look: &Look, d: &mut Draw, ab: (V3, V3), r: f32, c: (V3, f32), ray: Ray
     beam_of(look.shaft, d, ab, r, c, ray);
 }
 
+/// A line of light up from `a` to `b`, `r` thick: bright most of the
+/// way, fading out at its top (a cube's pillar's core).
+fn pillar(look: &Look, d: &mut Draw, ab: (V3, V3), r: f32, c: (V3, f32), ray: Ray) {
+    beam_of(look.pillar, d, ab, r, c, ray);
+}
+
 fn beam_of(mesh: Mesh, d: &mut Draw, (a, b): (V3, V3), r: f32, (c, alpha): (V3, f32), ray: Ray) {
     let along = geo::sub(b, a);
     let len = geo::dot(along, along).sqrt();
@@ -520,9 +526,10 @@ const LOOT_FAINT: f32 = 90.0;
 const LOOT_SEEN: f32 = 140.0;
 
 /// Spell cubes (their icon on every face, under a pillar of their light,
-/// taller by rank, a circle of runes turning under them). The pillars
-/// fade with distance, so far ones do not stripe the skyline; a rank III
-/// cube's stands out, wider, a gold core in it, pulsing.
+/// taller by rank, a bright core in it, a circle of runes turning under
+/// them). Near ones stand out whole; the pillars fade with distance, so
+/// far ones do not stripe the skyline; a rank III cube's stands out,
+/// wider, its core gold, pulsing.
 pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
     for &(id, s, rank, p) in &l.scrolls {
         let far = ((p[0] - eye[0]).powi(2) + (p[2] - eye[2]).powi(2)).sqrt();
@@ -557,12 +564,15 @@ pub fn loot(look: &Look, d: &mut Draw, l: &Loot, t: f32, eye: V3) {
         } else {
             1.0
         };
-        let pillar = ([at[0], at[1] + k * 0.9, at[2]], [p[0], p[1] + top, p[2]]);
+        let up = ([at[0], at[1] + k * 0.9, at[2]], [p[0], p[1] + top, p[2]]);
         let wide = (0.05 + 0.02 * rank as f32) * if best { 2.0 } else { 1.0 };
-        shaft(look, d, pillar, wide, (c, 0.3 * fade * pulse), Ray::Halo);
-        if best {
-            shaft(look, d, pillar, 0.025, (GOLD, fade * pulse), Ray::Core);
-        }
+        beam(look, d, up, wide, (c, 0.35 * fade * pulse), Ray::Halo);
+        let core = if best {
+            (GOLD, fade * pulse)
+        } else {
+            (mix(c, WHITE, 0.35), 0.6 * fade)
+        };
+        pillar(look, d, up, 0.02, core, Ray::Core);
         let floor = [p[0], p[1] + 0.06, p[2]];
         sigil(look, d, floor, UP, 0.62, (c, 0.55), t * 0.4);
         if rank > 1 {
@@ -615,32 +625,58 @@ pub fn aim_ring(look: &Look, d: &mut Draw, at: V3, t: f32) {
     runes(look, d, at, LIGHTNING_RADIUS, (c, pulse), t * 0.5);
 }
 
-/// A circle of runes lying on the ground about `at`, `r` across, turned
-/// by `turn`: laid on it where the renderer lays decals (taking to a
-/// slope, a step, a deck), else a flat circle over the grass.
+/// How much of a warning circle is laid on the ground under the one
+/// drawn over the grass (where the renderer lays decals).
+const LAID: f32 = 0.6;
+
+/// A circle of runes on the ground about `at`, `r` across, turned by
+/// `turn`, telling where something will strike: over the grass, so it
+/// reads from a wizard's own eyes (laid on the ground alone, the grass
+/// hides it), and laid on the ground under it too where the renderer
+/// lays decals, so it takes to a slope, a step, a deck.
 fn runes(look: &Look, d: &mut Draw, at: V3, r: f32, (c, a): (V3, f32), turn: f32) {
-    if !look.marks {
-        sigil(look, d, [at[0], at[1] + 0.06, at[2]], UP, r, (c, a), turn);
-    } else if r > 0.01 && a > 0.0 {
+    if r <= 0.01 || a <= 0.0 {
+        return;
+    }
+    sigil(look, d, [at[0], at[1] + 0.08, at[2]], UP, r, (c, a), turn);
+    if look.marks {
         d.decals.push(Decal {
             p: at,
             r,
             depth: lay_depth(r),
             yaw: turn,
-            c: [c[0], c[1], c[2], a],
+            c: [c[0], c[1], c[2], a * LAID],
             mark: Mark::Runes,
             seed: 0.37,
         });
     }
 }
 
-/// A ring of light rushing out along the ground about `at`, `r` across:
-/// laid on it as a decal where the renderer lays them (nothing in the
-/// air, all of it on a slope), else a soft ring lying flat.
+/// A ring of light on the ground about `at`, `r` across, telling the
+/// edge of where something will strike: as `runes` are, over the grass
+/// and laid under it.
+fn rim(look: &Look, d: &mut Draw, at: V3, r: f32, c: V3, a: f32) {
+    ring(look, d, [at[0], at[1] + 0.08, at[2]], r, c, a, 0.0);
+    if look.marks {
+        lay_ring(d, at, r, c, a * LAID);
+    }
+}
+
+/// A ring of light rushing out along the ground about `at`, `r` across
+/// (a shockwave, dust, a fall: nothing to dodge): laid on it as a decal
+/// where the renderer lays them (nothing in the air, all of it on a
+/// slope), else a soft ring lying flat.
 fn wave(look: &Look, d: &mut Draw, at: V3, r: f32, c: V3, a: f32) {
-    if !look.marks {
+    if look.marks {
+        lay_ring(d, at, r, c, a);
+    } else {
         ring(look, d, at, r, c, a, 0.0);
-    } else if r > 0.01 && a > 0.0 {
+    }
+}
+
+/// A soft ring of light laid on the ground about `at`, `r` across.
+fn lay_ring(d: &mut Draw, at: V3, r: f32, c: V3, a: f32) {
+    if r > 0.01 && a > 0.0 {
         d.decals.push(Decal {
             p: at,
             // The decal's ring is brightest a little in from its edge.

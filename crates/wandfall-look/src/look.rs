@@ -29,13 +29,15 @@ pub struct Look {
     pub wall: Mesh,
     /// A soft flat ring a metre across (shockwaves); an arcane circle;
     /// an ice crystal a metre along x; a beam, a ray drawn to a point at
-    /// each end, a shaft fading up, each a metre up y (`fx::meshes`).
+    /// each end, a shaft fading up, a pillar fading at its top, each a
+    /// metre up y (`fx::meshes`).
     pub ring: Mesh,
     pub sigil: Mesh,
     pub crystal: Mesh,
     pub beam: Mesh,
     pub ray: Mesh,
     pub shaft: Mesh,
+    pub pillar: Mesh,
     /// A spell cube a unit across for each spell, its icon on every face.
     pub cubes: Vec<Mesh>,
     /// The island (`land`), and its ground for what lies on it.
@@ -142,6 +144,7 @@ impl Look {
             beam: r.mesh(&fx::meshes::beam()),
             ray: r.mesh(&fx::meshes::ray()),
             shaft: r.mesh(&fx::meshes::shaft()),
+            pillar: r.mesh(&fx::meshes::pillar()),
             wall: one(r, |g| {
                 g.column([0.0; 3], 64, (1.0, 1.0), 1.0, 0.0, STORM, 0.5, false);
             }),
@@ -161,6 +164,7 @@ impl Look {
             self.beam,
             self.ray,
             self.shaft,
+            self.pillar,
         ];
         for m in all.into_iter().chain(self.land.held).chain(self.cubes) {
             r.free(m);

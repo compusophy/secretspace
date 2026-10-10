@@ -5,7 +5,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 
-use wandfall::laws::{spell, CROUCH_EYE, EYE, TICK_HZ};
+use wandfall::laws::{spell, CAST_AHEAD, CROUCH_EYE, EYE, TICK_HZ};
 use wandfall::proto::{self, flag, Ev, Frame, Loot, Seen};
 use wandfall::trig;
 use wandfall::world::STORM;
@@ -30,9 +30,6 @@ const CATCH_UP: f64 = 150.0;
 /// Further than this between two frames a tick apart (m) is a leap (a
 /// blink, a respawn, the drop), not a run: drawn there, not slid there.
 const LEAP: f32 = 4.0;
-/// How far ahead of its eyes a spell leaves the wand (m), as
-/// `spells::cast` sends it.
-const CAST_AHEAD: f32 = 0.6;
 
 /// A line in the feed: words, or a knockout (who, with what, whom).
 #[derive(Clone, Debug)]

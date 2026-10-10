@@ -99,7 +99,7 @@ pub fn cast(w: &mut World, k: usize, slot: usize, ev: &mut Vec<Event>) {
     let d = trig::look(yaw, pitch);
     let pw = power(s.spell, s.rank);
     let hit = level_scale(level, pw);
-    let from = ahead(eye, d, 0.6);
+    let from = ahead(eye, d, CAST_AHEAD);
     let bolt = |d: [f32; 3], speed: f32, life| Bolt {
         id: 0,
         by,
