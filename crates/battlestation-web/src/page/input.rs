@@ -88,7 +88,7 @@ pub(super) fn listen(heard: &Rc<RefCell<Heard>>, canvas: &HtmlCanvasElement) {
         if let Some(w) = e.dyn_ref::<WheelEvent>() {
             e.prevent_default();
             let mut h = h.borrow_mut();
-            h.wheel += w.delta_y() as f32;
+            h.wheel += crate::wheel_turn(w.delta_x(), w.delta_y(), w.shift_key()) as f32;
             h.wheel_shift |= w.shift_key();
         }
     });
@@ -121,10 +121,12 @@ pub(super) fn input(p: &mut Page, now: f64) {
         pointer(p, h, now);
     }
     // The wheel scrolls the computer where it takes it; elsewhere (or
-    // with Shift) it leans you in and out.
+    // with Shift) it leans you in and out, and leaned all the way, on into
+    // the screen (`wheel_to_screen`: a desk on it leans in turn).
     if heard.wheel != 0.0 && !p.meta.is_open() {
+        let to_screen = crate::wheel_to_screen(heard.wheel_shift, heard.wheel, p.lean_to);
         let taken = match &p.os {
-            Some(o) if p.on_os() && !heard.wheel_shift => o.wheel(p.screen.cursor, heard.wheel),
+            Some(o) if p.on_os() && to_screen => o.wheel(p.screen.cursor, heard.wheel),
             _ => false,
         };
         if !taken {

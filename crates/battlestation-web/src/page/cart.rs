@@ -45,7 +45,7 @@ pub fn wheel(_x: f64, _y: f64, dy: f64) -> bool {
 }
 
 pub fn key(down: bool, code: &str, key: &str, mods: u8, repeat: bool) -> bool {
-    SHIFT.with(|s| s.set(mods & kit::cart::SHIFT != 0));
+    SHIFT.with(|s| s.set(crate::shift_after(code, down, mods)));
     let Some(h) = heard() else {
         return false;
     };
