@@ -14,6 +14,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::{sound, Hooks};
 
+pub(crate) mod cart;
 mod input;
 mod os;
 mod out;
@@ -170,7 +171,8 @@ impl Page {
                 input::listen(&heard, c);
                 kit::input::Hands::attach(c)
             }
-            None => kit::input::Hands::detached(),
+            // Hosted: the host's keys and wheel come by `cart`.
+            None => kit::cart::hands(),
         };
         let now = kit::now();
         let lean = hooks.lean.unwrap_or(0.0);
@@ -221,8 +223,11 @@ impl Page {
         // monitor, where yours points); over the menu it shows.
         let cursor = if playing { "none" } else { "default" };
         if cursor != self.cursor {
-            if let Some(c) = self.out.canvas() {
-                let _ = c.style().set_property("cursor", cursor);
+            match self.out.canvas() {
+                Some(c) => {
+                    let _ = c.style().set_property("cursor", cursor);
+                }
+                None => kit::cart::set_cursor(cursor),
             }
             self.cursor = cursor;
         }
@@ -339,7 +344,12 @@ fn unmark(query: &str) {
     }
 }
 
+/// Why the desk cannot be drawn: on the page, in words; hosted, the
+/// host's to say (`error()`), the host's page untouched.
 fn say(text: &str) {
+    if kit::host::hosted() {
+        return kit::host::fail(text);
+    }
     if let Some(b) = kit::document().body() {
         b.set_inner_html(&format!(
             "<p style=\"color:#f4eede;font:16px sans-serif;padding:24px\">{text}</p>"
@@ -352,7 +362,7 @@ fn say(text: &str) {
 // (the start-guard rule, which scripts/caps.sh holds).
 #[wasm_bindgen]
 pub fn page() {
-    let query = kit::window().location().search().unwrap_or_default();
+    let query = kit::search();
     let hooks = Hooks::read(&query);
     kit::report::on_panic();
     if hooks.os {
@@ -362,43 +372,56 @@ pub fn page() {
             return;
         }
     }
-    wasm_bindgen_futures::spawn_local(async move {
-        if !gpu::offered() {
-            // (`?capture=1` needs it too.)
-            say("battlestation is drawn with WebGPU, which this browser does not offer yet. Chrome, Edge and Safari 26 have it.");
+    wasm_bindgen_futures::spawn_local(boot());
+}
+
+/// Start: WebGPU on the page's canvas (hosted: off screen for the host,
+/// `cart`), the desk, the computer booting, the frame loop.
+async fn boot() {
+    kit::report::on_panic();
+    let hosted = kit::host::hosted();
+    let query = kit::search();
+    let hooks = Hooks::read(&query);
+    if !gpu::offered() {
+        // (`?capture=1` needs it too.)
+        say("battlestation is drawn with WebGPU, which this browser does not offer yet. Chrome, Edge and Safari 26 have it.");
+        return;
+    }
+    let capture = !hosted && crate::param(&query, "capture").is_some_and(|v| v != "0");
+    let out = match Out::open("screen", capture, MIN_SHORT, MAX_DPR).await {
+        Ok(o) => o,
+        // Let go while the device was coming: nothing to say.
+        Err(_) if kit::host::ended() => return,
+        Err(e) => {
+            say(&format!("battlestation could not start WebGPU here ({e})."));
             return;
         }
-        let capture = crate::param(&query, "capture").is_some_and(|v| v != "0");
-        let out = match Out::open("screen", capture, MIN_SHORT, MAX_DPR).await {
-            Ok(o) => o,
-            Err(e) => {
-                say(&format!("battlestation could not start WebGPU here ({e})."));
-                return;
-            }
-        };
-        let page = Page::new(out, hooks, &query);
-        PAGE.with(|p| *p.borrow_mut() = Some(page));
-        // The computer boots in the background, to its welcome.
-        if hooks.os {
-            wasm_bindgen_futures::spawn_local(async {
-                let os = os::mount().await;
-                PAGE.with(|p| {
-                    if let Some(p) = p.borrow_mut().as_mut() {
-                        match os {
-                            Ok(o) => p.os = Some(o),
-                            Err(e) => p.os_said = e,
-                        }
-                    }
-                })
-            });
-        }
-        kit::frames(|now| {
+    };
+    let page = Page::new(out, hooks, &query);
+    PAGE.with(|p| *p.borrow_mut() = Some(page));
+    // The computer boots in the background, to its welcome.
+    if hooks.os {
+        wasm_bindgen_futures::spawn_local(async {
+            let os = os::mount().await;
             PAGE.with(|p| {
                 if let Some(p) = p.borrow_mut().as_mut() {
-                    p.frame(now);
+                    match os {
+                        Ok(o) => p.os = Some(o),
+                        Err(e) => p.os_said = e,
+                    }
                 }
             })
         });
+    }
+    kit::frames(|now| {
+        PAGE.with(|p| {
+            if let Some(p) = p.borrow_mut().as_mut() {
+                p.frame(now);
+            }
+        })
+    });
+    // Hosted, the host says when the surface changes (`cart::resized`).
+    if !hosted {
         kit::on(&kit::window(), "resize", |_| {
             PAGE.with(|p| {
                 if let Some(p) = p.borrow_mut().as_mut() {
@@ -406,5 +429,5 @@ pub fn page() {
                 }
             })
         });
-    });
+    }
 }

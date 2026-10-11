@@ -93,6 +93,10 @@ pub(super) fn frame(p: &mut Page, now: f64, dt: f32) {
     );
     p.out.finish(target);
     p.frames += 1;
+    // The title is the page's (hosted, the host's: left alone).
+    if kit::host::hosted() {
+        return;
+    }
     let doc = kit::document();
     if p.hooks.shot && p.frames == SHOT_AFTER {
         doc.set_title("shot ready");

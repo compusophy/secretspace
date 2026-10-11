@@ -44,6 +44,12 @@ impl Out {
         min_short: f64,
         max_dpr: f64,
     ) -> Result<Out, String> {
+        // Hosted: off screen, each picture onto the host's surface.
+        if kit::host::hosted() {
+            return gpu::Gpu::hosted(min_short, max_dpr)
+                .await
+                .map(|g| Out::Gpu(Box::new(g)));
+        }
         if !capture {
             return gpu::Gpu::new(id, min_short, max_dpr)
                 .await
@@ -98,6 +104,14 @@ impl Out {
         match self {
             Out::Gpu(g) => &g.caps,
             Out::Capture(c) => &c.off.caps,
+        }
+    }
+
+    /// Let the device go now (a host let the cartridge go).
+    pub(super) fn destroy(&self) {
+        match self {
+            Out::Gpu(g) => g.destroy(),
+            Out::Capture(c) => c.off.device.destroy(),
         }
     }
 

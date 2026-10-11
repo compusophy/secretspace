@@ -13,11 +13,42 @@
 //! (metres, degrees: yaw 0 looks north), `?capture=1` draws off screen
 //! and shows it as an image (what a headless browser can photograph),
 //! `?os=0` keeps compusophyOS off the monitor (its own terminal instead).
+//!
+//! Another page may run it as a cartridge (the exported `Cartridge`,
+//! `page/cart.rs`): then the monitor's compusophyOS is a module its host
+//! loaded for it alone (`opts.osModule`, its files at `opts.os`), so the
+//! desk runs inside the OS, and inside itself, each level its own OS.
 
 pub mod sound;
 
 #[cfg(target_arch = "wasm32")]
 mod page;
+
+#[cfg(target_arch = "wasm32")]
+kit::cartridge!(page::cart);
+
+/// The OS's files as a host names them (`opts.os`): an http(s) address,
+/// ending in `/` (one is added); anything else, none.
+pub fn os_base(given: Option<&str>) -> Option<String> {
+    let s = given?.trim();
+    let web = s.starts_with("https://") || s.starts_with("http://");
+    if !web || s.len() > 2048 || s.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(match s.ends_with('/') {
+        true => s.to_string(),
+        false => format!("{s}/"),
+    })
+}
+
+/// The OS's files beside a cartridge's own: `…/battlestation/pkg/` is
+/// `…/battlestation/os/`, where scripts/build-web.sh mirrors them.
+pub fn os_beside(base: &str) -> String {
+    match base.trim_end_matches('/').rsplit_once('/') {
+        Some((up, _)) if !up.is_empty() => format!("{up}/os/"),
+        _ => "./os/".into(),
+    }
+}
 
 /// A query value (`?k=v`), from a query string.
 pub fn param(query: &str, k: &str) -> Option<String> {
@@ -85,5 +116,38 @@ mod tests {
             Hooks::read("?eye=0,1,0.2,10,-30").eye,
             Some([0.0, 1.0, 0.2, 10.0, -30.0])
         );
+    }
+
+    #[test]
+    fn the_os_comes_from_where_the_host_says_or_beside() {
+        assert_eq!(
+            os_base(Some("https://compusophy.com/")).as_deref(),
+            Some("https://compusophy.com/")
+        );
+        assert_eq!(
+            os_base(Some(" http://127.0.0.1:8790/battlestation/os")).as_deref(),
+            Some("http://127.0.0.1:8790/battlestation/os/")
+        );
+        for bad in [
+            "",
+            "./os/",
+            "/os/",
+            "javascript:x",
+            "file:///os/",
+            "https://a b/",
+        ] {
+            assert_eq!(os_base(Some(bad)), None, "{bad}");
+        }
+        assert_eq!(os_base(None), None);
+        assert_eq!(
+            os_beside("https://secretspace.compusophy.com/battlestation/pkg/"),
+            "https://secretspace.compusophy.com/battlestation/os/"
+        );
+        assert_eq!(
+            os_beside("http://127.0.0.1:8787/battlestation/pkg"),
+            "http://127.0.0.1:8787/battlestation/os/"
+        );
+        assert_eq!(os_beside(""), "./os/");
+        assert_eq!(os_beside("/"), "./os/");
     }
 }

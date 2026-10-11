@@ -24,25 +24,35 @@ const MARGIN: (f64, f64) = (0.04, 0.06);
 /// How long a menu just opened ignores Esc (ms).
 const MENU_SETTLE: f64 = 400.0;
 
-/// Whether a key's own use in the browser is held back at the desk: all
-/// but the function keys and the browser's own shortcuts (reload, a tab,
-/// a window).
-fn hold_back(k: &KeyboardEvent) -> bool {
-    let code = k.code();
-    if k.meta_key() {
+/// Whether a key's own use in the browser (hosted: the host's) is held
+/// back at the desk: all but the function keys and the browser's own
+/// shortcuts (reload, a tab, a window). `mods` as `os::mods` counts them.
+pub(super) fn hold_back(code: &str, key: &str, mods: u8) -> bool {
+    if mods & kit::cart::META != 0 {
         return false;
     }
-    let function = code.len() <= 3 && code.starts_with('F') && code[1..].parse::<u8>().is_ok();
+    let function = code
+        .strip_prefix('F')
+        .is_some_and(|n| (1..=2).contains(&n.len()) && n.parse::<u8>().is_ok());
     if function {
         return false;
     }
-    if k.ctrl_key() {
+    if mods & kit::cart::CTRL != 0 {
         return !matches!(
-            k.key().to_ascii_lowercase().as_str(),
+            key.to_ascii_lowercase().as_str(),
             "r" | "w" | "t" | "n" | "tab" | "pageup" | "pagedown" | "+" | "-" | "=" | "0"
         );
     }
     true
+}
+
+/// A key as the page heard it, kept for the next frame (at most 256 wait).
+pub(super) fn heard_key(heard: &RefCell<Heard>, e: KeyEv) {
+    if let Ok(mut h) = heard.try_borrow_mut() {
+        if h.keys.len() < 256 {
+            h.keys.push(e);
+        }
+    }
 }
 
 /// Listen for keys anywhere, the wheel on the canvas, the page losing
@@ -54,25 +64,23 @@ pub(super) fn listen(heard: &Rc<RefCell<Heard>>, canvas: &HtmlCanvasElement) {
             let Some(k) = e.dyn_ref::<KeyboardEvent>() else {
                 return;
             };
-            if CAPTURE.with(|c| c.get()) && hold_back(k) {
+            let ev = KeyEv {
+                code: k.code(),
+                key: k.key(),
+                down,
+                mods: os::mods(
+                    k.shift_key(),
+                    k.ctrl_key(),
+                    k.alt_key(),
+                    k.meta_key(),
+                    k.get_modifier_state("AltGraph"),
+                ),
+                repeat: k.repeat(),
+            };
+            if CAPTURE.with(|c| c.get()) && hold_back(&ev.code, &ev.key, ev.mods) {
                 e.prevent_default();
             }
-            let mut h = heard.borrow_mut();
-            if h.keys.len() < 256 {
-                h.keys.push(KeyEv {
-                    code: k.code(),
-                    key: k.key(),
-                    down,
-                    mods: os::mods(
-                        k.shift_key(),
-                        k.ctrl_key(),
-                        k.alt_key(),
-                        k.meta_key(),
-                        k.get_modifier_state("AltGraph"),
-                    ),
-                    repeat: k.repeat(),
-                });
-            }
+            heard_key(&heard, ev);
         });
     }
     let h = heard.clone();
@@ -223,9 +231,11 @@ fn run(p: &mut Page, key: &str, ctrl: bool, gpu: &str, now: f64) {
     };
     match p.term.key(key, ctrl, &facts) {
         Some(Act::StandUp) => p.open_menu(),
-        Some(Act::Open(url)) => {
+        // A page opens a tab; hosted, the host's page is left alone.
+        Some(Act::Open(url)) if !kit::host::hosted() => {
             let _ = kit::window().open_with_url_and_target(url, "_blank");
         }
+        Some(Act::Open(_)) => {}
         None => {}
     }
 }

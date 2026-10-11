@@ -7,11 +7,20 @@
 //! programs. wasm-bindgen writes the import; no script is written here.
 //! Its frames come as pixels (`pixels`), not a canvas copied on the GPU:
 //! that copy is not to be had everywhere, and failing it ends a frame.
+//!
+//! Run as a cartridge, the desk's OS is the module its host loaded for it
+//! alone (`opts.osModule`, its files at `opts.os`): initialised and made
+//! here through the module's own `default` and `Cartridge`, used as the
+//! one imported (the methods below are called on whatever object they
+//! are given). Not given one, the one beside its files, as on a page.
 
 use battlestation::laws::SCREEN_PX;
+use js_sys::{Array, Function, Promise, Reflect};
 use look::glass::Glass;
 use render::wgpu;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 
 #[wasm_bindgen(raw_module = "../os/os.js")]
 extern "C" {
@@ -39,6 +48,8 @@ extern "C" {
     fn text(this: &Cartridge, text: &str);
     #[wasm_bindgen(method)]
     fn typing(this: &Cartridge) -> bool;
+    #[wasm_bindgen(method)]
+    fn visible(this: &Cartridge, on: bool);
 }
 
 /// The OS's desktop, in its CSS pixels (one a texel on the glass).
@@ -77,15 +88,96 @@ async fn sleep(ms: i32) {
     let _ = wasm_bindgen_futures::JsFuture::from(p).await;
 }
 
-/// Start the OS (it boots to its welcome while the page goes on).
-pub(super) async fn mount() -> Result<Os, String> {
-    wasm_bindgen_futures::JsFuture::from(os_init())
+/// Where the OS comes from: a module the host gave (none: the one this
+/// module imports), its files, its keys.
+struct Source {
+    module: Option<JsValue>,
+    base: String,
+    ns: String,
+}
+
+/// On a page: the OS beside it. Hosted: the host's module and files if it
+/// gave both, else the OS beside this cartridge's files; its keys under
+/// the cartridge's own.
+fn source() -> Source {
+    if !kit::host::hosted() {
+        return Source {
+            module: None,
+            base: BASE.into(),
+            ns: NS.into(),
+        };
+    }
+    let ns = format!("{}os.", kit::host::ns());
+    let module = kit::cart::option("osModule");
+    match crate::os_base(kit::cart::option("os").as_string().as_deref()) {
+        Some(base) if module.is_object() => Source {
+            module: Some(module),
+            base,
+            ns,
+        },
+        _ => Source {
+            module: None,
+            base: crate::os_beside(&kit::host::base()),
+            ns,
+        },
+    }
+}
+
+/// A module given by the host, initialised (its own `default`, which loads
+/// its wasm beside it): its `Cartridge` class.
+async fn given(module: &JsValue) -> Result<Function, String> {
+    let get = |k: &str| {
+        Reflect::get(module, &k.into())
+            .ok()?
+            .dyn_into::<Function>()
+            .ok()
+    };
+    let init = get("default").ok_or("the os given has no default")?;
+    let ready = init
+        .call0(module)
+        .map_err(|e| format!("the os did not load: {e:?}"))?;
+    JsFuture::from(Promise::resolve(&ready))
         .await
         .map_err(|e| format!("the os did not load: {e:?}"))?;
+    get("Cartridge").ok_or_else(|| "the os given has no Cartridge".into())
+}
+
+/// `new Cartridge(w, h, dpr, base, ns)` of a given module's class.
+fn construct(class: &Function, src: &Source) -> Result<Cartridge, JsValue> {
+    let args = Array::new();
+    for v in [DESKTOP.0, DESKTOP.1, 1.0] {
+        args.push(&JsValue::from(v));
+    }
+    args.push(&src.base.as_str().into());
+    args.push(&src.ns.as_str().into());
+    Reflect::construct(class, &args).map(JsCast::unchecked_into)
+}
+
+/// Start the OS (it boots to its welcome while the page goes on). Hosted
+/// and let go meanwhile, none is made.
+pub(super) async fn mount() -> Result<Os, String> {
+    let src = source();
+    let class = match &src.module {
+        Some(m) => Some(given(m).await?),
+        None => {
+            JsFuture::from(os_init())
+                .await
+                .map_err(|e| format!("the os did not load: {e:?}"))?;
+            None
+        }
+    };
+    let era = kit::host::era();
     let mut why = String::new();
     for wait in TRIES {
         sleep(wait).await;
-        match Cartridge::new(DESKTOP.0, DESKTOP.1, 1.0, BASE, NS) {
+        if kit::host::era() != era || kit::host::ended() {
+            return Err("the cartridge was let go".into());
+        }
+        let made = match &class {
+            Some(class) => construct(class, &src),
+            None => Cartridge::new(DESKTOP.0, DESKTOP.1, 1.0, &src.base, &src.ns),
+        };
+        match made {
             Ok(c) => {
                 return Ok(Os {
                     c,
@@ -100,6 +192,20 @@ pub(super) async fn mount() -> Result<Os, String> {
 }
 
 impl Os {
+    /// The desk let go: the OS told to end, where it can be (else hidden,
+    /// so it draws nothing more).
+    pub(super) fn end(&self) {
+        let end = Reflect::get(&self.c, &"end".into())
+            .ok()
+            .and_then(|f| f.dyn_into::<Function>().ok());
+        match end {
+            Some(f) => {
+                let _ = f.call0(&self.c);
+            }
+            None => self.c.visible(false),
+        }
+    }
+
     /// Its newest frame onto the glass, if one has come since the last:
     /// its pixels read back and uploaded (a frame only when the OS draws
     /// one; a still desktop costs nothing).
