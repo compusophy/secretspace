@@ -61,7 +61,9 @@ struct Inner {
     pressed: Vec<String>,
 }
 
-/// The keyboard, the mouse and every finger, since the last `drain`.
+/// The keyboard, the mouse and every finger, since the last `drain`. A
+/// clone hears the same hands (a host feeds one, the game drains another).
+#[derive(Clone)]
 pub struct Hands(Rc<RefCell<Inner>>);
 
 /// An event's time on `kit::now`'s clock: its own stamp, unless that is

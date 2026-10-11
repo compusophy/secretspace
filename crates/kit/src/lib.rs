@@ -8,9 +8,12 @@
 //! shares (`meta`), and the `shell` the front page opens games in. Rust
 //! only: the page's one line of script just starts the wasm. A page can
 //! also run inside another page, as a cartridge (`host`): then the size,
-//! storage, server, pointer lock and text come from its host.
+//! storage, server, pointer lock and text come from its host, and what it
+//! draws goes to a surface its host copies (`cart`, whose `cartridge!`
+//! exports a game's `Cartridge` class).
 
 pub mod audio;
+pub mod cart;
 pub mod gl;
 pub mod host;
 pub mod input;
@@ -59,8 +62,19 @@ pub fn on(target: &web_sys::EventTarget, event: &str, f: impl FnMut(web_sys::Eve
 
 /// Call `f` with the time on every animation frame, forever: the frame's
 /// own time (when the browser began it, on `now`'s clock), the same for
-/// everything drawn in it, so steps between frames come out even.
+/// everything drawn in it, so steps between frames come out even. Hosted,
+/// until the host lets the cartridge go (its `host::era` moves on).
 pub fn frames(mut f: impl FnMut(f64) + 'static) {
+    if host::hosted() {
+        let era = host::era();
+        return frames_while(move |t| {
+            let on = host::era() == era;
+            if on {
+                f(t);
+            }
+            on
+        });
+    }
     type Loop = Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>;
     let raf: Loop = Rc::new(RefCell::new(None));
     let again = raf.clone();
@@ -287,10 +301,10 @@ fn at(base: &str, room: &str, query: &str) -> String {
 }
 
 /// The canvas, and the pixels drawn into it: one buffer pixel is `scale`
-/// CSS pixels (a whole number of the device's), shown sharp.
+/// CSS pixels (a whole number of the device's), shown sharp. Hosted, no
+/// canvas: each picture goes to the host's surface (`cart::show`).
 pub struct Screen {
-    canvas: HtmlCanvasElement,
-    ctx: CanvasRenderingContext2d,
+    out: Option<(HtmlCanvasElement, CanvasRenderingContext2d)>,
     pub px: Canvas,
     /// CSS pixels per buffer pixel.
     pub scale: f64,
@@ -300,21 +314,23 @@ pub struct Screen {
 }
 
 impl Screen {
-    /// The canvas with this id.
+    /// The canvas with this id (hosted: none, the host's surface).
     pub fn new(id: &str) -> Screen {
-        let canvas: HtmlCanvasElement = document()
-            .get_element_by_id(id)
-            .and_then(|e| e.dyn_into().ok())
-            .unwrap_or_else(|| panic!("#{id} is a canvas"));
-        let ctx = canvas
-            .get_context("2d")
-            .ok()
-            .flatten()
-            .and_then(|c| c.dyn_into::<CanvasRenderingContext2d>().ok())
-            .expect("a 2d context");
+        let out = (!host::hosted()).then(|| {
+            let canvas: HtmlCanvasElement = document()
+                .get_element_by_id(id)
+                .and_then(|e| e.dyn_into().ok())
+                .unwrap_or_else(|| panic!("#{id} is a canvas"));
+            let ctx = canvas
+                .get_context("2d")
+                .ok()
+                .flatten()
+                .and_then(|c| c.dyn_into::<CanvasRenderingContext2d>().ok())
+                .expect("a 2d context");
+            (canvas, ctx)
+        });
         let mut s = Screen {
-            canvas,
-            ctx,
+            out,
             px: Canvas::new(1, 1),
             scale: 1.0,
             css: (1.0, 1.0),
@@ -337,7 +353,7 @@ impl Screen {
         // laptop at 125%. The buffer is as much narrower or wider, which
         // can change a layout (the hub's cards: two to a row, or one).
         self.ui = if pick >= 2.0 { 1 } else { 2 };
-        self.size(snap(pick, window().device_pixel_ratio()), w, h);
+        self.size(snap(pick, dpr()), w, h);
     }
 
     fn size(&mut self, scale: f64, w: f64, h: f64) {
@@ -348,11 +364,13 @@ impl Screen {
             (h / self.scale).ceil() as i32,
         );
         self.px.resize(bw, bh);
-        self.canvas.set_width(bw as u32);
-        self.canvas.set_height(bh as u32);
-        // Exactly `scale` CSS pixels a buffer pixel: what spills past the
-        // window's edge (less than one) is cut off.
-        place(&self.canvas, bw as f64 * scale, bh as f64 * scale);
+        if let Some((canvas, _)) = &self.out {
+            canvas.set_width(bw as u32);
+            canvas.set_height(bh as u32);
+            // Exactly `scale` CSS pixels a buffer pixel: what spills past
+            // the window's edge (less than one) is cut off.
+            place(canvas, bw as f64 * scale, bh as f64 * scale);
+        }
     }
 
     /// The text scale, in buffer pixels: 2 where a buffer pixel is about
@@ -373,21 +391,51 @@ impl Screen {
         (x as f64 * s, y as f64 * s, w as f64 * s, h as f64 * s)
     }
 
-    /// The mouse cursor over the canvas ("pointer", "default", ...).
+    /// The mouse cursor over the canvas ("pointer", "default", ...);
+    /// hosted, what the host is asked to show.
     pub fn cursor(&self, c: &str) {
-        let _ = HtmlElement::style(&self.canvas).set_property("cursor", c);
+        match &self.out {
+            Some((canvas, _)) => {
+                let _ = HtmlElement::style(canvas).set_property("cursor", c);
+            }
+            None => cart::set_cursor(c),
+        }
     }
 
-    /// Show what was drawn.
+    /// Show what was drawn. Hosted, onto the host's surface while it looks
+    /// (`host::drawing`), each buffer pixel `scale` CSS pixels square in
+    /// the device's pixels, the surface the size of the host's box.
     pub fn present(&self) {
+        let Some((_, ctx)) = &self.out else {
+            if host::drawing(now()) {
+                let (k, size) = device_box(self.scale, dpr(), self.css);
+                cart::show(&self.px, k, size);
+            }
+            return;
+        };
         if let Ok(img) = ImageData::new_with_u8_clamped_array_and_sh(
             Clamped(&self.px.data),
             self.px.w as u32,
             self.px.h as u32,
         ) {
-            let _ = self.ctx.put_image_data(&img, 0.0, 0.0);
+            let _ = ctx.put_image_data(&img, 0.0, 0.0);
         }
     }
+}
+
+/// A buffer whose pixels are `scale` CSS pixels, on a box `css` CSS pixels
+/// at `dpr`: device pixels a buffer pixel (whole, as `snap` makes it), and
+/// the box in device pixels (pure).
+pub fn device_box(scale: f64, dpr: f64, css: (f64, f64)) -> (u32, (u32, u32)) {
+    let whole = |v: f64, most: f64| match v.round() {
+        v if v.is_finite() => v.clamp(1.0, most) as u32,
+        _ => 1,
+    };
+    let k = whole(scale * dpr, 64.0);
+    (
+        k,
+        (whole(css.0 * dpr, 16384.0), whole(css.1 * dpr, 16384.0)),
+    )
 }
 
 /// A text box the page draws itself: an invisible input laid over where
@@ -623,6 +671,23 @@ mod tests {
         host::text("x");
         assert_eq!(name.value(), "abc");
         host::end();
+    }
+
+    #[test]
+    fn a_hosted_screen_fills_the_hosts_box_in_device_pixels() {
+        // 960 x 600 at 1: a buffer pixel a device pixel, the box as is.
+        assert_eq!(super::device_box(1.0, 1.0, (960.0, 600.0)), (1, (960, 600)));
+        // At 2: each buffer pixel 2 x 2, the box twice as many.
+        let s = snap(1.0, 2.0);
+        assert_eq!(super::device_box(s, 2.0, (960.0, 600.0)), (2, (1920, 1200)));
+        // A laptop at 125%: buffer pixels of 0.8 CSS pixels, one device
+        // pixel each; a 4K box with 3 CSS pixels a buffer pixel at 1.5.
+        let s = snap(1.0, 1.25);
+        assert_eq!(super::device_box(s, 1.25, (960.0, 600.0)), (1, (1200, 750)));
+        let s = snap(3.0, 1.5);
+        assert_eq!(super::device_box(s, 1.5, (2560.0, 1440.0)).0, 5);
+        // Nonsense is held in bounds.
+        assert_eq!(super::device_box(f64::NAN, 1.0, (0.0, -5.0)), (1, (1, 1)));
     }
 
     #[test]

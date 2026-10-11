@@ -5,7 +5,8 @@
 //! game knowledge. The adapter is asked for before the canvas is touched,
 //! so a browser without WebGPU leaves the canvas free for the WebGL2
 //! fallback. A page run inside another (`kit::host`) draws off screen
-//! instead (`Gpu::hosted`), each picture read back for its host (`read`).
+//! instead (`Gpu::hosted`), each picture read back onto the surface its
+//! host copies (`kit::cart::show`).
 //! Off the web only the shaders and the tables build (the tests check
 //! every WGSL string).
 

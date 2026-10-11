@@ -1,6 +1,6 @@
 //! The device on a browser canvas, or (hosted: a page run inside another,
-//! `kit::host`) on no canvas at all: drawn into a texture and read back as
-//! pixels for the host to show.
+//! `kit::host`) on no canvas at all: drawn into a texture, read back as
+//! pixels, and put on the surface its host copies (`kit::cart::show`).
 
 use crate::readback::{target, Readback};
 use crate::{layer, wanted, Caps, Health};
@@ -26,7 +26,19 @@ enum Target {
     Off {
         tex: Option<(wgpu::Texture, wgpu::TextureView, (u32, u32))>,
         ring: Readback,
+        /// The newest picture read back, on its way to the host's surface.
+        pic: pixels::Canvas,
     },
+}
+
+/// The newest picture read back, if one has come, onto the host's surface
+/// (`kit::cart::show`): a frame or two after it was drawn. Reading frees
+/// its buffer for another.
+fn shown(ring: &mut Readback, pic: &mut pixels::Canvas) {
+    if ring.read(pic, true) {
+        let size = (pic.w.max(0) as u32, pic.h.max(0) as u32);
+        kit::cart::show(pic, 1, size);
+    }
 }
 
 /// The colour format off screen: plain RGBA, as a host takes it.
@@ -155,6 +167,7 @@ impl Gpu {
             target: Target::Off {
                 tex: None,
                 ring: Readback::new(),
+                pic: pixels::Canvas::new(1, 1),
             },
             health: Health::watch(&device),
             device,
@@ -255,10 +268,13 @@ impl Gpu {
                     .create_view(&wgpu::TextureViewDescriptor::default());
                 (view, Some(texture))
             }
-            Target::Off { tex, ring } => {
+            Target::Off { tex, ring, pic } => {
                 if !kit::host::drawing(kit::now()) {
                     return None;
                 }
+                // What came back since the last frame, to the host first
+                // (its buffer free again for this one).
+                shown(ring, pic);
                 let size = self.size;
                 if tex.as_ref().map(|t| t.2) != Some(size) {
                     *tex = Some(target(&self.device, size, OFF));
@@ -282,7 +298,7 @@ impl Gpu {
     }
 
     /// The pixel layer over everything drawn, then the frame shown (hosted:
-    /// copied out, to be `read`).
+    /// copied out, onto the host's surface once it is back: `frame`).
     pub fn present(&mut self, mut f: Frame) {
         let k = (self.scale * self.dpr) as f32;
         self.layer.draw(
@@ -300,21 +316,11 @@ impl Gpu {
                     self.queue.present(t);
                 }
             }
-            Target::Off { tex, ring } => {
+            Target::Off { tex, ring, .. } => {
                 if let Some((t, _, size)) = tex.as_ref() {
                     ring.end(&self.queue, f.encoder, t, *size);
                 }
             }
-        }
-    }
-
-    /// Hosted: the newest picture read back, into `into` (sized to it; RGBA,
-    /// alpha 255, rows packed). False if none has come since the last, or
-    /// on a page's own canvas.
-    pub fn read(&mut self, into: &mut pixels::Canvas) -> bool {
-        match &mut self.target {
-            Target::Off { ring, .. } => ring.read(into, true),
-            Target::Page { .. } => false,
         }
     }
 
