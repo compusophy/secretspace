@@ -5,11 +5,16 @@
 //! still (a deploy) the last picture stays, dimmed, and the snake carries
 //! on where it was once the link is back. Esc (or, between lives on a
 //! phone, the menu button) opens the menu every game shares
-//! (`kit::meta`): feedback, and the only way out of the game.
+//! (`kit::meta`): feedback, and the only way out of the game. Its page
+//! starts it (`page`); another page may run it as a cartridge (`cart`,
+//! the exported `Cartridge`).
 
+mod cart;
 mod menu;
 mod render;
 mod state;
+
+kit::cartridge!(cart);
 
 use std::cell::RefCell;
 
@@ -297,8 +302,10 @@ fn aim(p: &mut Page, x: f32, y: f32) {
     p.steer = Some((y - cy).atan2(x - cx));
 }
 
-fn down(p: &mut Page, e: &PointerEvent) {
-    let (x, y) = p.screen.to_px(e.client_x() as f64, e.client_y() as f64);
+/// A press at (cx, cy), CSS pixels: `finger` its pointer's id, `mouse`
+/// whether it is a mouse's.
+fn down(p: &mut Page, cx: f64, cy: f64, finger: i32, mouse: bool) {
+    let (x, y) = p.screen.to_px(cx, cy);
     p.pointer = Some((x, y));
     if p.meta.is_open() {
         match p.meta.click(x, y, kit::now()) {
@@ -316,29 +323,95 @@ fn down(p: &mut Page, e: &PointerEvent) {
             p.meta.show();
         } else if !p.spots.name.contains(x, y) {
             p.field.blur();
+        } else {
+            // Hosted, the name takes the keys (a page's input has them
+            // from the browser already).
+            p.field.press(cx, cy);
         }
         return;
     }
     if boost_button(p).is_some_and(|b| b.grow(6.0).contains(x, y)) {
-        p.boost_finger = Some(e.pointer_id());
+        p.boost_finger = Some(finger);
         return;
     }
     aim(p, x, y);
-    if e.pointer_type() == "mouse" {
+    if mouse {
         p.boost_mouse = true;
     }
+}
+
+/// The pointer `finger` moved to (cx, cy), CSS pixels.
+fn moved(p: &mut Page, cx: f64, cy: f64, finger: i32) {
+    let (x, y) = p.screen.to_px(cx, cy);
+    p.pointer = Some((x, y));
+    // Under the menu the snake keeps its heading.
+    if !p.menu && !p.meta.is_open() && p.boost_finger != Some(finger) {
+        aim(p, x, y);
+    }
+}
+
+/// The pointer `finger` let go (or was taken away).
+fn up(p: &mut Page, finger: i32, mouse: bool) {
+    if p.boost_finger == Some(finger) {
+        p.boost_finger = None;
+    }
+    if mouse {
+        p.boost_mouse = false;
+    }
+}
+
+/// The keys went elsewhere: nothing held.
+fn blur(p: &mut Page) {
+    p.boost_mouse = false;
+    p.boost_key = false;
+    p.boost_finger = None;
+}
+
+/// A key pressed (`KeyboardEvent.key`): whether the game used it.
+fn key_down(p: &mut Page, key: &str) -> bool {
+    // Esc: the shared menu (open it, step back, close it).
+    if key == "Escape" {
+        p.meta.escape();
+        return true;
+    }
+    if p.meta.is_open() {
+        if key == "Enter" {
+            p.meta.enter(kit::now());
+            return true;
+        }
+        return false;
+    }
+    if p.menu {
+        if key == "Enter" {
+            play(p);
+            return true;
+        }
+        return false;
+    }
+    if boost_key(key) {
+        p.boost_key = true;
+        return true;
+    }
+    false
+}
+
+/// A key let go: whether the game used it.
+fn key_up(p: &mut Page, key: &str) -> bool {
+    let boost = boost_key(key);
+    if boost {
+        p.boost_key = false;
+    }
+    boost
 }
 
 fn boost_key(key: &str) -> bool {
     matches!(key, " " | "ArrowUp" | "w" | "W" | "Shift")
 }
 
-#[wasm_bindgen(start)]
-pub fn start() -> Result<(), JsValue> {
+/// Start: the screen, the link to the room, the frame loop (on the page,
+/// or for a host: `cart`).
+fn boot() {
     let screen = kit::Screen::new("screen");
-    let canvas = kit::document()
-        .get_element_by_id("screen")
-        .ok_or("no #screen")?;
     let field = kit::TextField::new(wyrm::laws::MAX_NAME as u32, "your name");
     let session = kit::Session::load();
     let name = session.name();
@@ -377,84 +450,62 @@ pub fn start() -> Result<(), JsValue> {
     kit::frames(|now| {
         with(|p| tick(p, now));
     });
+}
 
+/// The screen changed size (the window's, or the host's surface).
+fn resized(p: &mut Page) {
+    p.screen.fit();
+    send(p, &screen_msg(p));
+}
+
+// The page's own start, called by its index.html after init(): never on
+// init, so a host importing this module as a cartridge is left alone
+// (the start-guard rule, which scripts/caps.sh holds).
+#[wasm_bindgen]
+pub fn page() -> Result<(), JsValue> {
+    let canvas = kit::document()
+        .get_element_by_id("screen")
+        .ok_or("no #screen")?;
+    boot();
     kit::on(&kit::window(), "resize", |_| {
-        with(|p| {
-            p.screen.fit();
-            send(p, &screen_msg(p));
-        });
+        with(resized);
     });
     kit::on(&canvas, "pointerdown", |e| {
         if let Ok(e) = e.dyn_into::<PointerEvent>() {
-            with(|p| down(p, &e));
+            let (x, y) = (e.client_x() as f64, e.client_y() as f64);
+            let mouse = e.pointer_type() == "mouse";
+            with(|p| down(p, x, y, e.pointer_id(), mouse));
         }
     });
     kit::on(&canvas, "pointermove", |e| {
         if let Ok(e) = e.dyn_into::<PointerEvent>() {
-            with(|p| {
-                let (x, y) = p.screen.to_px(e.client_x() as f64, e.client_y() as f64);
-                p.pointer = Some((x, y));
-                // Under the menu the snake keeps its heading.
-                if !p.menu && !p.meta.is_open() && p.boost_finger != Some(e.pointer_id()) {
-                    aim(p, x, y);
-                }
-            });
+            let (x, y) = (e.client_x() as f64, e.client_y() as f64);
+            with(|p| moved(p, x, y, e.pointer_id()));
         }
     });
     for ev in ["pointerup", "pointercancel"] {
         kit::on(&kit::window(), ev, |e| {
             if let Ok(e) = e.dyn_into::<PointerEvent>() {
-                with(|p| {
-                    if p.boost_finger == Some(e.pointer_id()) {
-                        p.boost_finger = None;
-                    }
-                    if e.pointer_type() == "mouse" {
-                        p.boost_mouse = false;
-                    }
-                });
+                let mouse = e.pointer_type() == "mouse";
+                with(|p| up(p, e.pointer_id(), mouse));
             }
         });
     }
     kit::on(&kit::window(), "blur", |_| {
-        with(|p| {
-            p.boost_mouse = false;
-            p.boost_key = false;
-            p.boost_finger = None;
-        });
+        with(blur);
     });
     kit::on(&kit::window(), "keydown", |e| {
         if let Ok(e) = e.dyn_into::<KeyboardEvent>() {
-            with(|p| {
-                // Esc: the shared menu (open it, step back, close it).
-                if e.key() == "Escape" {
-                    e.prevent_default();
-                    p.meta.escape();
-                    return;
-                }
-                if p.meta.is_open() {
-                    if e.key() == "Enter" {
-                        p.meta.enter(kit::now());
-                    }
-                    return;
-                }
-                if p.menu {
-                    if e.key() == "Enter" {
-                        play(p);
-                    }
-                    return;
-                }
-                if boost_key(&e.key()) {
-                    e.prevent_default();
-                    p.boost_key = true;
-                }
-            });
+            let key = e.key();
+            // Esc and the boost keys are the game's, not the browser's.
+            if with(|p| key_down(p, &key)).unwrap_or(false) && key != "Enter" {
+                e.prevent_default();
+            }
         }
     });
     kit::on(&kit::window(), "keyup", |e| {
         if let Ok(e) = e.dyn_into::<KeyboardEvent>() {
-            if boost_key(&e.key()) {
-                with(|p| p.boost_key = false);
-            }
+            with(|p| key_up(p, &e.key()));
         }
     });
     Ok(())

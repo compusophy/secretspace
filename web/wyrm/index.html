@@ -20,6 +20,6 @@
 <body>
 <canvas id="screen" aria-label="wyrm"></canvas>
 <noscript>wyrm is drawn by WebAssembly; it needs a browser that runs it.</noscript>
-<script type="module">import init from "./pkg/wyrm.js"; init();</script>
+<script type="module">import init, { page } from "./pkg/wyrm.js"; init().then(() => page());</script>
 </body>
 </html>
