@@ -29,7 +29,7 @@ royale like Plunderstorm (`docs/plunder.md`), its first consumer.
    3D: WebGPU (`gpu`, WGSL) or WebGL2 (`kit::gl`, GLSL), shaders as Rust
    strings, with a `pixels` HUD layer over it. The only DOM besides the
    canvas: `kit::TextField` (an invisible input, so phones offer their
-   keyboard) and the frame the hub opens a game in (`kit::shell`).
+   keyboard) and the frame the hub opens a game in (`kit::shell`); hosted, none.
 2. **`engine`, `pixels` have no dependencies; a game's core (`wyrm`)
    depends only on `engine`.** std only, shared by server and page. How
    it looks (`wyrm-look`) is shared by its page and the hub's preview.
@@ -52,17 +52,16 @@ royale like Plunderstorm (`docs/plunder.md`), its first consumer.
 crates/engine     wire rng room (Room trait) hub (Stats) who (Hello, Seen,
                   names) words snap (save files) fixed sha1 synth (sounds)
 crates/pixels     Canvas (RGBA buffer, AA shapes, glow), font (5x7), wrap,
-                  fit_scale; examples/sheet.rs (a test sheet)
+                  fit_scale; examples/sheet.rs
 crates/kit        the browser end: Screen, place/snap/on_resize (whole
                   device pixels), gl (WebGL2), input (keys, fingers, pointer
                   lock), Link (reconnects, Hello first), Session, Version,
                   TextField, storage, audio, meta (every game's Esc menu),
-                  shell (games open over the hub, full screen), report
+                  shell (games over the hub), report, host/cart (cartridge)
 crates/gpu        WebGPU device (wgpu), Caps, Health, the pixel layer
 crates/render     the engine: retained scene, geo, sculpt, terrain, shadows
                   (cascades + island layer), HDR + AO + bloom + ACES, grass,
-                  sea, decals, slots (bind tables), light grid; its test page
-                  crates/showcase-web (/showcase/)
+                  sea, decals, slots, light grid; test page: showcase-web
 crates/hub-web    the front page: shelf (layout) backdrop tag; watch (wyrm's
                   card, live), wand (Wandfall's), desk (Battlestation's)
 crates/wyrm       the game: laws world bots grid proto view mirror room
@@ -107,7 +106,8 @@ wide at most); `ui()` is the text scale (2 phone, 1 desktop).
    watchers: see wyrm's); add it to `ROOMS` in `crates/server/src/main.rs`.
 3. Its page: `web/<id>/index.html` (copy wyrm's), a `page` line in
    `scripts/build-web.sh`, a hub-web `CARDS` card (live like `watch.rs`,
-   or still), its pkg path in `web/vercel.json`; Esc opens `kit::meta`.
+   or still), its path in `web/vercel.json`; Esc opens `kit::meta`;
+   `page()` starts it, `kit::cartridge!` exports it.
 
 ## Commands
 

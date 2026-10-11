@@ -25,16 +25,23 @@ js=$(git ls-files '*.js' '*.ts' '*.mjs' '*.jsx' '*.tsx')
 
 # A cartridge's init must be inert: a host imports its module and runs
 # init() with its own page around it (a canvas#screen too), so these crates
-# have no #[wasm_bindgen(start)]; their own index.html calls page().
-starts=$(grep -rn 'wasm_bindgen(start)' crates/wandfall-web crates/battlestation-web || true)
+# have no #[wasm_bindgen(start)]; their own index.html calls page(), and
+# each exports its Cartridge (kit::cartridge!).
+carts="crates/wyrm-web crates/wandfall-web crates/battlestation-web"
+# shellcheck disable=SC2086
+starts=$(grep -rn 'wasm_bindgen(start)' $carts || true)
 [ -z "$starts" ] || say "a cartridge's init must be inert (export page(), no start): $starts"
+for c in $carts; do
+  grep -rqs 'kit::cartridge!' "$c/src" || say "$c exports no Cartridge (kit::cartridge!)"
+done
 
 # 6. Size caps.
 for f in $(git ls-files '*.rs') $(git ls-files --others --exclude-standard '*.rs'); do
   n=$(wc -l < "$f")
   [ "$n" -le 1000 ] || say "$f has $n lines (cap 1000)"
 done
-chars=$(wc -c < CLAUDE.md)
+# As committed (LF): a Windows checkout's CRLF is no character of it.
+chars=$(tr -d '\r' < CLAUDE.md | wc -c)
 [ "$chars" -le 8000 ] || say "CLAUDE.md has $chars characters (cap 8000)"
 
 # The core is deterministic: what a page predicts (Wandfall's movement and

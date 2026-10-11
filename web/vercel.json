@@ -13,11 +13,32 @@
       ]
     },
     {
-      "source": "/(.*)/pkg/(.*)",
+      "source": "/wyrm/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cross-Origin-Resource-Policy", "value": "cross-origin" }
+      ]
+    },
+    {
+      "source": "/wandfall/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cross-Origin-Resource-Policy", "value": "cross-origin" }
+      ]
+    },
+    {
+      "source": "/battlestation/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cross-Origin-Resource-Policy", "value": "cross-origin" }
+      ]
+    },
+    {
+      "source": "/luciphon/pkg/(.*)",
       "headers": [{ "key": "Access-Control-Allow-Origin", "value": "*" }]
     },
     {
-      "source": "/battlestation/os/(.*)",
+      "source": "/showcase/pkg/(.*)",
       "headers": [{ "key": "Access-Control-Allow-Origin", "value": "*" }]
     },
     {
