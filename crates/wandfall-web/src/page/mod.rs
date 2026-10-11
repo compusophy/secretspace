@@ -33,6 +33,7 @@ use crate::sound::Sounds;
 use crate::state::{Line, State};
 use crate::touch::{self, Touch};
 
+pub(crate) mod cart;
 mod input;
 mod net;
 mod range;
@@ -176,22 +177,28 @@ thread_local! {
     static PAGE: RefCell<Option<Page>> = const { RefCell::new(None) };
 }
 
+/// Whether the page's address (hosted: the host's `query`) says `k`.
 fn query(k: &str) -> bool {
-    kit::window()
-        .location()
-        .search()
-        .is_ok_and(|q| q.trim_start_matches('?').split('&').any(|kv| kv == k))
+    kit::search()
+        .trim_start_matches('?')
+        .split('&')
+        .any(|kv| kv == k)
 }
 
 /// The value of `k=...` in the page's address, if there.
 fn query_value(k: &str) -> Option<String> {
-    let q = kit::window().location().search().ok()?;
-    q.trim_start_matches('?')
+    kit::search()
+        .trim_start_matches('?')
         .split('&')
         .find_map(|kv| kv.strip_prefix(k)?.strip_prefix('=').map(str::to_string))
 }
 
+/// Why the game cannot run: on the page, in words; hosted, the host's to
+/// say (`error()`), the host's page untouched.
 fn say(text: &str) {
+    if kit::host::hosted() {
+        return kit::host::fail(text);
+    }
     if let Some(b) = kit::document().body() {
         b.set_inner_html(&format!(
             "<p style=\"color:#f4eede;font:16px sans-serif;padding:24px;max-width:560px\">{text}</p>"
@@ -466,122 +473,136 @@ fn context(p: &Page) -> String {
 // (the start-guard rule, which scripts/caps.sh holds).
 #[wasm_bindgen]
 pub fn page() {
-    wasm_bindgen_futures::spawn_local(async {
-        kit::report::on_panic();
-        // Who cannot play, and why, is worth knowing too.
-        if !gpu::offered() {
-            kit::report::send("no webgpu", "game: wandfall\n", "");
-            say("Wandfall is drawn with WebGPU, which this browser does not offer yet. It runs in Chrome or Edge (desktop and Android), and Safari 26.");
+    wasm_bindgen_futures::spawn_local(boot());
+}
+
+/// Start: WebGPU on the page's canvas (hosted: off screen, for the host,
+/// `cart`), the title, the frame loop.
+async fn boot() {
+    kit::report::on_panic();
+    let hosted = kit::host::hosted();
+    // Who cannot play, and why, is worth knowing too.
+    if !gpu::offered() {
+        kit::report::send("no webgpu", "game: wandfall\n", "");
+        say("Wandfall is drawn with WebGPU, which this browser does not offer yet. It runs in Chrome or Edge (desktop and Android), and Safari 26.");
+        return;
+    }
+    let g = match hosted {
+        true => gpu::Gpu::hosted(MIN_SHORT, MAX_DPR).await,
+        false => gpu::Gpu::new("screen", MIN_SHORT, MAX_DPR).await,
+    };
+    let g = match g {
+        Ok(g) => g,
+        // Let go while the device was coming: nothing to say.
+        Err(_) if kit::host::ended() => return,
+        Err(e) => {
+            kit::report::send("no webgpu", "game: wandfall\n", &e.to_string());
+            say(&format!("Wandfall could not start WebGPU here ({e}). Try Chrome or Edge with hardware acceleration on."));
             return;
         }
-        let g = match gpu::Gpu::new("screen", MIN_SHORT, MAX_DPR).await {
-            Ok(g) => g,
-            Err(e) => {
-                kit::report::send("no webgpu", "game: wandfall\n", &e.to_string());
-                say(&format!("Wandfall could not start WebGPU here ({e}). Try Chrome or Edge with hardware acceleration on."));
-                return;
+    };
+    let search = kit::search();
+    let set = Settings::load();
+    let q = set.quality(&search, g.caps.software, kit::touch());
+    let r = Renderer::new(&g.device, &g.queue, g.format(), q);
+    let session = kit::Session::load();
+    let hands = match g.canvas() {
+        Some(c) => Hands::attach(c),
+        None => kit::cart::hands(),
+    };
+    PAGE.with(|p| {
+        *p.borrow_mut() = Some(Page {
+            g,
+            r,
+            island: None,
+            st: State::default(),
+            pred: Predict::default(),
+            prev: Body::default(),
+            alive: false,
+            acc: 0.0,
+            seq: 0,
+            outbox: Vec::new(),
+            yaw: 0.0,
+            pitch: 0.0,
+            firing: false,
+            aiming: false,
+            chase: Chase::default(),
+            aim: (0.0, 0.0),
+            asked: 0,
+            cast_heard: [f64::NEG_INFINITY; 4],
+            pad: Touch::default(),
+            cool: 0,
+            hands,
+            mode: Mode::Title,
+            inbox: Vec::new(),
+            local: 0.0,
+            spots: Spots::default(),
+            book: false,
+            was_locked: false,
+            skip: 0,
+            book_slot: 0,
+            meta: kit::meta::Meta::new("wandfall"),
+            shown: Vec::new(),
+            session,
+            version: kit::Version::watch(VERSION_EVERY),
+            last: kit::now(),
+            fps: 60.0,
+            pace: (0, 0.0),
+            fixed: query("q=low") || query("q=medium") || query("q=high"),
+            perf: query("perf=1"),
+            touch: kit::touch(),
+            sounds: Sounds::new(),
+            hold: query_value("hold").and_then(|v| v.parse().ok()),
+            lessons: Lessons::new(),
+            lesson_skip: None,
+            gallery: query_value("fx")
+                .map(|n| (n, query_value("age").and_then(|v| v.parse().ok()))),
+            sky: Sky::default(),
+            hour: query_value("hour").and_then(|h| Hour::named(&h)),
+            weather: query_value("weather").and_then(|w| Weather::named(&w)),
+            thunder: (0.0, None),
+            anims: HashMap::new(),
+            sighted: HashMap::new(),
+            orbit: query_value("orbit").and_then(|v| v.parse().ok()),
+            orbit_at: None,
+            set,
+            watch: None,
+            cycle: 0,
+            ear: ([0.0; 3], 0.0),
+            name: kit::TextField::new(engine::who::MAX_NAME as u32, "your name"),
+            taken: false,
+            lost: None,
+            notice: None,
+            next_try: 0.0,
+        })
+    });
+    PAGE.with(|p| {
+        if let Some(p) = p.borrow_mut().as_mut() {
+            p.sounds.audio.set_volume(p.set.volume);
+            p.name.set_value(&p.session.name());
+            island(p, PRACTICE_SEED);
+            // `?practice` goes straight to the range; a page reloaded
+            // for a newer build back to the match it was in.
+            let resume = kit::load(RESUME).is_some_and(|v| v == "online");
+            if resume {
+                kit::save(RESUME, "");
             }
-        };
-        let search = kit::window().location().search().unwrap_or_default();
-        let set = Settings::load();
-        let q = set.quality(&search, g.caps.software, kit::touch());
-        let r = Renderer::new(&g.device, &g.queue, g.format(), q);
-        let session = kit::Session::load();
-        let hands = match g.canvas() {
-            Some(c) => Hands::attach(c),
-            None => Hands::detached(),
-        };
-        PAGE.with(|p| {
-            *p.borrow_mut() = Some(Page {
-                g,
-                r,
-                island: None,
-                st: State::default(),
-                pred: Predict::default(),
-                prev: Body::default(),
-                alive: false,
-                acc: 0.0,
-                seq: 0,
-                outbox: Vec::new(),
-                yaw: 0.0,
-                pitch: 0.0,
-                firing: false,
-                aiming: false,
-                chase: Chase::default(),
-                aim: (0.0, 0.0),
-                asked: 0,
-                cast_heard: [f64::NEG_INFINITY; 4],
-                pad: Touch::default(),
-                cool: 0,
-                hands,
-                mode: Mode::Title,
-                inbox: Vec::new(),
-                local: 0.0,
-                spots: Spots::default(),
-                book: false,
-                was_locked: false,
-                skip: 0,
-                book_slot: 0,
-                meta: kit::meta::Meta::new("wandfall"),
-                shown: Vec::new(),
-                session,
-                version: kit::Version::watch(VERSION_EVERY),
-                last: kit::now(),
-                fps: 60.0,
-                pace: (0, 0.0),
-                fixed: query("q=low") || query("q=medium") || query("q=high"),
-                perf: query("perf=1"),
-                touch: kit::touch(),
-                sounds: Sounds::new(),
-                hold: query_value("hold").and_then(|v| v.parse().ok()),
-                lessons: Lessons::new(),
-                lesson_skip: None,
-                gallery: query_value("fx")
-                    .map(|n| (n, query_value("age").and_then(|v| v.parse().ok()))),
-                sky: Sky::default(),
-                hour: query_value("hour").and_then(|h| Hour::named(&h)),
-                weather: query_value("weather").and_then(|w| Weather::named(&w)),
-                thunder: (0.0, None),
-                anims: HashMap::new(),
-                sighted: HashMap::new(),
-                orbit: query_value("orbit").and_then(|v| v.parse().ok()),
-                orbit_at: None,
-                set,
-                watch: None,
-                cycle: 0,
-                ear: ([0.0; 3], 0.0),
-                name: kit::TextField::new(engine::who::MAX_NAME as u32, "your name"),
-                taken: false,
-                lost: None,
-                notice: None,
-                next_try: 0.0,
-            })
-        });
+            if query("practice") {
+                practise(p);
+            } else if resume {
+                online(p);
+            }
+        }
+    });
+    kit::frames(|now| {
         PAGE.with(|p| {
             if let Some(p) = p.borrow_mut().as_mut() {
-                p.sounds.audio.set_volume(p.set.volume);
-                p.name.set_value(&p.session.name());
-                island(p, PRACTICE_SEED);
-                // `?practice` goes straight to the range; a page reloaded
-                // for a newer build back to the match it was in.
-                let resume = kit::load(RESUME).is_some_and(|v| v == "online");
-                if resume {
-                    kit::save(RESUME, "");
-                }
-                if query("practice") {
-                    practise(p);
-                } else if resume {
-                    online(p);
-                }
+                frame(p, now);
             }
-        });
-        kit::frames(|now| {
-            PAGE.with(|p| {
-                if let Some(p) = p.borrow_mut().as_mut() {
-                    frame(p, now);
-                }
-            })
-        });
+        })
+    });
+    // Hosted, the host says when the surface changes (`cart::resized`).
+    if !hosted {
         kit::on(&kit::window(), "resize", |_| {
             PAGE.with(|p| {
                 if let Some(p) = p.borrow_mut().as_mut() {
@@ -589,5 +610,5 @@ pub fn page() {
                 }
             })
         });
-    });
+    }
 }

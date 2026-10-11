@@ -391,7 +391,8 @@ pub(super) fn frame(p: &mut Page, now: f64) {
         });
     }
     p.g.present(fr);
-    if let Some(line) = perf {
+    // The title is the page's (hosted, the host's: left alone).
+    if let Some(line) = perf.filter(|_| !kit::host::hosted()) {
         if (now as u64 / 500).is_multiple_of(2) {
             kit::document().set_title(&line);
         }
