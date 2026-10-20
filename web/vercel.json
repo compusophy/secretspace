@@ -34,6 +34,19 @@
       ]
     },
     {
+      "source": "/(wyrm|wandfall|battlestation)/embed/(.*)",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "frame-ancestors *" },
+        { "key": "Cache-Control", "value": "private, no-cache, no-store, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/(wyrm|wandfall|battlestation)/play/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "private, no-cache, no-store, max-age=0, must-revalidate" }
+      ]
+    },
+    {
       "source": "/luciphon/pkg/(.*)",
       "headers": [{ "key": "Access-Control-Allow-Origin", "value": "*" }]
     },
