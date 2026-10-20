@@ -308,19 +308,23 @@ fn isolated() -> bool {
         .unwrap_or(false)
 }
 
-/// An unisolated page: load it again, once, on its own (a front page
-/// loaded before it was isolated cannot isolate its frames; a stale copy
-/// may lack the headers). Whether it is going.
+/// An unisolated page: load it again, once, on its own (a stale copy may
+/// lack the headers). Whether it is going. A framed page (a feed's card
+/// player) never goes: its parent decides isolation, and it never navigates
+/// a page it does not own, so it plays unisolated (the OS's programs wait).
 fn again(query: &str) -> bool {
     if crate::param(query, AGAIN).is_some() {
         return false;
     }
     let w = kit::window();
+    match w.top() {
+        Ok(Some(top)) if js_sys::Object::is(top.as_ref(), w.as_ref()) => {}
+        _ => return false,
+    }
     let path = w.location().pathname().unwrap_or_default();
     let sep = if query.is_empty() { "?" } else { "&" };
     let to = format!("{path}{query}{sep}{AGAIN}=1");
-    let top = w.top().ok().flatten().unwrap_or(w);
-    top.location().replace(&to).is_ok()
+    w.location().replace(&to).is_ok()
 }
 
 /// An isolated page loaded again: its address without the mark.
