@@ -31,6 +31,8 @@ features = [
   "CanvasRenderingContext2d",
   "CssStyleDeclaration",
   "ImageData",
+  "OffscreenCanvas",
+  "OffscreenCanvasRenderingContext2d",
   "Event",
   "EventTarget",
   "MessageEvent",

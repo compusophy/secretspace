@@ -41,8 +41,9 @@ impl Version {
     }
 
     /// Ask again when it is time (call once a frame), or now with `soon`.
+    /// Hosted, never: the host's `/version.txt` is not this page's.
     pub fn poll(&mut self, now: f64, soon: bool) {
-        if PAGE == "dev" || (now < self.next && !soon) {
+        if PAGE == "dev" || crate::host::hosted() || (now < self.next && !soon) {
             return;
         }
         self.next = now + self.every;
@@ -72,14 +73,20 @@ impl Version {
 
     /// Whether a newer build is out than the one running.
     pub fn newer(&self) -> bool {
-        self.latest
-            .borrow()
-            .as_deref()
-            .is_some_and(|v| PAGE != "dev" && v != PAGE)
+        !crate::host::hosted()
+            && self
+                .latest
+                .borrow()
+                .as_deref()
+                .is_some_and(|v| PAGE != "dev" && v != PAGE)
     }
 }
 
-/// Load the page again (the newer build).
+/// Load the page again (the newer build). Hosted, the page is the host's:
+/// this cartridge is stale instead (its host may load a newer one).
 pub fn reload() {
+    if crate::host::hosted() {
+        return crate::host::fail("stale");
+    }
     let _ = crate::window().location().reload();
 }

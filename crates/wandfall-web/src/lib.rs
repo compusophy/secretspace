@@ -26,3 +26,7 @@ pub use wandfall_look::{aura, camera, fx, icon, land, look, rig, scene, sky, sta
 
 #[cfg(target_arch = "wasm32")]
 mod page;
+
+// Run inside another page: the exported `Cartridge` (`page::cart`).
+#[cfg(target_arch = "wasm32")]
+kit::cartridge!(page::cart);

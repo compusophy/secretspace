@@ -52,7 +52,11 @@ jobs:
       - name: Test
         run: cargo test --workspace --quiet
 
+      # The game server a page hosted elsewhere (a cartridge) dials, baked
+      # into the wasm: such a page has no <meta name="server"> of its own.
       - name: Build the page and the server
+        env:
+          SECRETSPACE_RELAY: ${{ vars.RELAY }}
         run: bash scripts/build-web.sh && bash scripts/ship.sh
 
       # The server is shipped only when something it is built from changed:

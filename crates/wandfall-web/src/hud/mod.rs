@@ -420,7 +420,7 @@ fn health(c: &mut Canvas, v: &View, o: &Own, lay: &Layout) {
     // The bar (a touch screen has buttons instead), and what lies
     // underfoot (not with the book open; on a touch screen in the band,
     // unless the lessons have it).
-    let under = (!v.book && !(v.touch && v.lesson)).then(|| bar::Under {
+    let under = (!(v.book || (v.touch && v.lesson))).then(|| bar::Under {
         feet: v.me.map_or(o.body.p, |m| m.0),
         band: v.touch.then_some(lay.band),
     });

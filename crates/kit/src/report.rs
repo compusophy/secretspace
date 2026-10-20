@@ -14,6 +14,11 @@ thread_local! {
     static CRASHED: Cell<bool> = const { Cell::new(false) };
 }
 
+/// Whether the page has panicked (it still answers this after).
+pub(crate) fn crashed() -> bool {
+    CRASHED.try_with(Cell::get).unwrap_or(true)
+}
+
 /// The server's own address for `path` ("/feedback"): where the rooms
 /// are (`room_url`), over http(s).
 pub fn server_url(path: &str) -> String {
@@ -32,6 +37,17 @@ pub fn server_url(path: &str) -> String {
 /// What the page knows of where it is: the page and its build, the
 /// browser, the window, fingers or a mouse.
 pub fn context() -> String {
+    if crate::host::hosted() {
+        let (cw, ch) = crate::host::css();
+        let w = crate::window();
+        return format!(
+            "page: {}\nbuild: {}\nbrowser: {}\nwindow: {cw}x{ch} at {:.2}\ntouch: false\nhosted: 1\n",
+            crate::host::base(),
+            crate::version::PAGE,
+            w.navigator().user_agent().unwrap_or_default(),
+            crate::host::dpr(),
+        );
+    }
     let w = crate::window();
     let size = |v: Result<wasm_bindgen::JsValue, _>| v.ok().and_then(|v| v.as_f64()).unwrap_or(0.0);
     format!(
@@ -63,6 +79,10 @@ pub fn body(kind: &str, game: &str, text: &str) -> String {
 /// Send a report (`kind`: "feedback", "crash", ...). Whether it went out
 /// (not whether it arrived).
 pub fn send(kind: &str, game: &str, text: &str) -> bool {
+    // Hosted with no server of its own: nowhere to send it.
+    if crate::host::hosted() && crate::host::server().is_none() {
+        return false;
+    }
     let Ok(req) = XmlHttpRequest::new() else {
         return false;
     };

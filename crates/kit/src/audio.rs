@@ -5,7 +5,9 @@
 //! a place left to right and a speed; and sounds played round and round
 //! (`hum`), their loudness and place eased as things change (`tune`).
 //! Without Web Audio it is silent and nothing else changes; a loudness,
-//! place or speed that is not a number is not played.
+//! place or speed that is not a number is not played. Hosted (a cartridge),
+//! it listens on nothing (the host's events wake it, `wake`), and is
+//! silent while the host is not looking (`host::drawing`).
 
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
@@ -40,6 +42,11 @@ fn wake_on_touch(ctx: &AudioContext) {
     }
 }
 
+/// Hosted and not being looked at (hidden, or not polled): no sound.
+fn quiet() -> bool {
+    crate::host::hosted() && !crate::host::drawing(crate::now())
+}
+
 pub struct Audio {
     ctx: Option<AudioContext>,
     master: Option<GainNode>,
@@ -58,7 +65,7 @@ impl Default for Audio {
 impl Audio {
     pub fn new() -> Audio {
         let ctx = AudioContext::new().ok();
-        if let Some(c) = &ctx {
+        if let Some(c) = ctx.as_ref().filter(|_| !crate::host::hosted()) {
             wake_on_touch(c);
         }
         let master = ctx.as_ref().and_then(|c| {
@@ -116,7 +123,7 @@ impl Audio {
         };
         let now = c.current_time();
         let (v, pan) = match heard(volume, pan, 1.0) {
-            Some((v, pan, _)) if !self.muted => (v, pan),
+            Some((v, pan, _)) if !self.muted && !quiet() => (v, pan),
             _ => (
                 0.0,
                 if pan.is_finite() {
@@ -140,6 +147,17 @@ impl Audio {
         }
     }
 
+    /// Done with sound: the context closed (a browser allows only so many),
+    /// every sound let go; silent from now on.
+    pub fn close(&mut self) {
+        if let Some(c) = self.ctx.take() {
+            let _ = c.close();
+        }
+        self.master = None;
+        self.sounds.clear();
+        self.hums.clear();
+    }
+
     /// A sound to play later, `rate` samples a second: its number.
     pub fn add(&mut self, samples: &[f32], rate: u32) -> usize {
         let b = self.ctx.as_ref().and_then(|c| {
@@ -156,7 +174,9 @@ impl Audio {
     /// Play sound `id` at `volume` (1 as written), `pan` (-1 left to 1
     /// right) and `speed` (1 as written; faster is higher).
     pub fn play(&self, id: usize, volume: f32, pan: f32, speed: f32) {
-        let Some((volume, pan, speed)) = heard(volume, pan, speed).filter(|_| !self.muted) else {
+        let Some((volume, pan, speed)) =
+            heard(volume, pan, speed).filter(|_| !self.muted && !quiet())
+        else {
             return;
         };
         let (Some(c), Some(m), Some(Some(b))) = (&self.ctx, &self.master, self.sounds.get(id))

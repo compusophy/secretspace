@@ -26,7 +26,7 @@ thread_local! {
 /// Whether this page is a game in the front page's frame (a frame of
 /// this same origin; another site framing us does not count).
 pub fn framed() -> bool {
-    window().frame_element().ok().flatten().is_some()
+    !crate::host::hosted() && window().frame_element().ok().flatten().is_some()
 }
 
 /// The window that holds the screen: the front page's, for a game in its
@@ -143,9 +143,12 @@ fn fill(frame: &HtmlIFrameElement) {
 
 /// From a game: leave it. In the front page's frame, the front page takes
 /// it down; on its own, the screen and the keyboard are given back and the
-/// front page loads.
+/// front page loads. Hosted, the host is asked to close it.
 pub fn exit() {
     crate::input::release();
+    if crate::host::hosted() {
+        return crate::host::close();
+    }
     if framed() {
         if let Ok(Some(parent)) = window().parent() {
             let origin = window().location().origin().unwrap_or_default();

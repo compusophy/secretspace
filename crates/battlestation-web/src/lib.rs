@@ -13,11 +13,73 @@
 //! (metres, degrees: yaw 0 looks north), `?capture=1` draws off screen
 //! and shows it as an image (what a headless browser can photograph),
 //! `?os=0` keeps compusophyOS off the monitor (its own terminal instead).
+//!
+//! Another page may run it as a cartridge (the exported `Cartridge`,
+//! `page/cart.rs`): then the monitor's compusophyOS is a module its host
+//! loaded for it alone (`opts.osModule`, its files at `opts.os`), so the
+//! desk runs inside the OS, and inside itself, each level its own OS.
 
 pub mod sound;
 
 #[cfg(target_arch = "wasm32")]
 mod page;
+
+#[cfg(target_arch = "wasm32")]
+kit::cartridge!(page::cart);
+
+/// Whether a wheel turn (`wheel`, down positive) goes to the computer on
+/// the monitor (pure). Plain, it does (it scrolls there; where nothing
+/// takes it, it leans). With Shift it leans you in or out, until you can
+/// lean no further that way (`lean`, 0 back in the chair, 1 all the way
+/// in): then on into the screen, where a desk on it leans in turn, so a
+/// desk inside a desk inside a desk can be dived into level by level.
+pub fn wheel_to_screen(shift: bool, wheel: f32, lean: f32) -> bool {
+    !shift || (wheel < 0.0 && lean >= 1.0) || (wheel > 0.0 && lean <= 0.0)
+}
+
+/// A wheel event's turn, down positive (pure): its vertical one, or with
+/// Shift and no vertical turn its sideways one (Chrome on Windows and Linux
+/// turns a mouse wheel sideways while Shift is held).
+pub fn wheel_turn(dx: f64, dy: f64, shift: bool) -> f64 {
+    if dy == 0.0 && shift {
+        dx
+    } else {
+        dy
+    }
+}
+
+/// Whether Shift is held after a key (pure): a Shift key itself says so by
+/// going down or up (a host may not count it in its own `mods`); any other
+/// key by its `mods` (Shift 1).
+pub fn shift_after(code: &str, down: bool, mods: u8) -> bool {
+    match code {
+        "ShiftLeft" | "ShiftRight" => down,
+        _ => mods & 1 != 0,
+    }
+}
+
+/// The OS's files as a host names them (`opts.os`): an http(s) address,
+/// ending in `/` (one is added); anything else, none.
+pub fn os_base(given: Option<&str>) -> Option<String> {
+    let s = given?.trim();
+    let web = s.starts_with("https://") || s.starts_with("http://");
+    if !web || s.len() > 2048 || s.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(match s.ends_with('/') {
+        true => s.to_string(),
+        false => format!("{s}/"),
+    })
+}
+
+/// The OS's files beside a cartridge's own: `…/battlestation/pkg/` is
+/// `…/battlestation/os/`, where scripts/build-web.sh mirrors them.
+pub fn os_beside(base: &str) -> String {
+    match base.trim_end_matches('/').rsplit_once('/') {
+        Some((up, _)) if !up.is_empty() => format!("{up}/os/"),
+        _ => "./os/".into(),
+    }
+}
 
 /// A query value (`?k=v`), from a query string.
 pub fn param(query: &str, k: &str) -> Option<String> {
@@ -85,5 +147,74 @@ mod tests {
             Hooks::read("?eye=0,1,0.2,10,-30").eye,
             Some([0.0, 1.0, 0.2, 10.0, -30.0])
         );
+    }
+
+    #[test]
+    fn the_wheel_scrolls_leans_and_dives() {
+        // Plain: the computer's, however you lean.
+        for lean in [0.0, 0.5, 1.0] {
+            assert!(wheel_to_screen(false, -100.0, lean));
+            assert!(wheel_to_screen(false, 100.0, lean));
+        }
+        // Shift: the lean's while it can move that way.
+        assert!(!wheel_to_screen(true, -100.0, 0.0));
+        assert!(!wheel_to_screen(true, -100.0, 0.88));
+        assert!(!wheel_to_screen(true, 100.0, 1.0));
+        assert!(!wheel_to_screen(true, 100.0, 0.12));
+        // All the way in, on into the screen; all the way out, likewise.
+        assert!(wheel_to_screen(true, -100.0, 1.0));
+        assert!(wheel_to_screen(true, 100.0, 0.0));
+        // The notches add up to all the way in exactly (clamped).
+        let mut lean = 0.0f32;
+        for _ in 0..12 {
+            lean = (lean + battlestation::laws::LEAN_NOTCH).clamp(0.0, 1.0);
+        }
+        assert!(wheel_to_screen(true, -1.0, lean));
+    }
+
+    #[test]
+    fn shift_turns_the_wheel_sideways_and_is_heard_by_its_key() {
+        assert_eq!(wheel_turn(0.0, -100.0, false), -100.0);
+        assert_eq!(wheel_turn(-100.0, 0.0, true), -100.0);
+        assert_eq!(wheel_turn(-100.0, 0.0, false), 0.0);
+        assert_eq!(wheel_turn(30.0, -100.0, true), -100.0);
+        // The Shift key itself, whatever the mods say.
+        assert!(shift_after("ShiftLeft", true, 0));
+        assert!(!shift_after("ShiftRight", false, 1));
+        // Any other key by its mods.
+        assert!(shift_after("KeyA", true, 1) && !shift_after("KeyA", true, 2));
+    }
+
+    #[test]
+    fn the_os_comes_from_where_the_host_says_or_beside() {
+        assert_eq!(
+            os_base(Some("https://compusophy.com/")).as_deref(),
+            Some("https://compusophy.com/")
+        );
+        assert_eq!(
+            os_base(Some(" http://127.0.0.1:8790/battlestation/os")).as_deref(),
+            Some("http://127.0.0.1:8790/battlestation/os/")
+        );
+        for bad in [
+            "",
+            "./os/",
+            "/os/",
+            "javascript:x",
+            "file:///os/",
+            "https://a b/",
+        ] {
+            assert_eq!(os_base(Some(bad)), None, "{bad}");
+        }
+        assert_eq!(os_base(None), None);
+        assert_eq!(
+            os_beside("https://secretspace.compusophy.com/battlestation/pkg/"),
+            "https://secretspace.compusophy.com/battlestation/os/"
+        );
+        assert_eq!(
+            os_beside("http://127.0.0.1:8787/battlestation/pkg"),
+            "http://127.0.0.1:8787/battlestation/os/"
+        );
+        assert_eq!(os_beside(""), "./os/");
+        assert_eq!(os_beside("/"), "./os/");
     }
 }
