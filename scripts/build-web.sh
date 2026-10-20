@@ -17,7 +17,7 @@ page() { # page <wasm lib name> <out name> <dir under dist> <html>
     "$target/wasm32-unknown-unknown/release/$1.wasm"
   cp "$4" "dist/$3/index.html"
   # The page's card image (its X player card and link previews), when it has one.
-  if [ -f "$(dirname "$4")/card.png" ]; then cp "$(dirname "$4")/card.png" "dist/$3/card.png"; fi
+  if [ -f "$(dirname "$4")/play.png" ]; then cp "$(dirname "$4")/play.png" "dist/$3/play.png"; fi
   local w="dist/$3/pkg/$2_bg.wasm"
   if [ -n "$opt" ]; then
     # The features rustc's wasm already uses: wasm-opt checks against them.
